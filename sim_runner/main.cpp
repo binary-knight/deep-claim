@@ -79,7 +79,9 @@ int main(int argc, char** argv) {
     }
     const sim::Content& gameContent = *loaded.content;
 
-    sim::Simulation simulation(gameContent, options.seed);
+    sim::GameSetup setup;
+    setup.aiNames = {"Rival Mining Co"};
+    sim::Simulation simulation(gameContent, options.seed, setup);
     simulation.tick(options.days);
 
     std::cout << std::format(

@@ -9,6 +9,7 @@
 #include "sim/world_state.h"
 
 #include <cstdint>
+#include <utility>
 
 namespace sim {
 
@@ -63,6 +64,8 @@ void generateWorld(const Content& content, WorldState& state) {
     Pcg32& rng = state.rng.world;
     state.plots.clear();
     state.hidden.plotDeposits.clear();
+    state.listingQueue.clear();
+    state.nextListing = 0;
 
     for (std::uint32_t regionIndex = 0; regionIndex < content.regions.size(); ++regionIndex) {
         const RegionDef& region = content.regions[regionIndex];
@@ -71,7 +74,8 @@ void generateWorld(const Content& content, WorldState& state) {
             plot.region = RegionId(regionIndex);
             plot.areaHectares =
                 uniformInt(rng, region.plotAreaMinHectares, region.plotAreaMaxHectares);
-            plot.askPrice = interpolatePrice(region, plot.areaHectares, rng);
+            plot.basePrice = interpolatePrice(region, plot.areaHectares, rng);
+            plot.askPrice = plot.basePrice;
 
             PlotDeposits deposits;
             for (const DepositPrior& prior : region.deposits) {
@@ -88,6 +92,17 @@ void generateWorld(const Content& content, WorldState& state) {
             state.plots.push_back(plot);
             state.hidden.plotDeposits.push_back(std::move(deposits));
         }
+    }
+
+    // Listing order: a Fisher-Yates shuffle so regions interleave and the
+    // player cannot predict which plot comes up next.
+    state.listingQueue.reserve(state.plots.size());
+    for (std::uint32_t i = 0; i < state.plots.size(); ++i) {
+        state.listingQueue.emplace_back(i);
+    }
+    for (std::size_t i = state.listingQueue.size(); i > 1; --i) {
+        const std::size_t j = rng.below(static_cast<std::uint32_t>(i));
+        std::swap(state.listingQueue[i - 1], state.listingQueue[j]);
     }
 }
 

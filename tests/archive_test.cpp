@@ -122,10 +122,10 @@ TEST_CASE("Truncated and oversized streams fail cleanly", "[archive]") {
 }
 
 TEST_CASE("Aggregate vectors are bounded by their real serialized size", "[archive]") {
-    // 25 bytes per default Plot; a prefix of 2 with only 25 bytes left must fail
+    // 37 bytes per default Plot; a prefix of 2 with only 37 bytes left must fail
     // before any decoding, not after allocating two elements.
     std::vector<std::uint8_t> bytes{2, 0, 0, 0};
-    bytes.resize(4 + 25, 0);
+    bytes.resize(4 + 37, 0);
     std::vector<sim::Plot> plots;
     CHECK_FALSE(sim::fromBytes(bytes, plots));
     CHECK(plots.empty());
@@ -149,11 +149,11 @@ TEST_CASE("Huge length prefixes are rejected before allocating", "[archive]") {
 
 TEST_CASE("Simulation save and load reproduce the state exactly", "[archive][save]") {
     const sim::Content content = test::makeContent();
-    sim::Simulation original(content, 9);
+    sim::Simulation original(content, 9, test::setup());
     original.tick(500);
     const std::vector<std::uint8_t> bytes = original.save();
 
-    sim::Simulation restored(content, 1);
+    sim::Simulation restored(content, 1, test::setup());
     REQUIRE(restored.load(bytes));
     CHECK(restored.state().day == 500);
     CHECK(restored.stateHash() == original.stateHash());
@@ -178,11 +178,11 @@ TEST_CASE("Invalid bool bytes and even RNG increments are rejected", "[archive][
 
 TEST_CASE("Saves with a bad header are rejected and leave the state alone", "[save]") {
     const sim::Content content = test::makeContent();
-    sim::Simulation original(content, 9);
+    sim::Simulation original(content, 9, test::setup());
     original.tick(10);
     const std::vector<std::uint8_t> good = original.save();
 
-    sim::Simulation target(content, 3);
+    sim::Simulation target(content, 3, test::setup());
     const std::uint64_t before = target.stateHash();
 
     std::vector<std::uint8_t> badMagic = good;
@@ -201,7 +201,7 @@ TEST_CASE("Saves with a bad header are rejected and leave the state alone", "[sa
 
 TEST_CASE("Saves holding an inconsistent world are rejected", "[save]") {
     const sim::Content content = test::makeContent();
-    sim::Simulation target(content, 1);
+    sim::Simulation target(content, 1, test::setup());
     const std::uint64_t before = target.stateHash();
 
     sim::WorldState broken = target.state();
@@ -234,14 +234,14 @@ TEST_CASE("Saves holding an inconsistent world are rejected", "[save]") {
 
 TEST_CASE("Saves are bound to the content they were made with", "[save]") {
     const sim::Content content = test::makeContent();
-    sim::Simulation original(content, 9);
+    sim::Simulation original(content, 9, test::setup());
     const std::vector<std::uint8_t> bytes = original.save();
 
     sim::Content edited = test::makeContent();
     edited.resources[0].basePrice = sim::Money::fromUnits(61);
-    sim::Simulation other(edited, 9);
+    sim::Simulation other(edited, 9, test::setup());
     CHECK_FALSE(other.load(bytes));
 
-    sim::Simulation same(content, 1);
+    sim::Simulation same(content, 1, test::setup());
     CHECK(same.load(bytes));
 }

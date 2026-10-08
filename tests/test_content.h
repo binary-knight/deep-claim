@@ -7,6 +7,7 @@
 #include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/money.h"
+#include "sim/simulation.h"
 
 #include <cstdint>
 
@@ -116,9 +117,17 @@ inline sim::Content makeContent() {
     c.balance.mineBuildDays = 180;
     c.balance.mineOpexPerDay = sim::Money::fromUnits(12'000);
     c.balance.auctionWindowDays = 30;
+    c.balance.plotsListedAtStart = 3;
     c.balance.plotsListedPerMonth = 1;
     c.balance.bankruptcyGraceMonths = 3;
     return c;
+}
+
+inline sim::GameSetup setup() {
+    sim::GameSetup s;
+    s.playerName = "Player";
+    s.aiNames = {"Rival"};
+    return s;
 }
 
 }  // namespace test

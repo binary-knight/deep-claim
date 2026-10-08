@@ -24,6 +24,16 @@ sim::WorldState generate(const sim::Content& content, sim::Seed seed) {
     return state;
 }
 
+bool isPermutation(const std::vector<sim::PlotId>& queue, std::size_t count) {
+    std::vector<int> seen(count, 0);
+    for (const sim::PlotId id : queue) {
+        if (!id.valid() || id.index() >= count || seen[id.index()]++ != 0) {
+            return false;
+        }
+    }
+    return queue.size() == count;
+}
+
 }  // namespace
 
 TEST_CASE("World generation creates every plot in region order", "[worldgen]") {
@@ -37,6 +47,7 @@ TEST_CASE("World generation creates every plot in region order", "[worldgen]") {
         CHECK(plot.region == (i < 20 ? sim::RegionId(0) : sim::RegionId(1)));
         CHECK(plot.listing == sim::PlotListing::Unlisted);
         CHECK_FALSE(plot.owner.valid());
+        CHECK(plot.askPrice == plot.basePrice);
 
         const sim::RegionDef& region = content.regions[plot.region.index()];
         CHECK(plot.areaHectares >= region.plotAreaMinHectares);
@@ -54,6 +65,19 @@ TEST_CASE("World generation creates every plot in region order", "[worldgen]") {
             CHECK(allowed);
         }
     }
+}
+
+TEST_CASE("Listing queue is a shuffled permutation of all plots", "[worldgen]") {
+    const sim::Content content = test::makeContent();
+    const sim::WorldState state = generate(content, 5);
+    CHECK(isPermutation(state.listingQueue, state.plots.size()));
+    CHECK(state.nextListing == 0);
+    // Not the identity order (probability of identity is 1/30!).
+    bool identity = true;
+    for (std::size_t i = 0; i < state.listingQueue.size(); ++i) {
+        identity = identity && state.listingQueue[i] == sim::PlotId(static_cast<std::uint32_t>(i));
+    }
+    CHECK_FALSE(identity);
 }
 
 TEST_CASE("Deposit presence follows the prior probability", "[worldgen]") {
@@ -102,9 +126,9 @@ TEST_CASE("Deposit sizes are log-normal around the prior median", "[worldgen]") 
 
 TEST_CASE("World generation is deterministic per seed", "[worldgen][determinism]") {
     const sim::Content content = test::makeContent();
-    const sim::Simulation a(content, 77);
-    const sim::Simulation b(content, 77);
-    const sim::Simulation c(content, 78);
+    const sim::Simulation a(content, 77, test::setup());
+    const sim::Simulation b(content, 77, test::setup());
+    const sim::Simulation c(content, 78, test::setup());
     CHECK(a.stateHash() == b.stateHash());
     CHECK(a.stateHash() != c.stateHash());
     CHECK(a.state().plots.size() == 30);

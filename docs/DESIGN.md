@@ -179,3 +179,33 @@ and clang-tidy are enforced in CI. Warnings are errors by default
 - The golden determinism hash uses an in-code content fixture
   (tests/test_content.h), so tuning data files does not move it. A separate
   test checks that the shipped data generates a sane world.
+
+## Companies, commands and the plot market (steps 5 and 6)
+
+- Company 0 is always the player; AI companies follow in `GameSetup` order.
+  All start with `starting_capital` and an empty inventory.
+- Commands are a `std::variant` queued with `Simulation::submit` and applied
+  at the start of the next tick, stable-sorted by company id so submission
+  order only matters within one company. A rejected command produces a
+  `CommandRejected` notice with a reason; it never throws or aborts. The
+  replay of a game is the seed, the setup and the command log.
+- `TickReport` is transient (not state) and lists what happened in the tick
+  for UIs and logs: listings, relistings, wins, losses, rejections.
+- Plots enter the market from a listing queue shuffled at generation:
+  `plots_listed_at_start` on day 0, then `plots_listed_per_month` on every
+  month boundary. Each listing opens a sealed-bid auction closing after
+  `auction_window_days`.
+- Bids: at least the ask, at most the company's uncommitted cash. Cash is
+  reserved by standing bids on open auctions so a company cannot promise
+  the same money twice; a rebid on the same plot replaces the old bid.
+  Highest bid wins, ties go to the earlier bid, the winner pays its bid and
+  the plot becomes Sold. Bidders who can no longer pay at close are skipped.
+- Unsold auctions relist immediately at 90% of the ask, never below half the
+  generated land value, so ignored plots get cheaper over time.
+- `CompanyView` is the only thing controllers and the UI read. It carries
+  public plot data, the viewer's own bid and the bid count on each open
+  auction (amounts stay sealed), own cash and reservations, and public facts
+  about competitors. `view.cpp` must never mention hidden state; a test
+  greps the source for it.
+- `validateWorld` now also checks company, auction and listing-queue
+  invariants so systems can index by id without bounds checks.

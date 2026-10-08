@@ -22,25 +22,115 @@ std::uint64_t hashContent(const Content& content) {
     return hashOf(content);
 }
 
+namespace {
+
+bool validateCompanies(const Content& content, const WorldState& state) {
+    if (state.companies.empty() || state.companies[0].kind != CompanyKind::Player) {
+        return false;
+    }
+    for (const Company& company : state.companies) {
+        if (company.kind != CompanyKind::Player && company.kind != CompanyKind::Ai) {
+            return false;
+        }
+        if (company.inventoryTonnes.size() != content.resources.size() || company.bankrupt > 1) {
+            return false;
+        }
+        for (const std::int64_t tonnes : company.inventoryTonnes) {
+            if (tonnes < 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool validatePlots(const Content& content, const WorldState& state) {
+    for (std::uint32_t i = 0; i < state.plots.size(); ++i) {
+        const Plot& plot = state.plots[i];
+        if (!plot.region.valid() || plot.region.index() >= content.regions.size()) {
+            return false;
+        }
+        if (plot.areaHectares < 1 || plot.askPrice < Money::zero() ||
+            plot.basePrice < Money::zero()) {
+            return false;
+        }
+        switch (plot.listing) {
+            case PlotListing::Unlisted:
+                if (plot.owner.valid() || plot.auction.valid()) {
+                    return false;
+                }
+                break;
+            case PlotListing::Listed: {
+                if (plot.owner.valid() || !plot.auction.valid() ||
+                    plot.auction.index() >= state.auctions.size()) {
+                    return false;
+                }
+                const Auction& auction = state.auctions[plot.auction.index()];
+                if (auction.open == 0 || auction.plot != PlotId(i)) {
+                    return false;
+                }
+                break;
+            }
+            case PlotListing::Sold:
+                if (!plot.owner.valid() || plot.owner.index() >= state.companies.size() ||
+                    plot.auction.valid()) {
+                    return false;
+                }
+                break;
+            default:
+                return false;
+        }
+    }
+    return true;
+}
+
+bool validateAuctions(const WorldState& state) {
+    for (const Auction& auction : state.auctions) {
+        if (!auction.plot.valid() || auction.plot.index() >= state.plots.size() ||
+            auction.open > 1 || auction.closesOnDay < auction.opensOnDay) {
+            return false;
+        }
+        if (auction.open != 0 && state.plots[auction.plot.index()].listing != PlotListing::Listed) {
+            return false;
+        }
+        for (const Bid& bid : auction.bids) {
+            if (!bid.company.valid() || bid.company.index() >= state.companies.size() ||
+                bid.amount < Money::zero()) {
+                return false;
+            }
+        }
+        if (auction.winner.valid() &&
+            (auction.open != 0 || auction.winner.index() >= state.companies.size())) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool validateListingQueue(const WorldState& state) {
+    if (state.listingQueue.size() != state.plots.size() ||
+        state.nextListing > state.listingQueue.size()) {
+        return false;
+    }
+    std::vector<std::uint8_t> seen(state.plots.size(), 0);
+    for (const PlotId plot : state.listingQueue) {
+        if (!plot.valid() || plot.index() >= state.plots.size() || seen[plot.index()] != 0) {
+            return false;
+        }
+        seen[plot.index()] = 1;
+    }
+    return true;
+}
+
+}  // namespace
+
 bool validateWorld(const Content& content, const WorldState& state) {
     if (state.plots.size() != state.hidden.plotDeposits.size()) {
         return false;
     }
-    for (const Plot& plot : state.plots) {
-        if (!plot.region.valid() || plot.region.index() >= content.regions.size()) {
-            return false;
-        }
-        if (plot.areaHectares < 1 || plot.askPrice < Money::zero()) {
-            return false;
-        }
-        if (plot.listing != PlotListing::Unlisted && plot.listing != PlotListing::Listed &&
-            plot.listing != PlotListing::Sold) {
-            return false;
-        }
-        // Companies arrive in step 5; until then no plot may have an owner.
-        if ((plot.listing == PlotListing::Sold) != plot.owner.valid()) {
-            return false;
-        }
+    if (!validateCompanies(content, state) || !validatePlots(content, state) ||
+        !validateAuctions(state) || !validateListingQueue(state)) {
+        return false;
     }
     for (const PlotDeposits& deposits : state.hidden.plotDeposits) {
         for (const DepositTruth& truth : deposits.deposits) {

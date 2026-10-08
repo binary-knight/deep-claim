@@ -4,6 +4,7 @@
 #include "sim/world_state.h"
 
 #include "content/loader.h"
+#include "test_content.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
@@ -33,7 +34,7 @@ TEST_CASE("Shipped data files load cleanly", "[content][data]") {
 TEST_CASE("A world generates from the shipped data", "[content][data][worldgen]") {
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
     REQUIRE(result.ok());
-    const sim::Simulation simulation(*result.content, 1);
+    const sim::Simulation simulation(*result.content, 1, test::setup());
     const sim::WorldState& state = simulation.state();
     CHECK(state.plots.size() == 30);
     std::size_t depositsTotal = 0;

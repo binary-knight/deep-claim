@@ -9,8 +9,8 @@
 
 TEST_CASE("Same seed produces identical state", "[determinism]") {
     const sim::Content content = test::makeContent();
-    sim::Simulation a(content, 1234);
-    sim::Simulation b(content, 1234);
+    sim::Simulation a(content, 1234, test::setup());
+    sim::Simulation b(content, 1234, test::setup());
     a.tick(sim::kDaysPerYear * 10);
     b.tick(sim::kDaysPerYear * 10);
     CHECK(a.state().day == b.state().day);
@@ -19,8 +19,8 @@ TEST_CASE("Same seed produces identical state", "[determinism]") {
 
 TEST_CASE("Different seeds produce different state", "[determinism]") {
     const sim::Content content = test::makeContent();
-    sim::Simulation a(content, 1);
-    sim::Simulation b(content, 2);
+    sim::Simulation a(content, 1, test::setup());
+    sim::Simulation b(content, 2, test::setup());
     a.tick(sim::kDaysPerYear);
     b.tick(sim::kDaysPerYear);
     CHECK(a.stateHash() != b.stateHash());
@@ -28,7 +28,7 @@ TEST_CASE("Different seeds produce different state", "[determinism]") {
 
 TEST_CASE("Ticking changes the state hash", "[determinism]") {
     const sim::Content content = test::makeContent();
-    sim::Simulation simulation(content, 1);
+    sim::Simulation simulation(content, 1, test::setup());
     const std::uint64_t before = simulation.stateHash();
     simulation.tick();
     CHECK(simulation.stateHash() != before);
@@ -40,9 +40,9 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // CI. It uses the in-code content fixture, so tuning data/*.json does not
     // move it. If a deliberate simulation change alters it, update the
     // constant in the same commit and say so in the commit message.
-    constexpr std::uint64_t kGolden = 0x9238c9ba44961a4bULL;
+    constexpr std::uint64_t kGolden = 0x4c38d49af875a059ULL;
     const sim::Content content = test::makeContent();
-    sim::Simulation simulation(content, 42);
+    sim::Simulation simulation(content, 42, test::setup());
     simulation.tick(sim::kDaysPerYear);
     CHECK(simulation.stateHash() == kGolden);
 }

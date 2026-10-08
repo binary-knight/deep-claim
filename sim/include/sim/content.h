@@ -106,6 +106,7 @@ struct BalanceParams {
     Day mineBuildDays = 0;
     Money mineOpexPerDay;
     Day auctionWindowDays = 0;
+    std::uint32_t plotsListedAtStart = 0;
     std::uint32_t plotsListedPerMonth = 0;
     std::uint32_t bankruptcyGraceMonths = 0;
 };

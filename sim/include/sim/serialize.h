@@ -69,7 +69,24 @@ void serialize(Archive& ar, StrongId<Tag>& id) {
 
 template <class Archive>
 void serialize(Archive& ar, Plot& plot) {
-    ar(plot.region, plot.areaHectares, plot.askPrice, plot.listing, plot.owner);
+    ar(plot.region, plot.areaHectares, plot.basePrice, plot.askPrice, plot.listing, plot.owner,
+       plot.auction);
+}
+
+template <class Archive>
+void serialize(Archive& ar, Company& company) {
+    ar(company.name, company.kind, company.cash, company.inventoryTonnes, company.bankrupt);
+}
+
+template <class Archive>
+void serialize(Archive& ar, Bid& bid) {
+    ar(bid.company, bid.amount, bid.day, bid.order);
+}
+
+template <class Archive>
+void serialize(Archive& ar, Auction& auction) {
+    ar(auction.plot, auction.opensOnDay, auction.closesOnDay, auction.bids, auction.open,
+       auction.winner, auction.winningAmount);
 }
 
 template <class Archive>
@@ -89,7 +106,8 @@ void serialize(Archive& ar, HiddenState& hidden) {
 
 template <class Archive>
 void serialize(Archive& ar, WorldState& state) {
-    ar(state.day, state.rng, state.plots, state.hidden);
+    ar(state.day, state.rng, state.companies, state.plots, state.auctions, state.listingQueue,
+       state.nextListing, state.bidCounter, state.hidden);
 }
 
 // ---- content (hashed into saves so a save cannot be opened against
@@ -137,8 +155,8 @@ void serialize(Archive& ar, BalanceParams& balance) {
     ar(balance.startingCapital, balance.loanAnnualRate, balance.loanTermMonths,
        balance.loanMaxPrincipal, balance.surveyCost, balance.surveyDurationDays,
        balance.surveyBaseNoise, balance.mineCapexPerHectare, balance.mineBuildDays,
-       balance.mineOpexPerDay, balance.auctionWindowDays, balance.plotsListedPerMonth,
-       balance.bankruptcyGraceMonths);
+       balance.mineOpexPerDay, balance.auctionWindowDays, balance.plotsListedAtStart,
+       balance.plotsListedPerMonth, balance.bankruptcyGraceMonths);
 }
 
 template <class Archive>

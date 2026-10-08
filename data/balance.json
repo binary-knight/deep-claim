@@ -10,6 +10,7 @@
   "mine_build_days": 180,
   "mine_opex_per_day": 12000,
   "auction_window_days": 30,
+  "plots_listed_at_start": 3,
   "plots_listed_per_month": 1,
   "bankruptcy_grace_months": 3
 }

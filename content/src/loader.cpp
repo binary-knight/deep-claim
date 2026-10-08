@@ -754,8 +754,8 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     node.allowKeys({"starting_capital", "loan_annual_rate", "loan_term_months",
                     "loan_max_principal", "survey_cost", "survey_duration_days",
                     "survey_base_noise", "mine_capex_per_hectare", "mine_build_days",
-                    "mine_opex_per_day", "auction_window_days", "plots_listed_per_month",
-                    "bankruptcy_grace_months"});
+                    "mine_opex_per_day", "auction_window_days", "plots_listed_at_start",
+                    "plots_listed_per_month", "bankruptcy_grace_months"});
     const sim::Money zero = sim::Money::zero();
     balance.startingCapital =
         valueOr(node.money("starting_capital", true, sim::Money::fromCents(1)), zero);
@@ -777,6 +777,8 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     balance.mineOpexPerDay = valueOr(node.money("mine_opex_per_day", true, zero), zero);
     balance.auctionWindowDays = static_cast<sim::Day>(
         valueOr(node.integer("auction_window_days", true, 1, sim::kDaysPerYear), 1LL));
+    balance.plotsListedAtStart = static_cast<std::uint32_t>(
+        valueOr(node.integer("plots_listed_at_start", true, 0, 1000), 0LL));
     balance.plotsListedPerMonth = static_cast<std::uint32_t>(
         valueOr(node.integer("plots_listed_per_month", true, 0, 1000), 0LL));
     balance.bankruptcyGraceMonths = static_cast<std::uint32_t>(
