@@ -1,21 +1,17 @@
 #include "sim/simulation.h"
 
-#include "sim/hash.h"
+#include "sim/save.h"
 
 namespace sim {
 
-namespace {
-constexpr std::uint64_t kWorldStream = 1;
-}  // namespace
-
 Simulation::Simulation(Seed seed) {
-    state_.rng = Pcg32(seed, kWorldStream);
+    state_.rng = RngStreams(seed);
 }
 
 void Simulation::tick() {
     // The full tick pipeline is documented in DESIGN.md. Only the final
     // step exists so far; the others are added one system at a time.
-    state_.noise = state_.noise * 31U + state_.rng.next();
+    state_.noise = state_.noise * 31U + state_.rng.world.next();
     ++state_.day;
 }
 
@@ -26,12 +22,20 @@ void Simulation::tick(Day days) {
 }
 
 std::uint64_t Simulation::stateHash() const {
-    Fnv1a64 hasher;
-    hasher.add(state_.day);
-    hasher.add(state_.rng.state());
-    hasher.add(state_.rng.increment());
-    hasher.add(state_.noise);
-    return hasher.value();
+    return hashWorld(state_);
+}
+
+std::vector<std::uint8_t> Simulation::save() const {
+    return saveWorld(state_);
+}
+
+bool Simulation::load(std::span<const std::uint8_t> bytes) {
+    WorldState loaded;
+    if (!loadWorld(bytes, loaded)) {
+        return false;
+    }
+    state_ = loaded;
+    return true;
 }
 
 }  // namespace sim

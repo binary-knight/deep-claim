@@ -4,6 +4,8 @@
 #include "sim/world_state.h"
 
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace sim {
 
@@ -17,6 +19,11 @@ public:
 
     [[nodiscard]] const WorldState& state() const { return state_; }
     [[nodiscard]] std::uint64_t stateHash() const;
+
+    [[nodiscard]] std::vector<std::uint8_t> save() const;
+    // Replaces the current state. Returns false and leaves the state
+    // untouched if the bytes are not a valid save.
+    [[nodiscard]] bool load(std::span<const std::uint8_t> bytes);
 
 private:
     WorldState state_;

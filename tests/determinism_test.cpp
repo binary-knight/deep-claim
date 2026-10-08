@@ -34,7 +34,7 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // This value was recorded on Linux/GCC and is verified on Windows/MSVC in
     // CI. If a deliberate simulation change alters it, update the constant in
     // the same commit and say so in the commit message.
-    constexpr std::uint64_t kGolden = 0xe1c8774e2cf22341ULL;
+    constexpr std::uint64_t kGolden = 0x9d0bb3b0519b969dULL;
     sim::Simulation simulation(42);
     simulation.tick(sim::kDaysPerYear);
     CHECK(simulation.stateHash() == kGolden);
