@@ -546,3 +546,6 @@ pieces that need OpenGL.
   headless layout probe also checks that the app writes a trace header.
 - Rejected: tracing from inside the sim (it must stay free of I/O) and a
   per-frame screenshot stream (too much data for too little signal).
+- Playtest sessions are written up under `docs/playtests/`, one file per
+  session, with the findings ranked and the order of work they imply. The
+  first is `docs/playtests/2026-10-08.md`.
