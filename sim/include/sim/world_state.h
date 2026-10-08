@@ -131,7 +131,9 @@ struct Mine {
     Day builtDay = 0;
     Day operationalDay = 0;
     MineState state = MineState::Building;
-    std::vector<std::int64_t> extractedTonnes;  // indexed by ResourceId, lifetime total
+    std::vector<std::int64_t> extractedTonnes;   // indexed by ResourceId, lifetime total
+    std::vector<std::int64_t> lastDayTonnes;     // what came out on the last processed day
+    std::vector<std::int64_t> lastOutputTonnes;  // output on the most recent operating day
 };
 
 // One research project. A company runs at most one at a time; the cost is

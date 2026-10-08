@@ -117,7 +117,8 @@ void serialize(Archive& ar, Survey& survey) {
 
 template <class Archive>
 void serialize(Archive& ar, Mine& mine) {
-    ar(mine.plot, mine.owner, mine.builtDay, mine.operationalDay, mine.state, mine.extractedTonnes);
+    ar(mine.plot, mine.owner, mine.builtDay, mine.operationalDay, mine.state, mine.extractedTonnes,
+       mine.lastDayTonnes, mine.lastOutputTonnes);
 }
 
 template <class Archive>

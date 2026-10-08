@@ -10,13 +10,13 @@
 
 namespace sim {
 
-Fixed techMultiplier(const Content& content, const Company& company, TechEffectType type) {
+Fixed techMultiplier(const Content& content, const std::vector<TechId>& completed,
+                     TechEffectType type) {
     // Accumulate in content order, not completion order, so the result
     // depends only on the set of completed techs (rounding is order-sensitive).
     Fixed product = Fixed::one();
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
-        if (std::find(company.completedTechs.begin(), company.completedTechs.end(), TechId(i)) ==
-            company.completedTechs.end()) {
+        if (std::find(completed.begin(), completed.end(), TechId(i)) == completed.end()) {
             continue;
         }
         for (const TechEffect& effect : content.techs[i].effects) {
@@ -28,13 +28,21 @@ Fixed techMultiplier(const Content& content, const Company& company, TechEffectT
     return product;
 }
 
-bool resourceUnlocked(const Content& content, const Company& company, ResourceId resource) {
+Fixed techMultiplier(const Content& content, const Company& company, TechEffectType type) {
+    return techMultiplier(content, company.completedTechs, type);
+}
+
+bool resourceUnlocked(const Content& content, const std::vector<TechId>& completed,
+                      ResourceId resource) {
     const TechId required = content.resources[resource.index()].unlockedBy;
     if (!required.valid()) {
         return true;
     }
-    return std::find(company.completedTechs.begin(), company.completedTechs.end(), required) !=
-           company.completedTechs.end();
+    return std::find(completed.begin(), completed.end(), required) != completed.end();
+}
+
+bool resourceUnlocked(const Content& content, const Company& company, ResourceId resource) {
+    return resourceUnlocked(content, company.completedTechs, resource);
 }
 
 }  // namespace sim

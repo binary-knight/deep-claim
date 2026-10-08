@@ -15,6 +15,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <string>
 #include <vector>
 
 namespace {
@@ -143,6 +145,58 @@ TEST_CASE("Event state survives save and load and is validated", "[events][save]
     CHECK_FALSE(simulation.load(saveOf(broken)));
     broken = simulation.state();
     broken.events[0].active = 1;  // long over
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+    CHECK(simulation.load(saveOf(simulation.state())));
+}
+
+TEST_CASE("Event multipliers do not depend on activation order", "[events]") {
+    sim::Content content = test::makeContent();
+    content.events.clear();
+    for (int i = 0; i < 3; ++i) {
+        sim::EventDef def;
+        def.id = "e" + std::to_string(i);
+        def.name = def.id;
+        def.dailyWeight = sim::Fixed::zero();
+        def.durationDays = 100;
+        content.events.push_back(def);
+    }
+    content.events[0].effects.push_back(
+        {sim::EventEffectType::OpexMult, sim::ResourceId(), sim::Fixed::fromInt(100)});
+    content.events[1].effects.push_back(
+        {sim::EventEffectType::OpexMult, sim::ResourceId(), sim::Fixed::fromInt(100)});
+    content.events[2].effects.push_back(
+        {sim::EventEffectType::OpexMult, sim::ResourceId(), sim::Fixed::fromRatio(1, 100)});
+
+    sim::WorldState a;
+    a.day = 5;
+    for (const std::uint32_t order : {0U, 1U, 2U}) {
+        a.events.push_back({sim::EventId(order), 0, 100, 1});
+    }
+    sim::WorldState b;
+    b.day = 5;
+    for (const std::uint32_t order : {2U, 0U, 1U}) {
+        b.events.push_back({sim::EventId(order), 0, 100, 1});
+    }
+    const sim::Fixed ma = sim::eventMultiplier(content, a, sim::EventEffectType::OpexMult);
+    const sim::Fixed mb = sim::eventMultiplier(content, b, sim::EventEffectType::OpexMult);
+    CHECK(ma == mb);
+    CHECK(ma == sim::Fixed::fromInt(100));  // 100 * 100 saturates, then x 0.01
+}
+
+TEST_CASE("Event records are validated for eligibility, dates and overlap", "[events][save]") {
+    const sim::Content content = certainEventContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(25);  // instances at 0-10, 10-20, 20-30
+    const auto saveOf = [&](const sim::WorldState& s) {
+        return sim::saveGame(s, {}, sim::hashContent(content));
+    };
+    sim::WorldState broken = simulation.state();
+    broken.events[0].startedDay = 5;  // overlaps the next instance
+    broken.events[0].endsDay = 15;
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+    broken = simulation.state();
+    broken.events.back().startedDay = broken.day;  // started in the future
+    broken.events.back().endsDay = broken.day + 10;
     CHECK_FALSE(simulation.load(saveOf(broken)));
     CHECK(simulation.load(saveOf(simulation.state())));
 }

@@ -364,3 +364,63 @@ and clang-tidy are enforced in CI. Warnings are errors by default
 - Hosts drive controllers with `collectCommands` before each tick; the sim
   never calls controllers itself, so the player's UI and the AI use the same
   path.
+
+### After the Codex review of steps 11 to 13
+
+- The AI runs every rule against one projected cash position (`Budget`), so a
+  day's commands are jointly affordable; sales add projected proceeds and
+  respect the cash bound. Bids and listed-plot surveys require the land plus
+  the mine plus six months of opex to be affordable, so the AI cannot strand
+  itself on undeveloped land. Research waits until a mine is producing.
+  Surveyed value counts only unlocked resources and at most five years of
+  output. Uncontested auctions get the ask, not a premium. Only active loans
+  count toward the loan cap. Idle operating mines are mothballed after 30
+  days.
+- Event multipliers walk definitions in content order, saturate instead of
+  aborting on overflow and clamp once at the end, so the result depends only
+  on which events are active. The combined demand factor is bounded to
+  [0.01, 1000] before it meets base demand.
+- Validation: pending research must have been startable (prerequisites
+  complete, tech unknown), projects of one company never overlap, event
+  instances of one definition never overlap and respect `min_year`, start
+  days are in the past, deadlines are computed in 64 bits.
+- Views gained `mineCapexQuote` per plot, `mineOpexQuote` and
+  `surveyNoiseQuote` per company, and `lastDayTonnes` per own mine, so the
+  UI can show costs and today's output without re-deriving rules. The active
+  research view no longer carries its global index, which leaked how many
+  projects other companies had started.
+
+## Balance runner (step 14)
+
+- `sim_runner` drives every company, the player's slot included, with the
+  heuristic AI, so a run is "what happens if nobody plays". Options: seed,
+  days or years, number of rivals, data directory, monthly CSV, `--sanity`.
+- The JSON summary reports per-company outcome (cash, debt, bankruptcy day,
+  plots, mines, techs), per-market price ratios and days pinned at the
+  floor or cap, rejected commands by reason, and five checks: the world
+  validates every year and at the end, no company strays beyond 1000x
+  starting capital, every price's mean sits within [0.3, 3] of base and is
+  pinned less than a quarter of the time, the AI never issues an invalid
+  command, and at least one mine is built in runs of two years or more.
+  `--sanity` turns a failed check into exit code 3; CI runs five years.
+- First sweep (seeds 1 to 6, two rivals, 20 years): all checks pass. The
+  pattern is winner-take-all: a company that gets three or more mines going
+  snowballs to 100M-600M while one- or two-mine companies went bankrupt in
+  year four. The AI changes below address the losers' behaviour; the
+  snowball is a balance question for the data files.
+- AI adjustments from the sweep: mines are mothballed when a day's output at
+  today's prices is worth less than opex (using `lastOutputTonnes`, the
+  output on the most recent operating day) and reopened at 125% of opex;
+  research is paid from net worth (cash minus debt); valuable plots get a
+  10% or 25% premium over the ask because sealed ties go to the earlier
+  bidder.
+- Second sweep finding: at 12k/day opex an iron mine on a median-or-smaller
+  deposit never repays land plus capex once prices sit at 0.8x base and
+  output declines with depletion, so every one- or two-mine company died.
+  Mine opex is now 8k/day (iron nets about 11k/day at 0.8x base, copper 46k,
+  nickel 36k, lithium 62k) and mothballed mines pay 15%. Iron stays the
+  low-margin bulk resource, but a reasonable deposit now pays back.
+- The AI values a prospect net of opex over the extraction time, requires
+  the net value to cover land plus capex by 20%, borrows its one bootstrap
+  loan only for a specific surveyed plot it could not otherwise afford, and
+  repays an idle loan rather than paying interest while it waits.

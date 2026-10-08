@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 
 namespace sim {
 
@@ -35,22 +36,25 @@ bool eventActive(const WorldState& state, EventId event) {
 
 Fixed eventMultiplier(const Content& content, const WorldState& state, EventEffectType type,
                       ResourceId resource) {
+    // Walk definitions in content order so the result depends only on which
+    // events are active, never on when they started. Saturate instead of
+    // aborting on overflow, then clamp once.
     Fixed product = Fixed::one();
-    for (const ActiveEvent& active : state.events) {
-        if (active.active == 0) {
+    for (std::uint32_t i = 0; i < content.events.size(); ++i) {
+        if (!eventActive(state, EventId(i))) {
             continue;
         }
-        for (const EventEffect& effect : content.events[active.event.index()].effects) {
-            if (effect.type != type) {
+        for (const EventEffect& effect : content.events[i].effects) {
+            if (effect.type != type ||
+                (type == EventEffectType::DemandMult && effect.resource != resource)) {
                 continue;
             }
-            if (type == EventEffectType::DemandMult && effect.resource != resource) {
-                continue;
-            }
-            product = clampFixed(product * effect.value, kMultMin, kMultMax);
+            const std::optional<std::int64_t> raw =
+                checkedMulDiv(product.raw(), effect.value.raw(), Fixed::kScale);
+            product = raw ? Fixed::fromRaw(*raw) : kMultMax;
         }
     }
-    return product;
+    return clampFixed(product, kMultMin, kMultMax);
 }
 
 void runEvents(const Content& content, WorldState& state, TickReport& report) {

@@ -10,10 +10,14 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace sim {
 
 [[nodiscard]] Money mineCapex(const Content& content, const Company& company, const Plot& plot);
+// What a company with these techs would pay to build on a plot of this area.
+[[nodiscard]] Money mineCapexQuote(const Content& content, const std::vector<TechId>& completed,
+                                   std::int64_t areaHectares);
 [[nodiscard]] Money mineDailyOpex(const Content& content, const WorldState& world,
                                   const Company& company, MineState state);
 

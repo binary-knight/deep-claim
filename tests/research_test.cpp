@@ -126,3 +126,24 @@ TEST_CASE("Research state survives save and load and is validated", "[research][
     CHECK_FALSE(simulation.load(saveOf(broken)));
     CHECK(simulation.load(saveOf(simulation.state())));
 }
+
+TEST_CASE("Pending research must have been startable", "[research][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.submit(sim::StartResearch{kPlayer, sim::TechId(0)});
+    simulation.tick(5);
+    const auto saveOf = [&](const sim::WorldState& s) {
+        return sim::saveGame(s, {}, sim::hashContent(content));
+    };
+    sim::WorldState broken = simulation.state();
+    broken.research[0].tech = sim::TechId(1);  // prerequisite (tech 0) not complete
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+    broken = simulation.state();
+    broken.companies[0].completedTechs.push_back(sim::TechId(0));  // researching a known tech
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+    broken = simulation.state();
+    broken.research[0].startedDay = broken.day;  // started in the future
+    broken.research[0].completesDay = broken.day + content.techs[0].durationDays;
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+    CHECK(simulation.load(saveOf(simulation.state())));
+}

@@ -150,6 +150,10 @@ struct Notice {
     RejectReason reason = RejectReason::None;
 };
 
+// Stable identifiers for logs, CSV and UI text lookup.
+[[nodiscard]] const char* rejectReasonName(RejectReason reason);
+[[nodiscard]] const char* noticeKindName(NoticeKind kind);
+
 [[nodiscard]] bool noticeIsPublic(NoticeKind kind);
 [[nodiscard]] bool noticeVisibleTo(const Notice& notice, CompanyId viewer);
 

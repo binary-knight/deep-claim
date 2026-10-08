@@ -11,6 +11,7 @@
 #include "sim/tech.h"
 #include "sim/world_state.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 
@@ -26,9 +27,14 @@ Notice mineNotice(NoticeKind kind, const Mine& mine, MineId id, Money amount = M
 
 }  // namespace
 
+Money mineCapexQuote(const Content& content, const std::vector<TechId>& completed,
+                     std::int64_t areaHectares) {
+    const Money base = content.balance.mineCapexPerHectare * areaHectares;
+    return base.scaled(techMultiplier(content, completed, TechEffectType::ExtractionCapexMult));
+}
+
 Money mineCapex(const Content& content, const Company& company, const Plot& plot) {
-    const Money base = content.balance.mineCapexPerHectare * plot.areaHectares;
-    return base.scaled(techMultiplier(content, company, TechEffectType::ExtractionCapexMult));
+    return mineCapexQuote(content, company.completedTechs, plot.areaHectares);
 }
 
 Money mineDailyOpex(const Content& content, const WorldState& world, const Company& company,
@@ -106,6 +112,8 @@ void applyBuildMine(const Content& content, WorldState& state, const BuildMine& 
     mine.operationalDay = state.day + content.balance.mineBuildDays;
     mine.state = MineState::Building;
     mine.extractedTonnes.assign(content.resources.size(), 0);
+    mine.lastDayTonnes.assign(content.resources.size(), 0);
+    mine.lastOutputTonnes.assign(content.resources.size(), 0);
     state.mines.push_back(mine);
     const MineId id(static_cast<std::uint32_t>(state.mines.size() - 1));
     plot.mine = id;
@@ -150,6 +158,7 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
         const MineId id(i);
         Company& owner = state.companies[mine.owner.index()];
 
+        std::fill(mine.lastDayTonnes.begin(), mine.lastDayTonnes.end(), 0);
         if (mine.state == MineState::Closed || mine.state == MineState::Depleted) {
             continue;
         }
@@ -173,6 +182,8 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
                     stock = checkedAdd(stock, output);
                     std::int64_t& lifetime = mine.extractedTonnes[truth.resource.index()];
                     lifetime = checkedAdd(lifetime, output);
+                    mine.lastDayTonnes[truth.resource.index()] = output;
+                    mine.lastOutputTonnes[truth.resource.index()] = output;
                 }
                 // Locked ore counts as remaining: the mine is not depleted.
                 anythingLeft = anythingLeft || truth.tonnesRemaining > 0;

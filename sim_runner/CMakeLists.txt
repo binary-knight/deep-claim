@@ -5,4 +5,4 @@ target_link_libraries(sim_runner PRIVATE dc::sim dc::content dc_warnings)
 target_compile_definitions(sim_runner PRIVATE DC_DATA_DIR="${CMAKE_SOURCE_DIR}/data")
 
 # Smoke test used by CI: five in-game years must run and exit cleanly.
-add_test(NAME runner_smoke COMMAND sim_runner --seed 1 --days 1800)
+add_test(NAME runner_smoke COMMAND sim_runner --seed 1 --years 5 --ai 1 --sanity)

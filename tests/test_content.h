@@ -117,8 +117,8 @@ inline sim::Content makeContent() {
     c.balance.surveyBaseNoise = sim::Fixed::fromRatio(1, 2);
     c.balance.mineCapexPerHectare = sim::Money::fromUnits(4'000);
     c.balance.mineBuildDays = 180;
-    c.balance.mineOpexPerDay = sim::Money::fromUnits(12'000);
-    c.balance.mineMothballOpexMult = sim::Fixed::fromRatio(1, 5);
+    c.balance.mineOpexPerDay = sim::Money::fromUnits(8'000);
+    c.balance.mineMothballOpexMult = sim::Fixed::fromRatio(3, 20);
     c.balance.auctionWindowDays = 45;
     c.balance.plotsListedAtStart = 3;
     c.balance.plotsListedPerMonth = 1;

@@ -12,6 +12,124 @@ void setCommandCompany(Command& command, CompanyId company) {
     std::visit([company](auto& concrete) { concrete.company = company; }, command);
 }
 
+const char* rejectReasonName(RejectReason reason) {
+    switch (reason) {
+        case RejectReason::None:
+            return "none";
+        case RejectReason::UnknownCompany:
+            return "unknown_company";
+        case RejectReason::CompanyBankrupt:
+            return "company_bankrupt";
+        case RejectReason::UnknownPlot:
+            return "unknown_plot";
+        case RejectReason::PlotNotForSale:
+            return "plot_not_for_sale";
+        case RejectReason::BidBelowAsk:
+            return "bid_below_ask";
+        case RejectReason::InsufficientFunds:
+            return "insufficient_funds";
+        case RejectReason::PlotOwnedByOther:
+            return "plot_owned_by_other";
+        case RejectReason::NotPlotOwner:
+            return "not_plot_owner";
+        case RejectReason::SurveyInProgress:
+            return "survey_in_progress";
+        case RejectReason::MineExists:
+            return "mine_exists";
+        case RejectReason::UnknownMine:
+            return "unknown_mine";
+        case RejectReason::NotMineOwner:
+            return "not_mine_owner";
+        case RejectReason::MineNotSwitchable:
+            return "mine_not_switchable";
+        case RejectReason::UnknownResource:
+            return "unknown_resource";
+        case RejectReason::InvalidQuantity:
+            return "invalid_quantity";
+        case RejectReason::InsufficientInventory:
+            return "insufficient_inventory";
+        case RejectReason::SaleTooLarge:
+            return "sale_too_large";
+        case RejectReason::InvalidAmount:
+            return "invalid_amount";
+        case RejectReason::LoanLimitExceeded:
+            return "loan_limit_exceeded";
+        case RejectReason::LoanTooSmall:
+            return "loan_too_small";
+        case RejectReason::TooManyLoans:
+            return "too_many_loans";
+        case RejectReason::CashLimitExceeded:
+            return "cash_limit_exceeded";
+        case RejectReason::UnknownLoan:
+            return "unknown_loan";
+        case RejectReason::NotLoanHolder:
+            return "not_loan_holder";
+        case RejectReason::LoanNotActive:
+            return "loan_not_active";
+        case RejectReason::UnknownTech:
+            return "unknown_tech";
+        case RejectReason::TechAlreadyKnown:
+            return "tech_already_known";
+        case RejectReason::ResearchBusy:
+            return "research_busy";
+        case RejectReason::PrerequisitesMissing:
+            return "prerequisites_missing";
+    }
+    return "unknown";
+}
+
+const char* noticeKindName(NoticeKind kind) {
+    switch (kind) {
+        case NoticeKind::CommandRejected:
+            return "command_rejected";
+        case NoticeKind::PlotListed:
+            return "plot_listed";
+        case NoticeKind::PlotRelisted:
+            return "plot_relisted";
+        case NoticeKind::PlotSold:
+            return "plot_sold";
+        case NoticeKind::AuctionLost:
+            return "auction_lost";
+        case NoticeKind::BidForfeited:
+            return "bid_forfeited";
+        case NoticeKind::SurveyStarted:
+            return "survey_started";
+        case NoticeKind::SurveyComplete:
+            return "survey_complete";
+        case NoticeKind::MineStarted:
+            return "mine_started";
+        case NoticeKind::MineOperational:
+            return "mine_operational";
+        case NoticeKind::MineDepleted:
+            return "mine_depleted";
+        case NoticeKind::MineSwitched:
+            return "mine_switched";
+        case NoticeKind::OreSold:
+            return "ore_sold";
+        case NoticeKind::StorageCharged:
+            return "storage_charged";
+        case NoticeKind::LoanTaken:
+            return "loan_taken";
+        case NoticeKind::LoanPayment:
+            return "loan_payment";
+        case NoticeKind::LoanRepaid:
+            return "loan_repaid";
+        case NoticeKind::InsolvencyWarning:
+            return "insolvency_warning";
+        case NoticeKind::Bankrupt:
+            return "bankrupt";
+        case NoticeKind::ResearchStarted:
+            return "research_started";
+        case NoticeKind::ResearchComplete:
+            return "research_complete";
+        case NoticeKind::EventStarted:
+            return "event_started";
+        case NoticeKind::EventEnded:
+            return "event_ended";
+    }
+    return "unknown";
+}
+
 bool noticeIsPublic(NoticeKind kind) {
     switch (kind) {
         case NoticeKind::PlotListed:

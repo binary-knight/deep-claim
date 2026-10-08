@@ -71,12 +71,53 @@ TEST_CASE("The AI is deterministic and reproducible from a save", "[ai][determin
 TEST_CASE("The AI stops acting once bankrupt", "[ai]") {
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 1, test::setup());
+    // Deeper in the red than any loan can cover, so the bootstrap loan rule
+    // cannot rescue it and it must go bankrupt after the grace period.
     sim::WorldState edited = simulation.state();
-    edited.companies[1].cash = sim::Money::fromUnits(-1);
+    edited.companies[1].cash = sim::Money::fromUnits(-30'000'000);
     REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
     sim::HeuristicController ai(content);
     std::uint32_t rejections = 0;
     playYears(simulation, ai, sim::kDaysPerYear, rejections);
     CHECK(simulation.state().companies[1].bankrupt == 1);
     CHECK(rejections == 0);
+}
+
+TEST_CASE("The AI's daily commands are jointly affordable", "[ai]") {
+    // Rich in opportunities, short on cash: several surveyed listings, an owned
+    // plot ready to build on, research available. Everything it issues must be
+    // accepted by the sim, which only happens if one budget governs all rules.
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 5, test::setup());
+    sim::HeuristicController ai(content);
+    std::uint32_t rejections = 0;
+    // Let it survey and buy for two years, then squeeze its cash.
+    playYears(simulation, ai, sim::kDaysPerYear * 2, rejections);
+    CHECK(rejections == 0);
+    sim::WorldState squeezed = simulation.state();
+    squeezed.companies[1].cash =
+        sim::Money::fromUnits(2'400'000) + simulation.view(kRival).reservedCash;
+    REQUIRE(simulation.load(sim::saveGame(squeezed, {}, sim::hashContent(content))));
+    playYears(simulation, ai, sim::kDaysPerYear, rejections);
+    CHECK(rejections == 0);
+}
+
+TEST_CASE("The AI does not strand itself on land it cannot develop", "[ai]") {
+    const sim::Content content = test::makeContent();
+    for (sim::Seed seed = 1; seed <= 4; ++seed) {
+        sim::Simulation simulation(content, seed, test::setup());
+        sim::HeuristicController ai(content);
+        std::uint32_t rejections = 0;
+        playYears(simulation, ai, sim::kDaysPerYear * 6, rejections);
+        const sim::CompanyView view = simulation.view(kRival);
+        // Either it never bought land, or every plot it owns has a mine or it
+        // can still fund one from cash plus borrowing capacity.
+        for (const sim::PlotView& plot : view.plots) {
+            if (plot.owner != kRival || plot.mine.has_value()) {
+                continue;
+            }
+            CHECK((view.cash - view.reservedCash + view.loanCapacity).cents() >=
+                  plot.mineCapexQuote.cents());
+        }
+    }
 }

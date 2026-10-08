@@ -7,6 +7,7 @@
 #include "sim/mines.h"
 #include "sim/money.h"
 #include "sim/plot_market.h"
+#include "sim/surveys.h"
 #include "sim/world_state.h"
 
 #include <algorithm>
@@ -17,9 +18,12 @@ namespace sim {
 
 namespace {
 
-PlotView makePlotView(const WorldState& state, std::uint32_t index, CompanyId viewer) {
+PlotView makePlotView(const Content& content, const WorldState& state, std::uint32_t index,
+                      CompanyId viewer) {
     const Plot& plot = state.plots[index];
     PlotView plotView;
+    plotView.mineCapexQuote =
+        mineCapexQuote(content, state.companies[viewer.index()].completedTechs, plot.areaHectares);
     plotView.id = PlotId(index);
     plotView.region = plot.region;
     plotView.areaHectares = plot.areaHectares;
@@ -84,6 +88,8 @@ void addOwnMines(const Content& content, const WorldState& state, CompanyId view
         mineView.state = mine.state;
         mineView.operationalDay = mine.operationalDay;
         mineView.extractedTonnes = mine.extractedTonnes;
+        mineView.lastDayTonnes = mine.lastDayTonnes;
+        mineView.lastOutputTonnes = mine.lastOutputTonnes;
         mineView.dailyOpex = mineDailyOpex(content, state, self, mine.state);
         view.mines.push_back(mineView);
     }
@@ -124,11 +130,9 @@ void addOwnLoans(const WorldState& state, CompanyId viewer, CompanyView& view) {
 }
 
 void addResearchAndEvents(const WorldState& state, CompanyId viewer, CompanyView& view) {
-    for (std::uint32_t i = 0; i < state.research.size(); ++i) {
-        const Research& research = state.research[i];
+    for (const Research& research : state.research) {
         if (research.company == viewer && research.complete == 0) {
             ResearchView researchView;
-            researchView.id = ResearchId(i);
             researchView.tech = research.tech;
             researchView.startedDay = research.startedDay;
             researchView.completesDay = research.completesDay;
@@ -181,12 +185,14 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     view.outstandingPrincipal = outstandingPrincipal(state, company);
     view.loanCapacity = content.balance.loanMaxPrincipal - view.outstandingPrincipal;
     view.monthlyStorageCost = monthlyStorageCost(content, state, company);
+    view.mineOpexQuote = mineDailyOpex(content, state, self, MineState::Operating);
+    view.surveyNoiseQuote = surveyNoise(content, self);
     view.monthsInsolvent = self.monthsInsolvent;
     view.bankrupt = self.bankrupt != 0;
 
     view.plots.reserve(state.plots.size());
     for (std::uint32_t i = 0; i < state.plots.size(); ++i) {
-        view.plots.push_back(makePlotView(state, i, company));
+        view.plots.push_back(makePlotView(content, state, i, company));
     }
     addOwnSurveys(state, company, view);
     addOwnMines(content, state, company, view);

@@ -40,6 +40,7 @@ struct PlotView {
     CompanyId owner;
     std::optional<AuctionView> auction;
     std::optional<MinePublicView> mine;
+    Money mineCapexQuote;  // what the viewer would pay to build here today
 };
 
 struct SurveyEstimateView {
@@ -73,7 +74,6 @@ struct MarketView {
 constexpr std::size_t kRecentPriceDays = 90;
 
 struct ResearchView {
-    ResearchId id;
     TechId tech;
     Day startedDay = 0;
     Day completesDay = 0;
@@ -101,7 +101,9 @@ struct MineView {
     PlotId plot;
     MineState state = MineState::Building;
     Day operationalDay = 0;
-    std::vector<std::int64_t> extractedTonnes;  // indexed by ResourceId
+    std::vector<std::int64_t> extractedTonnes;   // indexed by ResourceId
+    std::vector<std::int64_t> lastDayTonnes;     // output on the last processed day
+    std::vector<std::int64_t> lastOutputTonnes;  // output on the most recent operating day
     Money dailyOpex;
 };
 
@@ -121,6 +123,8 @@ struct CompanyView {
     Money outstandingPrincipal;
     Money loanCapacity;        // how much more may be borrowed
     Money monthlyStorageCost;  // at current inventory
+    Money mineOpexQuote;       // daily opex of an operating mine for the viewer today
+    Fixed surveyNoiseQuote;    // relative error of the viewer's surveys today
     std::uint32_t monthsInsolvent = 0;
     bool bankrupt = false;
     std::vector<std::int64_t> inventoryTonnes;

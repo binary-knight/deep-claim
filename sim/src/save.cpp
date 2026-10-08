@@ -289,7 +289,16 @@ bool validateMineShape(const Content& content, const WorldState& state, const Mi
         mine.owner.index() >= state.companies.size() ||
         mine.operationalDay != mine.builtDay + content.balance.mineBuildDays ||
         mine.operationalDay > kMaxDeadline ||
-        mine.extractedTonnes.size() != content.resources.size()) {
+        mine.extractedTonnes.size() != content.resources.size() ||
+        mine.lastDayTonnes.size() != content.resources.size() ||
+        mine.lastOutputTonnes.size() != content.resources.size()) {
+        return false;
+    }
+    const auto saneTonnes = [](std::int64_t tonnes) {
+        return tonnes >= 0 && tonnes <= kMaxDepositTonnes;
+    };
+    if (!std::ranges::all_of(mine.lastDayTonnes, saneTonnes) ||
+        !std::ranges::all_of(mine.lastOutputTonnes, saneTonnes)) {
         return false;
     }
     if (mine.state != MineState::Building && mine.state != MineState::Operating &&
@@ -408,40 +417,70 @@ bool validateLoans(const Content& content, const WorldState& state) {
     });
 }
 
+// Validity of one research record; `active` and `lastEnd` track per-company
+// state across the records in vector (creation) order.
+bool validateResearchRecord(const Content& content, const WorldState& state,
+                            const Research& research, std::vector<std::uint8_t>& active,
+                            std::vector<std::uint64_t>& lastEnd) {
+    if (!research.company.valid() || research.company.index() >= state.companies.size() ||
+        !research.tech.valid() || research.tech.index() >= content.techs.size() ||
+        research.complete > 1 || research.startedDay >= state.day ||
+        research.completesDay > kMaxDeadline) {
+        return false;
+    }
+    const TechDef& tech = content.techs[research.tech.index()];
+    if (static_cast<std::uint64_t>(research.startedDay) + tech.durationDays !=
+        research.completesDay) {
+        return false;
+    }
+    // Completes while processing completesDay; afterwards day > completesDay.
+    const bool shouldBeComplete = research.completesDay < state.day;
+    if ((research.complete != 0) != shouldBeComplete) {
+        return false;
+    }
+    // One project at a time: each starts after the previous one finished.
+    const std::size_t c = research.company.index();
+    if (lastEnd[c] != 0 && static_cast<std::uint64_t>(research.startedDay) <= lastEnd[c]) {
+        return false;
+    }
+    lastEnd[c] = research.completesDay;
+    const Company& company = state.companies[c];
+    const bool known = std::find(company.completedTechs.begin(), company.completedTechs.end(),
+                                 research.tech) != company.completedTechs.end();
+    if (research.complete == 0) {
+        if (active[c]++ != 0 || known) {
+            return false;
+        }
+        // Pending research must have been startable: prerequisites complete.
+        return std::ranges::all_of(tech.prerequisites, [&](TechId p) {
+            return std::find(company.completedTechs.begin(), company.completedTechs.end(), p) !=
+                   company.completedTechs.end();
+        });
+    }
+    return known;  // finished research must have granted its tech
+}
+
 bool validateResearch(const Content& content, const WorldState& state) {
     std::vector<std::uint8_t> active(state.companies.size(), 0);
-    for (const Research& research : state.research) {
-        if (!research.company.valid() || research.company.index() >= state.companies.size() ||
-            !research.tech.valid() || research.tech.index() >= content.techs.size() ||
-            research.complete > 1 || research.completesDay > kMaxDeadline ||
-            research.completesDay !=
-                research.startedDay + content.techs[research.tech.index()].durationDays) {
-            return false;
-        }
-        // Completes while processing completesDay; afterwards day > completesDay.
-        const bool shouldBeComplete = research.completesDay < state.day;
-        if ((research.complete != 0) != shouldBeComplete) {
-            return false;
-        }
-        const Company& company = state.companies[research.company.index()];
-        if (research.complete == 0) {
-            if (active[research.company.index()]++ != 0) {
-                return false;  // one project at a time
-            }
-        } else if (std::find(company.completedTechs.begin(), company.completedTechs.end(),
-                             research.tech) == company.completedTechs.end()) {
-            return false;  // finished research must have granted its tech
-        }
-    }
-    return true;
+    std::vector<std::uint64_t> lastEnd(state.companies.size(), 0);
+    return std::ranges::all_of(state.research, [&](const Research& research) {
+        return validateResearchRecord(content, state, research, active, lastEnd);
+    });
 }
 
 bool validateEvents(const Content& content, const WorldState& state) {
-    std::vector<std::uint8_t> active(content.events.size(), 0);
+    // Per definition: instances in vector order must not overlap (a new one
+    // may start exactly on the day its predecessor ends).
+    std::vector<std::uint64_t> lastEnd(content.events.size(), 0);
+    std::vector<std::uint8_t> seen(content.events.size(), 0);
     for (const ActiveEvent& event : state.events) {
         if (!event.event.valid() || event.event.index() >= content.events.size() ||
-            event.active > 1 || event.endsDay > kMaxDeadline ||
-            event.endsDay != event.startedDay + content.events[event.event.index()].durationDays) {
+            event.active > 1 || event.startedDay >= state.day || event.endsDay > kMaxDeadline) {
+            return false;
+        }
+        const EventDef& def = content.events[event.event.index()];
+        if (static_cast<std::uint64_t>(event.startedDay) + def.durationDays != event.endsDay ||
+            event.startedDay / kDaysPerYear + 1 < def.minYear) {
             return false;
         }
         // Expires while processing endsDay; afterwards day > endsDay.
@@ -449,9 +488,12 @@ bool validateEvents(const Content& content, const WorldState& state) {
         if ((event.active != 0) != shouldBeActive) {
             return false;
         }
-        if (event.active != 0 && active[event.event.index()]++ != 0) {
-            return false;  // one running instance per definition
+        const std::size_t e = event.event.index();
+        if (seen[e] != 0 && static_cast<std::uint64_t>(event.startedDay) < lastEnd[e]) {
+            return false;
         }
+        seen[e] = 1;
+        lastEnd[e] = event.endsDay;
     }
     return true;
 }

@@ -9,16 +9,22 @@
 #include "sim/ids.h"
 #include "sim/world_state.h"
 
+#include <vector>
+
 namespace sim {
 
 // Product of every completed tech's effects of the given multiplier type;
 // one when none apply.
 [[nodiscard]] Fixed techMultiplier(const Content& content, const Company& company,
                                    TechEffectType type);
+[[nodiscard]] Fixed techMultiplier(const Content& content, const std::vector<TechId>& completed,
+                                   TechEffectType type);
 
 // A resource is unlocked when it has no unlocking tech or the company has
 // completed it. Locked ore is neither extracted nor sold.
 [[nodiscard]] bool resourceUnlocked(const Content& content, const Company& company,
+                                    ResourceId resource);
+[[nodiscard]] bool resourceUnlocked(const Content& content, const std::vector<TechId>& completed,
                                     ResourceId resource);
 
 }  // namespace sim
