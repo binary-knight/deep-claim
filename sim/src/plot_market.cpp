@@ -18,6 +18,13 @@ namespace sim {
 
 namespace {
 
+Notice auctionNotice(NoticeKind kind, CompanyId company, PlotId plot, AuctionId auction,
+                     Money amount = Money::zero()) {
+    Notice notice = makeNotice(kind, company, plot, amount);
+    notice.auction = auction;
+    return notice;
+}
+
 // Ask price multiplier after an auction ends without a sale, and the floor
 // relative to the generated land value.
 const Fixed kUnsoldAskMult = Fixed::fromRatio(9, 10);
@@ -66,8 +73,8 @@ void closeAuction(const Content& content, WorldState& state, AuctionId auctionId
         Company& company = state.companies[bid.company.index()];
         // A bidder may have lost the cash to other costs since bidding.
         if (company.bankrupt != 0 || company.cash < bid.amount) {
-            report.notices.push_back(
-                makeNotice(NoticeKind::BidForfeited, bid.company, plotId, auctionId, bid.amount));
+            report.notices.push_back(auctionNotice(NoticeKind::BidForfeited, bid.company, plotId,
+                                                   auctionId, bid.amount));
             continue;
         }
         company.cash -= bid.amount;
@@ -77,7 +84,7 @@ void closeAuction(const Content& content, WorldState& state, AuctionId auctionId
         state.auctions[auctionId.index()].winningAmount = bid.amount;
         winner = bid.company;
         report.notices.push_back(
-            makeNotice(NoticeKind::PlotSold, bid.company, plotId, auctionId, bid.amount));
+            auctionNotice(NoticeKind::PlotSold, bid.company, plotId, auctionId, bid.amount));
         break;
     }
     if (winner.valid()) {
@@ -90,7 +97,7 @@ void closeAuction(const Content& content, WorldState& state, AuctionId auctionId
             if (pastWinner) {
                 // Ranked below the winner: outbid.
                 report.notices.push_back(
-                    makeNotice(NoticeKind::AuctionLost, other.company, plotId, auctionId));
+                    auctionNotice(NoticeKind::AuctionLost, other.company, plotId, auctionId));
             }
         }
         return;
@@ -102,7 +109,7 @@ void closeAuction(const Content& content, WorldState& state, AuctionId auctionId
     const Money newAsk = plot.askPrice;
     const AuctionId relisted = openAuction(content, state, plotId);  // may reallocate auctions
     report.notices.push_back(
-        makeNotice(NoticeKind::PlotRelisted, CompanyId(), plotId, relisted, newAsk));
+        auctionNotice(NoticeKind::PlotRelisted, CompanyId(), plotId, relisted, newAsk));
 }
 
 }  // namespace
@@ -111,8 +118,8 @@ void listPlots(const Content& content, WorldState& state, std::uint32_t count, T
     for (std::uint32_t i = 0; i < count && state.nextListing < state.listingQueue.size(); ++i) {
         const PlotId plotId = state.listingQueue[state.nextListing++];
         const AuctionId auction = openAuction(content, state, plotId);
-        report.notices.push_back(makeNotice(NoticeKind::PlotListed, CompanyId(), plotId, auction,
-                                            state.plots[plotId.index()].askPrice));
+        report.notices.push_back(auctionNotice(NoticeKind::PlotListed, CompanyId(), plotId, auction,
+                                               state.plots[plotId.index()].askPrice));
     }
 }
 

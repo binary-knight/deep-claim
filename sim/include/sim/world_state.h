@@ -27,6 +27,7 @@ struct Plot {
     PlotListing listing = PlotListing::Unlisted;
     CompanyId owner;    // valid only when Sold
     AuctionId auction;  // valid only while Listed
+    MineId mine;        // valid once a mine has been built here
 };
 
 // True deposit of one resource on one plot. Hidden from every company;
@@ -52,8 +53,9 @@ enum class CompanyKind : std::uint8_t { Player, Ai };
 struct Company {
     std::string name;
     CompanyKind kind = CompanyKind::Ai;
-    Money cash;
+    Money cash;                                 // may go negative; see finance
     std::vector<std::int64_t> inventoryTonnes;  // indexed by ResourceId
+    std::vector<TechId> completedTechs;
     std::uint8_t bankrupt = 0;
 };
 
@@ -76,6 +78,40 @@ struct Auction {
     Money winningAmount;
 };
 
+// A survey's noisy reading of one deposit. relativeError is the log-normal
+// sigma used, so the viewer knows roughly how wide the error band is.
+struct SurveyEstimate {
+    ResourceId resource;
+    std::int64_t tonnesEstimate = 0;
+    Fixed relativeError;
+};
+
+// Surveys belong to the commissioning company and are never shown to others.
+struct Survey {
+    CompanyId company;
+    PlotId plot;
+    Day commissionedDay = 0;
+    Day completesDay = 0;
+    std::uint8_t complete = 0;
+    std::vector<SurveyEstimate> estimates;  // filled on completion
+};
+
+enum class MineState : std::uint8_t {
+    Building,    // capex paid, not yet producing; no opex
+    Operating,   // producing, full opex
+    Mothballed,  // not producing, reduced opex
+    Depleted,    // every deposit exhausted; no opex
+};
+
+struct Mine {
+    PlotId plot;
+    CompanyId owner;
+    Day builtDay = 0;
+    Day operationalDay = 0;
+    MineState state = MineState::Building;
+    std::vector<std::int64_t> extractedTonnes;  // indexed by ResourceId, lifetime total
+};
+
 // The complete dynamic state of a game. Everything that affects the future
 // of the simulation lives here so that save, load, hashing and replay all
 // operate on one struct. Entities are stored in vectors indexed by StrongId
@@ -86,6 +122,8 @@ struct WorldState {
     std::vector<Company> companies;  // index 0 is the player
     std::vector<Plot> plots;
     std::vector<Auction> auctions;
+    std::vector<Survey> surveys;
+    std::vector<Mine> mines;
     std::vector<PlotId> listingQueue;  // shuffled at generation; listed in order
     std::uint32_t nextListing = 0;     // index into listingQueue
     std::uint32_t bidCounter = 0;      // monotonic order stamp for tie-breaks

@@ -4,6 +4,7 @@
 // reading WorldState::hidden; the UI and AI controllers see only this.
 
 #include "sim/content.h"
+#include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/money.h"
 #include "sim/types.h"
@@ -23,6 +24,13 @@ struct AuctionView {
     Money myBid;                 // zero when this company has not bid
 };
 
+// A mine's public face: that it exists, whose it is, whether it runs.
+struct MinePublicView {
+    MineId id;
+    CompanyId owner;
+    MineState state = MineState::Building;
+};
+
 struct PlotView {
     PlotId id;
     RegionId region;
@@ -31,6 +39,33 @@ struct PlotView {
     PlotListing listing = PlotListing::Unlisted;
     CompanyId owner;
     std::optional<AuctionView> auction;
+    std::optional<MinePublicView> mine;
+};
+
+struct SurveyEstimateView {
+    ResourceId resource;
+    std::int64_t tonnesEstimate = 0;
+    Fixed relativeError;
+};
+
+// One of the viewer's own surveys, pending or complete.
+struct SurveyView {
+    SurveyId id;
+    PlotId plot;
+    Day commissionedDay = 0;
+    Day completesDay = 0;
+    bool complete = false;
+    std::vector<SurveyEstimateView> estimates;
+};
+
+// One of the viewer's own mines, with what extraction has revealed so far.
+struct MineView {
+    MineId id;
+    PlotId plot;
+    MineState state = MineState::Building;
+    Day operationalDay = 0;
+    std::vector<std::int64_t> extractedTonnes;  // indexed by ResourceId
+    Money dailyOpex;
 };
 
 struct CompanyPublicView {
@@ -48,6 +83,8 @@ struct CompanyView {
     Money reservedCash;  // committed to standing bids
     std::vector<std::int64_t> inventoryTonnes;
     std::vector<PlotView> plots;
+    std::vector<SurveyView> surveys;
+    std::vector<MineView> mines;
     std::vector<CompanyPublicView> companies;
 };
 

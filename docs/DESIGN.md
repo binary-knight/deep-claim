@@ -134,7 +134,8 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   before needing a loan or revenue. That is the intended early tension.
 - Loan at 8 percent over 60 months, capped at 10M, so leverage is available
   but a bad first mine can bankrupt.
-- Survey at 150k and 45 days with base relative noise 0.5; the three survey
+- Survey at 150k and 20 days (auctions run 45 days so a survey commissioned at
+  listing informs the bid) with base relative noise 0.5; the three survey
   techs bring it down to 0.5 x 0.8 x 0.7 x 0.6 = 0.17.
 - Mine opex is 12k/day for every mine. Net margins per mine at base prices:
   iron 400 t x 60 = 24k gross, 12k net; copper 60 t x 900 = 54k gross, 42k
@@ -225,3 +226,35 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   unique order stamps below the counter, representable reservation totals,
   and days within `kMaxDay` (10,000 years). Systems can then index by id
   without bounds checks.
+
+## Surveys and mines (steps 7 and 8)
+
+- Any plot not owned by another company may be surveyed, including listed
+  plots, so bidding can be informed. Cost is paid at commission; results
+  arrive after `survey_duration_days`. One pending survey per company per
+  plot; repeat surveys after completion are allowed and independent, so a
+  player may pay to average readings.
+- A reading is `remaining tonnes * exp(sigma * z)` per deposit actually
+  present (z clamped to 3 sigma, from the survey RNG stream), with sigma =
+  `survey_base_noise` times the product of completed survey techs. The
+  reading carries sigma so the UI can show an error band. Absent resources
+  are not reported; presence is what surveys get right.
+- Surveys belong to the commissioning company and appear only in its view.
+- Tech effects are read through `techMultiplier` and `resourceUnlocked`
+  (sim/tech.h) from `Company::completedTechs`; research (step 11) only has
+  to fill that list.
+- Mines: one per plot, on an owned plot. Capex = `mine_capex_per_hectare` x
+  area x capex techs, paid up front; no opex while building. After
+  `mine_build_days` the mine operates and extracts every unlocked deposit
+  on the plot each day at `base_output_tonnes_per_day` (per resource) x
+  output techs x (0.5 + 0.5 x remaining share), so output halves as a
+  deposit nears exhaustion. Locked ore stays in the ground. Daily opex is
+  `mine_opex_per_day` x opex techs; mothballed mines produce nothing and pay
+  `mine_mothball_opex_mult` of it; depleted mines pay nothing.
+- Cash may go negative from opex; bankruptcy (step 10) decides what then.
+  `availableCash` is negative in that case, so no new spending passes.
+- Extraction updates hidden truth directly; the owner sees only lifetime
+  extracted tonnes per resource and the mine state, so remaining tonnage is
+  inferred from the output decline, as the brief asks.
+- Mines are public (existence, owner, state); surveys and extraction totals
+  are private. MineStarted is a public notice.

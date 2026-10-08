@@ -4,3 +4,7 @@ vcpkg_installed/
 compile_commands.json
 .vs/
 *.swp
+
+# Claude Code session files
+.claude/
+.mcp.json

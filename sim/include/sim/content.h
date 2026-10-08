@@ -105,6 +105,7 @@ struct BalanceParams {
     Money mineCapexPerHectare;
     Day mineBuildDays = 0;
     Money mineOpexPerDay;
+    Fixed mineMothballOpexMult;  // share of opex a mothballed mine still pays
     Day auctionWindowDays = 0;
     std::uint32_t plotsListedAtStart = 0;
     std::uint32_t plotsListedPerMonth = 0;

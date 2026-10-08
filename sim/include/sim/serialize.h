@@ -72,12 +72,29 @@ void serialize(Archive& ar, StrongId<Tag>& id) {
 template <class Archive>
 void serialize(Archive& ar, Plot& plot) {
     ar(plot.region, plot.areaHectares, plot.basePrice, plot.askPrice, plot.listing, plot.owner,
-       plot.auction);
+       plot.auction, plot.mine);
 }
 
 template <class Archive>
 void serialize(Archive& ar, Company& company) {
-    ar(company.name, company.kind, company.cash, company.inventoryTonnes, company.bankrupt);
+    ar(company.name, company.kind, company.cash, company.inventoryTonnes, company.completedTechs,
+       company.bankrupt);
+}
+
+template <class Archive>
+void serialize(Archive& ar, SurveyEstimate& estimate) {
+    ar(estimate.resource, estimate.tonnesEstimate, estimate.relativeError);
+}
+
+template <class Archive>
+void serialize(Archive& ar, Survey& survey) {
+    ar(survey.company, survey.plot, survey.commissionedDay, survey.completesDay, survey.complete,
+       survey.estimates);
+}
+
+template <class Archive>
+void serialize(Archive& ar, Mine& mine) {
+    ar(mine.plot, mine.owner, mine.builtDay, mine.operationalDay, mine.state, mine.extractedTonnes);
 }
 
 template <class Archive>
@@ -108,8 +125,8 @@ void serialize(Archive& ar, HiddenState& hidden) {
 
 template <class Archive>
 void serialize(Archive& ar, WorldState& state) {
-    ar(state.day, state.rng, state.companies, state.plots, state.auctions, state.listingQueue,
-       state.nextListing, state.bidCounter, state.hidden);
+    ar(state.day, state.rng, state.companies, state.plots, state.auctions, state.surveys,
+       state.mines, state.listingQueue, state.nextListing, state.bidCounter, state.hidden);
 }
 
 // ---- commands (queued commands travel with saves) ----
@@ -120,6 +137,21 @@ void serialize(Archive& ar, BidOnPlot& bid) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, CommissionSurvey& command) {
+    ar(command.company, command.plot);
+}
+
+template <class Archive>
+void serialize(Archive& ar, BuildMine& command) {
+    ar(command.company, command.plot);
+}
+
+template <class Archive>
+void serialize(Archive& ar, SetMineState& command) {
+    ar(command.company, command.mine, command.operate);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Command& command) {
     auto index = static_cast<std::uint8_t>(command.index());
     ar(index);
@@ -127,6 +159,15 @@ void serialize(Archive& ar, Command& command) {
         switch (index) {
             case 0:
                 command = BidOnPlot{};
+                break;
+            case 1:
+                command = CommissionSurvey{};
+                break;
+            case 2:
+                command = BuildMine{};
+                break;
+            case 3:
+                command = SetMineState{};
                 break;
             default:
                 ar.fail();
@@ -181,8 +222,8 @@ void serialize(Archive& ar, BalanceParams& balance) {
     ar(balance.startingCapital, balance.loanAnnualRate, balance.loanTermMonths,
        balance.loanMaxPrincipal, balance.surveyCost, balance.surveyDurationDays,
        balance.surveyBaseNoise, balance.mineCapexPerHectare, balance.mineBuildDays,
-       balance.mineOpexPerDay, balance.auctionWindowDays, balance.plotsListedAtStart,
-       balance.plotsListedPerMonth, balance.bankruptcyGraceMonths);
+       balance.mineOpexPerDay, balance.mineMothballOpexMult, balance.auctionWindowDays,
+       balance.plotsListedAtStart, balance.plotsListedPerMonth, balance.bankruptcyGraceMonths);
 }
 
 template <class Archive>

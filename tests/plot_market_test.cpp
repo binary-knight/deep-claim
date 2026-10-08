@@ -71,17 +71,21 @@ TEST_CASE("Plots are listed monthly and auctions close after the window", "[mark
     sim::Simulation simulation(content, 1, test::setup());
     simulation.tick(30);  // processes days 0..29
     CHECK(simulation.state().auctions.size() == 3);
-    const sim::TickReport& day30 = simulation.tick();  // processes day 30: close + list
+    const sim::TickReport& day30 = simulation.tick();  // processes day 30: monthly listing
     CHECK(day30.day == 30);
-    // Three unsold auctions relist, plus one new monthly listing.
-    CHECK(std::count_if(day30.notices.begin(), day30.notices.end(), [](const sim::Notice& n) {
-              return n.kind == sim::NoticeKind::PlotRelisted;
-          }) == 3);
     CHECK(std::count_if(day30.notices.begin(), day30.notices.end(), [](const sim::Notice& n) {
               return n.kind == sim::NoticeKind::PlotListed;
           }) == 1);
     CHECK(countListed(simulation.state()) == 4);
     CHECK(simulation.state().nextListing == 4);
+    // The three day-0 auctions close unsold on day 45 and relist.
+    while (simulation.state().day < content.balance.auctionWindowDays) {
+        simulation.tick();
+    }
+    const sim::TickReport& day45 = simulation.tick();
+    CHECK(std::count_if(day45.notices.begin(), day45.notices.end(), [](const sim::Notice& n) {
+              return n.kind == sim::NoticeKind::PlotRelisted;
+          }) == 3);
 }
 
 TEST_CASE("Unsold plots relist at a lower ask down to half the land value", "[market]") {
@@ -89,7 +93,7 @@ TEST_CASE("Unsold plots relist at a lower ask down to half the land value", "[ma
     sim::Simulation simulation(content, 1, test::setup());
     const sim::PlotId plot = firstListed(simulation.state());
     const sim::Money base = simulation.state().plots[plot.index()].basePrice;
-    simulation.tick(31);  // the day-0 auction closes while processing day 30
+    simulation.tick(content.balance.auctionWindowDays + 1);  // first auction closes unsold
     CHECK(simulation.state().plots[plot.index()].askPrice ==
           base.scaled(sim::Fixed::fromRatio(9, 10)));
     simulation.tick(sim::kDaysPerYear * 3);
@@ -180,9 +184,11 @@ TEST_CASE("Highest bid wins, ties go to the earlier bid, winner pays", "[market]
     simulation.tick();
     simulation.submit(sim::BidOnPlot{kPlayer, plot, ask + sim::Money::fromUnits(1)});
     simulation.tick();
-    simulation.tick(28);  // state.day is now 30; the auction is still open
+    while (simulation.state().day < content.balance.auctionWindowDays) {
+        simulation.tick();
+    }
     CHECK(simulation.state().plots[plot.index()].listing == sim::PlotListing::Listed);
-    const sim::TickReport& closing = simulation.tick();  // processes day 30
+    const sim::TickReport& closing = simulation.tick();  // processes the closing day
     CHECK(hasNotice(closing, sim::NoticeKind::PlotSold, kRival));
     CHECK(hasNotice(closing, sim::NoticeKind::AuctionLost, kPlayer));
     const sim::Plot& sold = simulation.state().plots[plot.index()];
@@ -205,7 +211,7 @@ TEST_CASE("Highest bid wins, ties go to the earlier bid, winner pays", "[market]
     simulation.submit(sim::BidOnPlot{kRival, other, otherAsk});
     simulation.tick();
     simulation.submit(sim::BidOnPlot{kPlayer, other, otherAsk + sim::Money::fromUnits(5)});
-    simulation.tick(sim::kDaysPerMonth);
+    simulation.tick(content.balance.auctionWindowDays + 1);
     CHECK(simulation.state().plots[other.index()].owner == kPlayer);
 }
 
@@ -217,7 +223,7 @@ TEST_CASE("Commands change the hash and replays reproduce it", "[market][determi
     const sim::PlotId plot = firstListed(active.state());
     const sim::Money ask = active.state().plots[plot.index()].askPrice;
 
-    for (sim::Day d = 0; d < 60; ++d) {
+    for (sim::Day d = 0; d < 90; ++d) {
         if (d == 2) {
             active.submit(sim::BidOnPlot{kPlayer, plot, ask});
             replay.submit(sim::BidOnPlot{kPlayer, plot, ask});
@@ -243,8 +249,8 @@ TEST_CASE("Saving mid-auction preserves bids and the eventual outcome", "[market
     sim::Simulation restored(content, 99, test::setup());
     REQUIRE(restored.load(bytes));
     CHECK(restored.stateHash() == original.stateHash());
-    original.tick(30);
-    restored.tick(30);
+    original.tick(45);
+    restored.tick(45);
     CHECK(restored.stateHash() == original.stateHash());
     CHECK(restored.state().plots[plot.index()].owner == kRival);
 }
@@ -292,10 +298,10 @@ TEST_CASE("Reports are filtered per viewer; sale prices are public", "[market][v
               return n.kind == sim::NoticeKind::CommandRejected;
           }) == 1);
 
-    while (simulation.state().day < 30) {
+    while (simulation.state().day < content.balance.auctionWindowDays) {
         simulation.tick();
     }
-    simulation.tick();  // closes on day 30
+    simulation.tick();  // closes on the window's last day
     const std::vector<sim::Notice> playerClose = simulation.reportFor(kPlayer);
     const std::vector<sim::Notice> rivalClose = simulation.reportFor(kRival);
     // Loser sees its loss; winner does not see the loss notice.
@@ -330,7 +336,7 @@ TEST_CASE("A bidder that can no longer pay forfeits and the plot relists", "[mar
     drained.companies[1].cash = sim::Money::fromUnits(1);
     REQUIRE(simulation.load(sim::saveGame(drained, {}, sim::hashContent(content))));
 
-    while (simulation.state().day < 30) {
+    while (simulation.state().day < content.balance.auctionWindowDays) {
         simulation.tick();
     }
     const sim::TickReport& closing = simulation.tick();
@@ -352,8 +358,8 @@ TEST_CASE("Queued commands survive save and load", "[market][save]") {
     original.submit(sim::BidOnPlot{kPlayer, plot, ask});
     REQUIRE(restored.load(original.save()));
     CHECK(restored.pendingCommands().size() == 1);
-    original.tick(31);
-    restored.tick(31);
+    original.tick(content.balance.auctionWindowDays + 1);
+    restored.tick(content.balance.auctionWindowDays + 1);
     CHECK(restored.stateHash() == original.stateHash());
     CHECK(restored.state().plots[plot.index()].owner == kPlayer);
 }

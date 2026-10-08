@@ -21,7 +21,27 @@ struct BidOnPlot {
     Money amount;  // must be at least the plot's current ask price
 };
 
-using Command = std::variant<BidOnPlot>;
+// Any plot not owned by another company may be surveyed; the cost is paid
+// up front and results arrive after the survey duration.
+struct CommissionSurvey {
+    CompanyId company;
+    PlotId plot;
+};
+
+// One mine per plot, on a plot the company owns. Capex is paid up front.
+struct BuildMine {
+    CompanyId company;
+    PlotId plot;
+};
+
+// Switch an Operating mine to Mothballed (reduced opex, no output) or back.
+struct SetMineState {
+    CompanyId company;
+    MineId mine;
+    std::uint8_t operate = 1;  // 1 = Operating, 0 = Mothballed
+};
+
+using Command = std::variant<BidOnPlot, CommissionSurvey, BuildMine, SetMineState>;
 
 [[nodiscard]] CompanyId commandCompany(const Command& command);
 void setCommandCompany(Command& command, CompanyId company);
@@ -34,16 +54,29 @@ enum class RejectReason : std::uint8_t {
     PlotNotForSale,
     BidBelowAsk,
     InsufficientFunds,
+    PlotOwnedByOther,
+    NotPlotOwner,
+    SurveyInProgress,
+    MineExists,
+    UnknownMine,
+    NotMineOwner,
+    MineNotSwitchable,
 };
 
 // Private notices are visible only to `company`; public ones to everyone.
 enum class NoticeKind : std::uint8_t {
-    CommandRejected,  // private: company, plot, amount, reason
+    CommandRejected,  // private: company, plot/mine, amount, reason
     PlotListed,       // public: plot, auction, amount = ask price
     PlotRelisted,     // public: plot, auction (the new one), amount = new ask
     PlotSold,         // public: company (buyer), plot, auction, amount paid
     AuctionLost,      // private: company was outbid on plot/auction
     BidForfeited,     // private: company could no longer pay its bid at close
+    SurveyStarted,    // private: company, plot, amount = cost
+    SurveyComplete,   // private: company, plot
+    MineStarted,      // public: company, plot, mine, amount = capex
+    MineOperational,  // private: company, plot, mine
+    MineDepleted,     // private: company, plot, mine
+    MineSwitched,     // private: company, plot, mine (state changed)
 };
 
 struct Notice {
@@ -51,6 +84,7 @@ struct Notice {
     CompanyId company;
     PlotId plot;
     AuctionId auction;
+    MineId mine;
     Money amount;
     RejectReason reason = RejectReason::None;
 };
@@ -59,13 +93,12 @@ struct Notice {
 [[nodiscard]] bool noticeVisibleTo(const Notice& notice, CompanyId viewer);
 
 [[nodiscard]] inline Notice makeNotice(NoticeKind kind, CompanyId company, PlotId plot,
-                                       AuctionId auction, Money amount = Money::zero(),
+                                       Money amount = Money::zero(),
                                        RejectReason reason = RejectReason::None) {
     Notice notice;
     notice.kind = kind;
     notice.company = company;
     notice.plot = plot;
-    notice.auction = auction;
     notice.amount = amount;
     notice.reason = reason;
     return notice;

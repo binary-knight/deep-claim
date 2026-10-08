@@ -2,8 +2,10 @@
 
 #include "sim/commands.h"
 #include "sim/fatal.h"
+#include "sim/mines.h"
 #include "sim/plot_market.h"
 #include "sim/save.h"
+#include "sim/surveys.h"
 #include "sim/view.h"
 #include "sim/worldgen.h"
 
@@ -52,28 +54,56 @@ void Simulation::collectCommands(CompanyId company, Controller& controller) {
     }
 }
 
+void Simulation::reject(CompanyId company, PlotId plot, Money amount, RejectReason reason) {
+    report_.notices.push_back(
+        makeNotice(NoticeKind::CommandRejected, company, plot, amount, reason));
+}
+
 void Simulation::applyCommands() {
     // Deterministic order: by company id, then submission order.
     std::stable_sort(pending_.begin(), pending_.end(), [](const Command& a, const Command& b) {
         return commandCompany(a) < commandCompany(b);
     });
     for (const Command& command : pending_) {
-        std::visit(
-            [&](const auto& concrete) {
-                using T = std::decay_t<decltype(concrete)>;
-                if constexpr (std::is_same_v<T, BidOnPlot>) {
-                    if (const std::optional<RejectReason> reason = validateBid(state_, concrete)) {
-                        report_.notices.push_back(
-                            makeNotice(NoticeKind::CommandRejected, concrete.company, concrete.plot,
-                                       AuctionId(), concrete.amount, *reason));
-                    } else {
-                        applyBid(state_, concrete);
-                    }
-                }
-            },
-            command);
+        dispatch(command);
     }
     pending_.clear();
+}
+
+void Simulation::dispatch(const Command& command) {
+    std::visit(
+        [&](const auto& concrete) {
+            using T = std::decay_t<decltype(concrete)>;
+            if constexpr (std::is_same_v<T, BidOnPlot>) {
+                if (const auto reason = validateBid(state_, concrete)) {
+                    reject(concrete.company, concrete.plot, concrete.amount, *reason);
+                } else {
+                    applyBid(state_, concrete);
+                }
+            } else if constexpr (std::is_same_v<T, CommissionSurvey>) {
+                if (const auto reason = validateSurvey(*content_, state_, concrete)) {
+                    reject(concrete.company, concrete.plot, Money::zero(), *reason);
+                } else {
+                    applySurvey(*content_, state_, concrete, report_);
+                }
+            } else if constexpr (std::is_same_v<T, BuildMine>) {
+                if (const auto reason = validateBuildMine(*content_, state_, concrete)) {
+                    reject(concrete.company, concrete.plot, Money::zero(), *reason);
+                } else {
+                    applyBuildMine(*content_, state_, concrete, report_);
+                }
+            } else if constexpr (std::is_same_v<T, SetMineState>) {
+                if (const auto reason = validateSetMineState(state_, concrete)) {
+                    Notice notice = makeNotice(NoticeKind::CommandRejected, concrete.company,
+                                               PlotId(), Money::zero(), *reason);
+                    notice.mine = concrete.mine;
+                    report_.notices.push_back(notice);
+                } else {
+                    applySetMineState(state_, concrete, report_);
+                }
+            }
+        },
+        command);
 }
 
 const TickReport& Simulation::tick() {
@@ -86,6 +116,8 @@ const TickReport& Simulation::tick() {
     // exist yet are absent, not stubbed.
     applyCommands();                            // 1
     runPlotMarket(*content_, state_, report_);  // 2
+    runSurveys(*content_, state_, report_);     // 3
+    runMines(*content_, state_, report_);       // 4
     ++state_.day;                               // 9
     return report_;
 }

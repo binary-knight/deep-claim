@@ -111,12 +111,13 @@ inline sim::Content makeContent() {
     c.balance.loanTermMonths = 60;
     c.balance.loanMaxPrincipal = sim::Money::fromUnits(10'000'000);
     c.balance.surveyCost = sim::Money::fromUnits(150'000);
-    c.balance.surveyDurationDays = 45;
+    c.balance.surveyDurationDays = 20;
     c.balance.surveyBaseNoise = sim::Fixed::fromRatio(1, 2);
     c.balance.mineCapexPerHectare = sim::Money::fromUnits(4'000);
     c.balance.mineBuildDays = 180;
     c.balance.mineOpexPerDay = sim::Money::fromUnits(12'000);
-    c.balance.auctionWindowDays = 30;
+    c.balance.mineMothballOpexMult = sim::Fixed::fromRatio(1, 5);
+    c.balance.auctionWindowDays = 45;
     c.balance.plotsListedAtStart = 3;
     c.balance.plotsListedPerMonth = 1;
     c.balance.bankruptcyGraceMonths = 3;

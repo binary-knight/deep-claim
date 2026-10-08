@@ -17,10 +17,16 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::PlotListed:
         case NoticeKind::PlotRelisted:
         case NoticeKind::PlotSold:
+        case NoticeKind::MineStarted:
             return true;
         case NoticeKind::CommandRejected:
         case NoticeKind::AuctionLost:
         case NoticeKind::BidForfeited:
+        case NoticeKind::SurveyStarted:
+        case NoticeKind::SurveyComplete:
+        case NoticeKind::MineOperational:
+        case NoticeKind::MineDepleted:
+        case NoticeKind::MineSwitched:
             return false;
     }
     return false;

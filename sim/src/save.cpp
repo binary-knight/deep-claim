@@ -4,6 +4,7 @@
 #include "sim/serialize.h"
 #include "sim/types.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -33,8 +34,63 @@ bool validateCompanies(const Content& content, const WorldState& state) {
                 return false;
             }
         }
+        std::vector<std::uint8_t> seen(content.techs.size(), 0);
+        for (const TechId tech : company.completedTechs) {
+            if (!tech.valid() || tech.index() >= content.techs.size() ||
+                seen[tech.index()]++ != 0) {
+                return false;
+            }
+        }
     }
     return true;
+}
+
+bool validateSurveys(const Content& content, const WorldState& state) {
+    for (const Survey& survey : state.surveys) {
+        if (!survey.company.valid() || survey.company.index() >= state.companies.size() ||
+            !survey.plot.valid() || survey.plot.index() >= state.plots.size() ||
+            survey.completesDay < survey.commissionedDay || survey.complete > 1) {
+            return false;
+        }
+        if (survey.complete == 0 && !survey.estimates.empty()) {
+            return false;
+        }
+        for (const SurveyEstimate& estimate : survey.estimates) {
+            if (!estimate.resource.valid() ||
+                estimate.resource.index() >= content.resources.size() ||
+                estimate.tonnesEstimate < 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool validateMines(const Content& content, const WorldState& state) {
+    for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
+        const Mine& mine = state.mines[i];
+        if (!mine.plot.valid() || mine.plot.index() >= state.plots.size() || !mine.owner.valid() ||
+            mine.owner.index() >= state.companies.size() || mine.operationalDay < mine.builtDay ||
+            mine.extractedTonnes.size() != content.resources.size()) {
+            return false;
+        }
+        if (mine.state != MineState::Building && mine.state != MineState::Operating &&
+            mine.state != MineState::Mothballed && mine.state != MineState::Depleted) {
+            return false;
+        }
+        const Plot& plot = state.plots[mine.plot.index()];
+        if (plot.owner != mine.owner || plot.mine != MineId(i)) {
+            return false;  // exactly one mine per plot, owned by the plot's owner
+        }
+        for (const std::int64_t tonnes : mine.extractedTonnes) {
+            if (tonnes < 0) {
+                return false;
+            }
+        }
+    }
+    return std::ranges::all_of(state.plots, [&](const Plot& plot) {
+        return !plot.mine.valid() || plot.mine.index() < state.mines.size();
+    });
 }
 
 bool validatePlots(const Content& content, const WorldState& state) {
@@ -156,7 +212,8 @@ bool validateWorldImpl(const Content& content, const WorldState& state) {
         return false;
     }
     if (!validateCompanies(content, state) || !validatePlots(content, state) ||
-        !validateAuctions(state) || !validateListingQueue(state)) {
+        !validateAuctions(state) || !validateListingQueue(state) ||
+        !validateSurveys(content, state) || !validateMines(content, state)) {
         return false;
     }
     for (const PlotDeposits& deposits : state.hidden.plotDeposits) {

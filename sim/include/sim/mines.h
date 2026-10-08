@@ -1,0 +1,39 @@
+#pragma once
+
+// Mines (tick pipeline step 4): construction, extraction, depletion, opex.
+
+#include "sim/commands.h"
+#include "sim/content.h"
+#include "sim/ids.h"
+#include "sim/money.h"
+#include "sim/world_state.h"
+
+#include <cstdint>
+#include <optional>
+
+namespace sim {
+
+[[nodiscard]] Money mineCapex(const Content& content, const Company& company, const Plot& plot);
+[[nodiscard]] Money mineDailyOpex(const Content& content, const Company& company, MineState state);
+
+// Tonnes an operating mine would extract today from a deposit of the given
+// size: base output scaled by tech and by remaining share (output falls to
+// half as the deposit nears exhaustion), capped by what is left.
+[[nodiscard]] std::int64_t mineDailyOutput(const Content& content, const Company& company,
+                                           ResourceId resource, std::int64_t tonnesTotal,
+                                           std::int64_t tonnesRemaining);
+
+[[nodiscard]] std::optional<RejectReason> validateBuildMine(const Content& content,
+                                                            const WorldState& state,
+                                                            const BuildMine& command);
+void applyBuildMine(const Content& content, WorldState& state, const BuildMine& command,
+                    TickReport& report);
+
+[[nodiscard]] std::optional<RejectReason> validateSetMineState(const WorldState& state,
+                                                               const SetMineState& command);
+void applySetMineState(WorldState& state, const SetMineState& command, TickReport& report);
+
+// Finishes construction, extracts, charges opex, marks depletion.
+void runMines(const Content& content, WorldState& state, TickReport& report);
+
+}  // namespace sim

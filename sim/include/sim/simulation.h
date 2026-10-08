@@ -4,6 +4,7 @@
 #include "sim/content.h"
 #include "sim/controller.h"
 #include "sim/ids.h"
+#include "sim/money.h"
 #include "sim/types.h"
 #include "sim/view.h"
 #include "sim/world_state.h"
@@ -56,6 +57,8 @@ public:
 
 private:
     void applyCommands();
+    void dispatch(const Command& command);
+    void reject(CompanyId company, PlotId plot, Money amount, RejectReason reason);
 
     const Content* content_;
     std::uint64_t contentHash_;
