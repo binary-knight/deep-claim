@@ -79,4 +79,52 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   against remaining bytes before allocation. `hashOf(x)` equals FNV-1a over
   `toBytes(x)` by construction.
 - Save files are the magic "DCSV", a uint32 format version, then the
-  WorldState. Unknown versions are rejected; no migrations until ship.
+  WorldState. Until the first public build, `kSaveVersion` stays at 1 and
+  saves are simply not compatible across commits; versioning and migration
+  start when players have saves worth keeping.
+- `mulDiv` aborts in every build type on overflow or division by zero. A
+  crash with a message is easier to find than a silently corrupted balance,
+  and overflow indicates a design bug, not a runtime condition.
+- The archive's vector path does not support `std::vector<bool>`. Entity
+  flags use sized integer or enum types.
+
+## Content and data files (step 3)
+
+- `sim::Content` holds plain structs (ResourceDef, TechDef, RegionDef,
+  EventDef, BalanceParams). The `content` library owns nlohmann-json and the
+  filesystem; the sim never sees either. Tests build content in code or from
+  JSON strings without touching disk.
+- Numbers in JSON are human units: money in whole currency units with up to
+  two decimals, ratios as decimals with up to six. The loader parses doubles,
+  rejects non-finite values and excess precision, then rounds to nearest.
+  Truncation is the rule inside the sim, never at the content boundary.
+- Validation collects every error (file, JSON path, message) and fails the
+  whole load. Unknown keys are errors so typos cannot silently become
+  defaults. Cross-file references are checked both ways: a resource's
+  `unlocked_by` tech must carry the matching `unlock_resource` effect.
+- Tests and sim_runner locate `data/` through a compile definition set by
+  CMake; the runner's `--data` flag overrides it. The game will later ship
+  data next to its executable.
+- Deposit priors are log-normal, written as `tonnes_median` and
+  `tonnes_spread` (ratio between the 84th percentile and the median) because
+  those are easier to tune by hand than log-space parameters. World
+  generation (step 4) needs a fixed-point power function for this.
+- Ids in data files are lowercase snake_case so they can double as stable
+  save/replay identifiers.
+
+### Balance numbers, first pass (all provisional until sim_runner sweeps)
+
+- Starting capital 5.0M against plots at 0.4M to 4M and mines at 4000 per
+  hectare (0.8M to 8M): the player can afford roughly one plot and one mine
+  before needing a loan or revenue. That is the intended early tension.
+- Loan at 8 percent over 60 months, capped at 10M, so leverage is available
+  but a bad first mine can bankrupt.
+- Survey at 150k and 45 days with base relative noise 0.5; the three survey
+  techs bring it down to 0.5 x 0.8 x 0.7 x 0.6 = 0.17.
+- Mine output 400 t/day with opex 12k/day: iron at 110/t grosses 44k/day, so
+  an iron mine pays back capex in one to two years; lithium at 14000/t is
+  the late-game prize behind a 240-day tech.
+- Demand baselines sit a little above what one or two mines produce, so a
+  third mine on the same resource visibly depresses the price.
+- Event daily weights of 0.0015 to 0.003 give roughly one event every one to
+  two in-game years.

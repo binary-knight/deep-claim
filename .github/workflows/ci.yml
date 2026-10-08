@@ -62,13 +62,24 @@ jobs:
   tidy:
     name: clang-tidy
     runs-on: ubuntu-24.04
+    env:
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg-cache,readwrite"
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg-cache
+          key: vcpkg-ubuntu-24.04-tidy-${{ hashFiles('vcpkg.json', '.gitmodules') }}
+          restore-keys: |
+            vcpkg-ubuntu-24.04-tidy-
+      - run: ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
       - run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
-      # The sim library and runner have no third-party dependencies, so this
-      # job needs no vcpkg bootstrap.
+      # Tests are excluded: Catch2 macros do not survive the tidy checks and
+      # the test code is not shipped.
       - run: >
-          cmake -S . -B build/tidy -DCMAKE_BUILD_TYPE=Debug
-          -DDC_BUILD_TESTS=OFF -DDC_BUILD_RUNNER=ON
+          cmake --preset debug -DDC_BUILD_TESTS=OFF
           -DCMAKE_CXX_CLANG_TIDY=clang-tidy-18
-      - run: cmake --build build/tidy --parallel
+      - run: cmake --build --preset debug --parallel
