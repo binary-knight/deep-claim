@@ -286,8 +286,9 @@ bool validateMineAccounting(const Content& content, const WorldState& state, con
 bool validateMineShape(const Content& content, const WorldState& state, const Mine& mine,
                        MineId id) {
     if (!mine.plot.valid() || mine.plot.index() >= state.plots.size() || !mine.owner.valid() ||
-        mine.owner.index() >= state.companies.size() ||
-        mine.operationalDay != mine.builtDay + content.balance.mineBuildDays ||
+        mine.owner.index() >= state.companies.size() || mine.builtDay >= state.day ||
+        static_cast<std::uint64_t>(mine.builtDay) + content.balance.mineBuildDays !=
+            mine.operationalDay ||
         mine.operationalDay > kMaxDeadline ||
         mine.extractedTonnes.size() != content.resources.size() ||
         mine.lastDayTonnes.size() != content.resources.size() ||

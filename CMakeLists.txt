@@ -18,6 +18,8 @@ include(Sanitizers)
 
 add_subdirectory(sim)
 add_subdirectory(content)
+add_subdirectory(platform)
+add_subdirectory(game/session)
 
 if(DC_BUILD_RUNNER)
     add_subdirectory(sim_runner)

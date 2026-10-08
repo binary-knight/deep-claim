@@ -41,14 +41,21 @@ const Money kBootstrapLoan = Money::fromUnits(4'000'000);
 // One projected cash position shared by every rule, so the commands issued
 // on a day are jointly affordable and no rule can starve another.
 struct Budget {
-    Money cash;  // projected uncommitted cash after the commands so far
+    Money cash;    // projected spendable cash: actual minus reservations, commitments, reserve
+    Money actual;  // projected bank balance, for the cash-bound checks the sim applies
 
     [[nodiscard]] bool canSpend(Money amount) const { return amount <= cash; }
-    void spend(Money amount) { cash -= amount; }
+    void spend(Money amount) {
+        cash -= amount;
+        actual -= amount;
+    }
+    void commit(Money amount) { cash -= amount; }  // earmarked, not paid yet
     void receive(Money amount) {
         // Stay inside the persisted cash bound.
         cash = Money::fromCents(std::min(cash.cents() + amount.cents(), kMaxCashCents));
+        actual = Money::fromCents(std::min(actual.cents() + amount.cents(), kMaxCashCents));
     }
+    [[nodiscard]] std::int64_t headroomCents() const { return kMaxCashCents - actual.cents(); }
 };
 
 std::uint32_t activeLoanCount(const CompanyView& view) {
@@ -81,12 +88,26 @@ bool regionWorthProspecting(const Content& content, const CompanyView& view, Reg
         });
 }
 
-// Surveys the company has paid for on listed plots it does not yet own.
-std::size_t openProspects(const CompanyView& view) {
+// Forward declaration: net value of a surveyed plot (defined below).
+Money surveyedNetValue(const Content& content, const CompanyView& view, const SurveyView& survey);
+
+// Prospects still in play: pending surveys on listed plots, plus completed
+// surveys on listed plots that are worth bidding on. Dead prospects (empty
+// or uneconomic plots that keep relisting) do not count, so they can never
+// block further exploration.
+std::size_t openProspects(const Content& content, const CompanyView& view) {
     std::size_t count = 0;
     for (const SurveyView& survey : view.surveys) {
         const PlotView& plot = view.plots[survey.plot.index()];
-        if (plot.listing == PlotListing::Listed && plot.owner != view.me) {
+        if (plot.listing != PlotListing::Listed || plot.owner == view.me) {
+            continue;
+        }
+        if (!survey.complete) {
+            ++count;
+            continue;
+        }
+        const Money outlay = plot.askPrice + plot.mineCapexQuote;
+        if (surveyedNetValue(content, view, survey) >= outlay.scaled(kRequiredReturn)) {
             ++count;
         }
     }
@@ -163,8 +184,7 @@ void decideSales(const Content& content, const CompanyView& view, Budget& budget
         }
         // Never sell more than the cash bound can absorb.
         if (price > Money::zero()) {
-            const std::int64_t room = (kMaxCashCents - budget.cash.cents()) / price.cents();
-            tonnes = std::min(tonnes, room);
+            tonnes = std::min(tonnes, budget.headroomCents() / price.cents());
         }
         if (tonnes <= 0) {
             continue;
@@ -228,6 +248,7 @@ void decideBuilding(const Content& content, const CompanyView& view, Budget& bud
             budget.canSpend(capex + constructionReserve(view))) {
             out.emplace_back(BuildMine{view.me, plot.id});
             budget.spend(capex);
+            budget.commit(constructionReserve(view));
         }
     }
 }
@@ -239,7 +260,7 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
                  std::vector<Command>& out) {
     bool wantsLoan = false;
     const Money room = borrowingRoom(content, view);
-    bool surveyedToday = openProspects(view) >= kMaxOpenProspects;
+    bool surveyedToday = openProspects(content, view) >= kMaxOpenProspects;
     for (const PlotView& plot : view.plots) {
         if (plot.listing != PlotListing::Listed || !plot.auction.has_value() ||
             plot.auction->myBid > Money::zero() ||
@@ -265,28 +286,32 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
             continue;
         }
         const Money value = surveyedNetValue(content, view, *survey);
-        const Money outlay = plot.askPrice + capex;
-        if (value < outlay.scaled(kRequiredReturn)) {
+        if (value < (plot.askPrice + capex).scaled(kRequiredReturn)) {
             continue;  // not worth the land plus the mine
         }
         // Bids are sealed and ties go to the earlier bidder, so pay a premium
         // for clearly valuable plots, plus a small company-specific offset so
         // identical competitors do not tie on every auction.
         Fixed premium = Fixed::one();
-        if (value >= outlay * 4) {
+        if (value >= (plot.askPrice + capex) * 4) {
             premium = kBidPremiumHigh;
-        } else if (plot.auction->bidCount > 0 || value >= outlay * 2) {
+        } else if (plot.auction->bidCount > 0 || value >= (plot.askPrice + capex) * 2) {
             premium = kBidPremium;
         }
         const auto jitterPercent =
             static_cast<std::int64_t>((plot.id.value() * 7U + view.me.value() * 13U) % 7U);
         premium = premium + Fixed::fromRatio(jitterPercent, 100);
         const Money bid = plot.askPrice.scaled(premium);
-        const Money needed = bid + capex + constructionReserve(view);
-        if (budget.canSpend(needed)) {
+        if (value < (bid + capex).scaled(kRequiredReturn)) {
+            continue;  // the premium would eat the return
+        }
+        const Money development = capex + constructionReserve(view);
+        if (budget.canSpend(bid + development)) {
             out.emplace_back(BidOnPlot{view.me, plot.id, bid});
-            budget.spend(bid);
-        } else if (needed <= budget.cash + room) {
+            // The bid is reserved by the sim; the mine it implies is earmarked
+            // here so later rules cannot spend that money.
+            budget.commit(bid + development);
+        } else if (bid + development <= budget.cash + room) {
             wantsLoan = true;  // worth it, but only with a loan
         }
     }
@@ -342,8 +367,7 @@ void decideLoans(const Content& content, const CompanyView& view, bool producing
         return;
     }
     const Money chunk = std::min(bootstrap ? kBootstrapLoan : kLoanChunk, view.loanCapacity);
-    if (chunk >= content.balance.loanMinPrincipal &&
-        chunk.cents() <= kMaxCashCents - view.cash.cents()) {
+    if (chunk >= content.balance.loanMinPrincipal && chunk.cents() <= budget.headroomCents()) {
         out.emplace_back(TakeLoan{view.me, chunk});
     }
 }
@@ -361,7 +385,8 @@ void decideRepayment(const CompanyView& view, Budget& budget, std::vector<Comman
     if (largest == nullptr) {
         return;
     }
-    const bool idle = view.mines.empty() && view.companies[view.me.index()].plotsOwned == 0;
+    const bool idle = view.mines.empty() && view.companies[view.me.index()].plotsOwned == 0 &&
+                      view.reservedCash == Money::zero();
     const bool flush = budget.canSpend(largest->remaining * 2 + kResearchFloor);
     const Money repay = flush ? largest->remaining : std::min(largest->remaining, budget.cash);
     if ((flush || idle) && repay > Money::zero()) {
@@ -378,7 +403,15 @@ void HeuristicController::decide(const CompanyView& view, std::vector<Command>& 
     }
     const bool producing = std::ranges::any_of(
         view.mines, [](const MineView& m) { return m.state == MineState::Operating; });
-    Budget budget{view.cash - view.reservedCash - kCashReserve};
+    // Money earmarked for mines on plots the company is currently bidding for,
+    // so standing bids from earlier days keep their development funding.
+    Money earmarked = Money::zero();
+    for (const PlotView& plot : view.plots) {
+        if (plot.auction.has_value() && plot.auction->myBid > Money::zero()) {
+            earmarked += plot.mineCapexQuote + constructionReserve(view);
+        }
+    }
+    Budget budget{view.cash - view.reservedCash - earmarked - kCashReserve, view.cash};
     decideSales(*content_, view, budget, out);
     decideMothballing(view, out);
     decideBuilding(*content_, view, budget, out);

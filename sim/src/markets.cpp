@@ -109,9 +109,13 @@ void runMarkets(const Content& content, WorldState& state) {
         // The world outside the game supplies exactly the base demand, so with
         // no company sales and no demand shift the price sits at base.
         const Fixed baseDemand = Fixed::fromInt(resource.baseDemandTonnesPerDay);
-        const Fixed demand =
-            baseDemand * market.demandMult *
-            eventMultiplier(content, state, EventEffectType::DemandMult, ResourceId(i));
+        // Combined demand factor is bounded before it meets base demand so the
+        // product fits Fixed for any valid content (1e9 t x 1000 = 1e12 t).
+        const Fixed demandFactor = clampFixed(
+            market.demandMult *
+                eventMultiplier(content, state, EventEffectType::DemandMult, ResourceId(i)),
+            Fixed::fromRatio(1, 100), Fixed::fromInt(1000));
+        const Fixed demand = baseDemand * demandFactor;
         const Fixed supply = baseDemand + market.supplySmoothed;
         const Fixed ratio = clampFixed(demand / supply, kRatioMin, kRatioMax);
         const Money target = resource.basePrice.scaled(fixedPow(ratio, resource.elasticity));

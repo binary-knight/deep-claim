@@ -10,7 +10,20 @@
     "game": {
       "description": "Dependencies for the SDL3/RmlUi game client",
       "dependencies": [
-        "sdl3",
+        {
+          "name": "sdl3",
+          "default-features": false,
+          "features": [
+            {
+              "name": "x11",
+              "platform": "linux"
+            },
+            {
+              "name": "wayland",
+              "platform": "linux"
+            }
+          ]
+        },
         "rmlui"
       ]
     }

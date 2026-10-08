@@ -1,0 +1,115 @@
+#include "game/session.h"
+
+#include "sim/commands.h"
+#include "sim/fixed.h"
+#include "sim/money.h"
+#include "sim/save.h"
+#include "sim/types.h"
+#include "sim/world_state.h"
+
+#include "game/format.h"
+#include "test_content.h"
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <cstdint>
+
+TEST_CASE("Money, day and tonnage formatting", "[session][format]") {
+    CHECK(game::formatMoney(sim::Money::fromUnits(5'000'000)) == "$5.00M");
+    CHECK(game::formatMoney(sim::Money::fromUnits(1'234'567)) == "$1.23M");
+    CHECK(game::formatMoney(sim::Money::fromUnits(-450'000)) == "-$450k");
+    CHECK(game::formatMoney(sim::Money::fromUnits(12'500)) == "$12.5k");
+    CHECK(game::formatMoney(sim::Money::fromCents(1'234)) == "$12.34");
+    CHECK(game::formatMoney(sim::Money::fromUnits(2'500'000'000LL)) == "$2.50B");
+    CHECK(game::formatDay(0) == "Y1 M1 D1");
+    CHECK(game::formatDay(sim::kDaysPerYear + 45) == "Y2 M2 D16");
+    CHECK(game::formatTonnes(1'234'567) == "1,234,567 t");
+    CHECK(game::formatRatio(sim::Fixed::fromRatio(85, 100)) == "x0.85");
+}
+
+TEST_CASE("A session advances with real time at the chosen speed", "[session]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    CHECK(session.speed() == game::Speed::Paused);
+    CHECK(session.advance(10.0) == 0);
+    CHECK(session.day() == 0);
+
+    session.setSpeed(game::Speed::Normal);
+    CHECK(session.advance(0.5) == 0);
+    CHECK(session.advance(0.5) == 1);
+    CHECK(session.day() == 1);
+
+    session.setSpeed(game::Speed::Fastest);
+    CHECK(session.advance(1.0) == 20);
+    CHECK(session.day() == 21);
+    // A long stall is capped rather than replayed in one frame.
+    CHECK(session.advance(100.0) == 40);
+
+    session.togglePause();
+    CHECK(session.speed() == game::Speed::Paused);
+    session.stepOneDay();
+    CHECK(session.day() == 62);
+}
+
+TEST_CASE("Player orders are bound to the player and show up in the log", "[session]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    // Day-0 listings are already in the log.
+    CHECK(std::any_of(session.log().begin(), session.log().end(), [](const game::LogEntry& e) {
+        return e.notice.kind == sim::NoticeKind::PlotListed;
+    }));
+    sim::PlotId listed;
+    for (const sim::PlotView& plot : session.view().plots) {
+        if (plot.listing == sim::PlotListing::Listed) {
+            listed = plot.id;
+            break;
+        }
+    }
+    REQUIRE(listed.valid());
+    // Wrong company id on purpose: the session must rebind it to the player.
+    session.submit(sim::CommissionSurvey{sim::CompanyId(1), listed});
+    session.stepOneDay();
+    CHECK(session.view().surveys.size() == 1);
+    CHECK(session.view().cash == content.balance.startingCapital - content.balance.surveyCost);
+    CHECK(std::any_of(session.log().begin(), session.log().end(), [](const game::LogEntry& e) {
+        return e.notice.kind == sim::NoticeKind::SurveyStarted && e.text.find("Survey") == 0;
+    }));
+}
+
+TEST_CASE("Rivals act on their own and the session can be saved and loaded", "[session]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 3, test::setup());
+    session.setSpeed(game::Speed::Fastest);
+    for (int i = 0; i < 40; ++i) {
+        session.advance(1.0);  // 800 days
+    }
+    const sim::CompanyView view = session.view();
+    const bool rivalActive = view.companies[1].plotsOwned > 0 || view.companies[1].bankrupt;
+    CHECK(rivalActive);
+
+    game::Session other(content, 9, test::setup());
+    REQUIRE(other.load(session.save()));
+    CHECK(other.day() == session.day());
+    CHECK(other.speed() == game::Speed::Paused);
+    CHECK(other.log().size() == 1);
+    CHECK(other.log()[0].text == "Game loaded");
+    other.stepOneDay();
+    session.stepOneDay();
+    CHECK(other.simulation().stateHash() == session.simulation().stateHash());
+}
+
+TEST_CASE("The session stops once the player is bankrupt", "[session]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    sim::WorldState broke = session.simulation().state();
+    broke.companies[0].cash = sim::Money::fromUnits(-50'000'000);
+    REQUIRE(session.load(sim::saveGame(broke, {}, sim::hashContent(content))));
+    session.setSpeed(game::Speed::Fastest);
+    for (int i = 0; i < 20; ++i) {
+        session.advance(1.0);
+    }
+    CHECK(session.gameOver());
+    const sim::Day stopped = session.day();
+    CHECK(session.advance(5.0) == 0);
+    CHECK(session.day() == stopped);
+}

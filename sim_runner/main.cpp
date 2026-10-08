@@ -57,9 +57,9 @@ bool parseUnsigned(std::string_view text, unsigned long long& out) {
 bool parseNumericOption(std::string_view arg, unsigned long long number, Options& out) {
     if (arg == "--seed") {
         out.seed = number;
-    } else if (arg == "--days" && number <= std::numeric_limits<sim::Day>::max()) {
+    } else if (arg == "--days" && number >= 1 && number <= sim::kMaxDay) {
         out.days = static_cast<sim::Day>(number);
-    } else if (arg == "--years" && number <= 10'000) {
+    } else if (arg == "--years" && number >= 1 && number <= 10'000) {
         out.days = static_cast<sim::Day>(number) * sim::kDaysPerYear;
     } else if (arg == "--ai" && number <= 16) {
         out.aiCompanies = static_cast<std::uint32_t>(number);
@@ -94,10 +94,16 @@ bool parseArgs(std::span<char*> args, Options& out) {
     return true;
 }
 
+// Adds without overflow: saturates at the int64 limit.
+std::int64_t saturatingAdd(std::int64_t a, std::int64_t b) {
+    constexpr std::int64_t kMax = std::numeric_limits<std::int64_t>::max();
+    return b > kMax - a ? kMax : a + b;
+}
+
 struct MarketStats {
     std::int64_t minCents = std::numeric_limits<std::int64_t>::max();
     std::int64_t maxCents = 0;
-    std::int64_t sumCents = 0;  // bounded: price <= 1e13 cents, days <= 3.6e6
+    std::int64_t sumCents = 0;  // saturating; prices reach 1e13 cents over 3.6e6 days
     std::uint32_t daysAtFloor = 0;
     std::uint32_t daysAtCap = 0;
 };
@@ -106,6 +112,9 @@ struct RunStats {
     std::vector<MarketStats> markets;
     std::map<std::string, std::uint32_t> rejections;
     std::vector<sim::Day> bankruptDay;
+    std::vector<sim::Day> firstMineDay;  // 1-based day; 0 = never built one
+    std::vector<std::int64_t> peakCashCents;
+    std::vector<std::int64_t> peakDebtCents;
     std::uint32_t validationFailures = 0;
     std::uint32_t minesBuilt = 0;
 };
@@ -145,9 +154,10 @@ void writeCsvRows(std::ostream& csv, const sim::Simulation& simulation) {
                           [](const auto& m) { return m.state == sim::MineState::Operating; });
         std::int64_t inventoryValue = 0;
         for (std::size_t r = 0; r < view.inventoryTonnes.size(); ++r) {
-            inventoryValue +=
+            inventoryValue = saturatingAdd(
+                inventoryValue,
                 sim::checkedMulDiv(view.markets[r].price.cents(), view.inventoryTonnes[r], 1)
-                    .value_or(0);
+                    .value_or(std::numeric_limits<std::int64_t>::max()));
         }
         csv << day << ',' << c << ',' << sim::toString(view.cash) << ','
             << sim::toString(view.outstandingPrincipal) << ',' << view.companies[c].plotsOwned
@@ -168,16 +178,29 @@ void recordDay(const sim::Content& content, const sim::Simulation& simulation,
             stats.bankruptDay[notice.company.index()] = report.day;
         } else if (notice.kind == sim::NoticeKind::MineStarted) {
             ++stats.minesBuilt;
+            if (stats.firstMineDay[notice.company.index()] == 0) {
+                stats.firstMineDay[notice.company.index()] = report.day + 1;
+            }
         }
     }
     const sim::WorldState& state = simulation.state();
+    for (std::size_t c = 0; c < state.companies.size(); ++c) {
+        stats.peakCashCents[c] = std::max(stats.peakCashCents[c], state.companies[c].cash.cents());
+        std::int64_t debt = 0;
+        for (const sim::Loan& loan : state.loans) {
+            if (loan.active != 0 && loan.company.index() == c) {
+                debt = saturatingAdd(debt, loan.remaining.cents());
+            }
+        }
+        stats.peakDebtCents[c] = std::max(stats.peakDebtCents[c], debt);
+    }
     for (std::size_t r = 0; r < stats.markets.size(); ++r) {
         const sim::Money price = state.markets[r].price;
         const sim::Money base = content.resources[r].basePrice;
         MarketStats& market = stats.markets[r];
         market.minCents = std::min(market.minCents, price.cents());
         market.maxCents = std::max(market.maxCents, price.cents());
-        market.sumCents += price.cents();
+        market.sumCents = saturatingAdd(market.sumCents, price.cents());
         market.daysAtFloor += price <= base.scaled(content.balance.priceFloorMult) ? 1U : 0U;
         market.daysAtCap += price >= base.scaled(content.balance.priceCapMult) ? 1U : 0U;
     }
@@ -193,6 +216,9 @@ RunStats run(const Options& options, const sim::Content& content, sim::Simulatio
     RunStats stats;
     stats.markets.resize(content.resources.size());
     stats.bankruptDay.assign(companyCount, 0);
+    stats.firstMineDay.assign(companyCount, 0);
+    stats.peakCashCents.assign(companyCount, 0);
+    stats.peakDebtCents.assign(companyCount, 0);
     for (sim::Day d = 0; d < options.days; ++d) {
         for (std::uint32_t c = 0; c < companyCount; ++c) {
             simulation.collectCommands(sim::CompanyId(c), ai);
@@ -214,11 +240,13 @@ std::vector<Check> buildChecks(const Options& options, const sim::Content& conte
                       std::format("{} yearly validation failures", stats.validationFailures)});
 
     const std::int64_t limit = content.balance.startingCapital.cents() * 1000;
-    const bool noRunaway = std::ranges::all_of(final.companies, [&](const sim::Company& company) {
-        return company.cash.cents() <= limit && company.cash.cents() >= -limit;
-    });
+    bool noRunaway = true;
+    for (std::size_t c = 0; c < final.companies.size(); ++c) {
+        noRunaway = noRunaway && stats.peakCashCents[c] <= limit &&
+                    final.companies[c].cash.cents() >= -limit;
+    }
     checks.push_back(
-        {"no_runaway_money", noRunaway, "every company within 1000x starting capital"});
+        {"no_runaway_money", noRunaway, "every company's peak cash within 1000x starting capital"});
 
     bool pricesOk = true;
     std::string detail;
@@ -226,8 +254,7 @@ std::vector<Check> buildChecks(const Options& options, const sim::Content& conte
         const MarketStats& market = stats.markets[r];
         const std::int64_t base = content.resources[r].basePrice.cents();
         const std::int64_t mean = market.sumCents / static_cast<std::int64_t>(options.days);
-        const bool pinned =
-            market.daysAtFloor * 4 > options.days || market.daysAtCap * 4 > options.days;
+        const bool pinned = (market.daysAtFloor + market.daysAtCap) * 4 > options.days;
         const bool sane = mean * 10 >= base * 3 && mean <= base * 3;
         pricesOk = pricesOk && !pinned && sane;
         detail += std::format("{}: mean {:.2f}x base, {} days at floor, {} at cap; ",
@@ -262,11 +289,15 @@ void printSummary(const Options& options, const sim::Content& content,
         std::cout << std::format(
             "    {{\"name\": {}, \"cash\": {}, \"debt\": {}, \"bankrupt\": {}, \"bankrupt_day\": "
             "{}, "
-            "\"plots\": {}, \"mines\": {}, \"techs\": {}}}{}\n",
+            "\"plots\": {}, \"mines\": {}, \"techs\": {}, \"first_mine_day\": {}, "
+            "\"peak_cash\": {}, \"peak_debt\": {}}}{}\n",
             jsonString(company.name), sim::toString(company.cash),
             sim::toString(view.outstandingPrincipal), company.bankrupt != 0 ? "true" : "false",
             stats.bankruptDay[c], view.companies[c].plotsOwned, view.mines.size(),
-            company.completedTechs.size(), c + 1 < final.companies.size() ? "," : "");
+            company.completedTechs.size(), stats.firstMineDay[c],
+            sim::toString(sim::Money::fromCents(stats.peakCashCents[c])),
+            sim::toString(sim::Money::fromCents(stats.peakDebtCents[c])),
+            c + 1 < final.companies.size() ? "," : "");
     }
     std::cout << "  ],\n  \"markets\": [\n";
     for (std::size_t r = 0; r < stats.markets.size(); ++r) {
@@ -321,17 +352,28 @@ int main(int argc, char** argv) {
     std::ofstream csv;
     if (!options.csvPath.empty()) {
         csv.open(options.csvPath);
-        if (!csv) {
+        if (!csv.is_open()) {
             std::cerr << "cannot write " << options.csvPath << '\n';
             return 1;
         }
         writeCsvHeader(csv, gameContent);
     }
 
-    const RunStats stats = run(options, gameContent, simulation, csv ? &csv : nullptr);
+    const RunStats stats = run(options, gameContent, simulation, csv.is_open() ? &csv : nullptr);
     const std::vector<Check> checks = buildChecks(options, gameContent, simulation.state(), stats);
     const bool allPassed =
         std::ranges::all_of(checks, [](const Check& check) { return check.passed; });
     printSummary(options, gameContent, simulation, stats, checks, allPassed);
+    if (csv.is_open()) {
+        csv.flush();
+        if (!csv) {
+            std::cerr << "error writing " << options.csvPath << '\n';
+            return 1;
+        }
+    }
+    std::cout.flush();
+    if (!std::cout) {
+        return 1;
+    }
     return options.sanity && !allPassed ? 3 : 0;
 }

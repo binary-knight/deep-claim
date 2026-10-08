@@ -183,11 +183,12 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
                     std::int64_t& lifetime = mine.extractedTonnes[truth.resource.index()];
                     lifetime = checkedAdd(lifetime, output);
                     mine.lastDayTonnes[truth.resource.index()] = output;
-                    mine.lastOutputTonnes[truth.resource.index()] = output;
                 }
                 // Locked ore counts as remaining: the mine is not depleted.
                 anythingLeft = anythingLeft || truth.tonnesRemaining > 0;
             }
+            // The whole vector is replaced so a resource that ran out reads zero.
+            mine.lastOutputTonnes = mine.lastDayTonnes;
             // Today's production day is paid for even if it emptied the mine.
             owner.cash =
                 debitCash(owner.cash, mineDailyOpex(content, state, owner, MineState::Operating));
