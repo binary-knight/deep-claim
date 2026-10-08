@@ -3,7 +3,8 @@
   "version-string": "0.1.0",
   "description": "Asteroid mining company simulation (working title: Deep Claim)",
   "dependencies": [
-    "catch2"
+    "catch2",
+    "nlohmann-json"
   ],
   "features": {
     "game": {

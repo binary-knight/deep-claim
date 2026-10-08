@@ -17,6 +17,7 @@ include(Warnings)
 include(Sanitizers)
 
 add_subdirectory(sim)
+add_subdirectory(content)
 
 if(DC_BUILD_RUNNER)
     add_subdirectory(sim_runner)

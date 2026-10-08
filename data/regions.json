@@ -1,0 +1,36 @@
+[
+  {
+    "id": "northern_shield",
+    "name": "Northern Shield",
+    "plot_count": 10,
+    "land_price": { "min": 800000, "max": 2500000 },
+    "plot_area_hectares": { "min": 200, "max": 1200 },
+    "deposits": {
+      "iron":   { "presence_prob": 0.8, "tonnes_median": 700000, "tonnes_spread": 2.5 },
+      "nickel": { "presence_prob": 0.3, "tonnes_median": 20000, "tonnes_spread": 3 }
+    }
+  },
+  {
+    "id": "copper_belt",
+    "name": "Copper Belt",
+    "plot_count": 10,
+    "land_price": { "min": 1200000, "max": 4000000 },
+    "plot_area_hectares": { "min": 150, "max": 900 },
+    "deposits": {
+      "copper": { "presence_prob": 0.75, "tonnes_median": 90000, "tonnes_spread": 2.5 },
+      "iron":   { "presence_prob": 0.4, "tonnes_median": 250000, "tonnes_spread": 2 },
+      "nickel": { "presence_prob": 0.15, "tonnes_median": 12000, "tonnes_spread": 3 }
+    }
+  },
+  {
+    "id": "salt_flats",
+    "name": "Salt Flats",
+    "plot_count": 10,
+    "land_price": { "min": 400000, "max": 1500000 },
+    "plot_area_hectares": { "min": 300, "max": 2000 },
+    "deposits": {
+      "lithium": { "presence_prob": 0.5, "tonnes_median": 6000, "tonnes_spread": 3 },
+      "copper":  { "presence_prob": 0.2, "tonnes_median": 30000, "tonnes_spread": 2.5 }
+    }
+  }
+]

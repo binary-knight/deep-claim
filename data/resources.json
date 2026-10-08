@@ -1,0 +1,42 @@
+[
+  {
+    "id": "iron",
+    "name": "Iron ore",
+    "base_price": 110,
+    "base_demand_tonnes_per_day": 4000,
+    "elasticity": 0.6,
+    "volatility": 0.02,
+    "storage_cost_per_tonne_month": 1.5,
+    "unlocked_by": null
+  },
+  {
+    "id": "copper",
+    "name": "Copper ore",
+    "base_price": 900,
+    "base_demand_tonnes_per_day": 600,
+    "elasticity": 0.8,
+    "volatility": 0.03,
+    "storage_cost_per_tonne_month": 2.5,
+    "unlocked_by": null
+  },
+  {
+    "id": "nickel",
+    "name": "Nickel ore",
+    "base_price": 2200,
+    "base_demand_tonnes_per_day": 150,
+    "elasticity": 0.9,
+    "volatility": 0.04,
+    "storage_cost_per_tonne_month": 4,
+    "unlocked_by": null
+  },
+  {
+    "id": "lithium",
+    "name": "Lithium concentrate",
+    "base_price": 14000,
+    "base_demand_tonnes_per_day": 40,
+    "elasticity": 1.1,
+    "volatility": 0.05,
+    "storage_cost_per_tonne_month": 8,
+    "unlocked_by": "lithium_processing"
+  }
+]

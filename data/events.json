@@ -1,0 +1,34 @@
+[
+  {
+    "id": "ev_battery_boom",
+    "name": "EV battery demand surge",
+    "daily_weight": 0.002,
+    "min_year": 2,
+    "duration_days": 180,
+    "effects": [ { "type": "demand_mult", "resource": "lithium", "value": 1.6 } ]
+  },
+  {
+    "id": "ev_construction_slump",
+    "name": "Construction slump",
+    "daily_weight": 0.0025,
+    "min_year": 1,
+    "duration_days": 240,
+    "effects": [ { "type": "demand_mult", "resource": "iron", "value": 0.7 } ]
+  },
+  {
+    "id": "ev_fuel_spike",
+    "name": "Fuel price spike",
+    "daily_weight": 0.003,
+    "min_year": 1,
+    "duration_days": 120,
+    "effects": [ { "type": "opex_mult", "value": 1.3 } ]
+  },
+  {
+    "id": "ev_land_rush",
+    "name": "Land rush",
+    "daily_weight": 0.0015,
+    "min_year": 3,
+    "duration_days": 360,
+    "effects": [ { "type": "land_price_mult", "value": 1.4 } ]
+  }
+]
