@@ -31,5 +31,5 @@ if(DC_BUILD_TESTS)
 endif()
 
 if(DC_BUILD_GAME)
-    message(FATAL_ERROR "The game target is added in Milestone 1 step 15.")
+    add_subdirectory(game)
 endif()

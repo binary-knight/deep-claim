@@ -1,0 +1,141 @@
+/* Deep Claim interface. RmlUi has no default stylesheet, so everything is
+   explicit. Units in dp scale with the window's pixel ratio. */
+
+body {
+    font-family: "DejaVu Sans";
+    font-size: 14dp;
+    color: #e6e6e6;
+    background-color: #14181f;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+div { display: block; }
+span { display: inline; }
+p { display: block; margin: 0 0 6dp 0; }
+h1 { display: block; font-size: 20dp; font-weight: bold; margin: 0 0 8dp 0; color: #ffffff; }
+h2 { display: block; font-size: 16dp; font-weight: bold; margin: 12dp 0 6dp 0; color: #cfd8e3; }
+
+.muted { color: #8a94a3; }
+.warning { color: #f3b65a; }
+.danger { color: #ff6b6b; }
+.good { color: #7fd48a; }
+.right { text-align: right; }
+.row { display: flex; flex-direction: row; align-items: center; }
+.grow { flex: 1; }
+.gap { margin-right: 10dp; }
+
+/* Header */
+#header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 8dp 14dp;
+    background-color: #1d232d;
+    border-bottom: 1dp #2d3542;
+}
+#header .stat { margin-right: 22dp; }
+#header .label { color: #8a94a3; font-size: 12dp; display: block; }
+#header .value { font-size: 17dp; font-weight: bold; display: block; }
+
+button {
+    display: inline-block;
+    padding: 5dp 12dp;
+    margin: 0 4dp 0 0;
+    background-color: #2f3b4d;
+    color: #ffffff;
+    border-radius: 3dp;
+    cursor: pointer;
+    font-size: 13dp;
+}
+button:hover { background-color: #3d4c63; }
+button:active { background-color: #243043; }
+button.primary { background-color: #2b6cb0; }
+button.primary:hover { background-color: #3b7dc4; }
+button.active { background-color: #d9a441; color: #1a1a1a; }
+button.small { padding: 3dp 8dp; font-size: 12dp; }
+button.disabled { background-color: #262c36; color: #6b7482; cursor: arrow; }
+
+input.text {
+    display: inline-block;
+    width: 120dp;
+    padding: 4dp 6dp;
+    margin-right: 6dp;
+    background-color: #0f1319;
+    color: #ffffff;
+    border: 1dp #3a4452;
+    border-radius: 3dp;
+    font-size: 13dp;
+    cursor: text;
+}
+input.text:focus { border-color: #5b8fd6; }
+
+/* Body: nav + content */
+#body { display: flex; flex-direction: row; flex: 1; min-height: 0; }
+#nav {
+    width: 150dp;
+    padding: 12dp 8dp;
+    background-color: #181d26;
+    border-right: 1dp #2d3542;
+}
+#nav button { display: block; width: 100%; margin: 0 0 6dp 0; text-align: left; }
+#content { flex: 1; padding: 14dp 18dp; overflow-y: auto; min-height: 0; }
+
+#status {
+    padding: 6dp 14dp;
+    background-color: #1d232d;
+    border-top: 1dp #2d3542;
+    color: #d9a441;
+    min-height: 18dp;
+}
+
+/* Tables */
+table { display: table; width: 100%; border-collapse: collapse; }
+tr { display: table-row; }
+th { display: table-cell; text-align: left; color: #8a94a3; font-size: 12dp; padding: 4dp 8dp; border-bottom: 1dp #2d3542; }
+td { display: table-cell; padding: 5dp 8dp; border-bottom: 1dp #222934; vertical-align: middle; }
+tr.selected td { background-color: #243043; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background-color: #1f2733; }
+
+.card {
+    display: block;
+    padding: 10dp 12dp;
+    margin: 0 0 10dp 0;
+    background-color: #1b212b;
+    border: 1dp #2d3542;
+    border-radius: 4dp;
+}
+.cards { display: flex; flex-direction: row; flex-wrap: wrap; }
+.cards .card { width: 300dp; margin-right: 10dp; }
+
+price-chart {
+    display: block;
+    width: 100%;
+    height: 220dp;
+    background-color: #0f1319;
+    border: 1dp #2d3542;
+    margin: 8dp 0;
+}
+
+#overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #000000bb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#overlay .panel {
+    padding: 30dp 40dp;
+    background-color: #1d232d;
+    border: 1dp #d9a441;
+    border-radius: 6dp;
+    text-align: center;
+}
+#overlay h1 { font-size: 26dp; }
+
+.log-row { display: flex; flex-direction: row; padding: 3dp 0; border-bottom: 1dp #222934; }
+.log-day { width: 110dp; color: #8a94a3; }

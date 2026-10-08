@@ -1,0 +1,196 @@
+<rml>
+<head>
+    <title>Deep Claim</title>
+    <link type="text/rcss" href="main.rcss"/>
+</head>
+<body data-model="game">
+    <div id="header">
+        <div class="stat"><span class="label">Company</span><span class="value">{{company}}</span></div>
+        <div class="stat"><span class="label">Date</span><span class="value">{{day}}</span></div>
+        <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
+        <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span></div>
+        <div class="grow"></div>
+        <div class="row">
+            <button data-class-active="speed == 0" data-event-click="set_speed(0)">Pause</button>
+            <button data-class-active="speed == 1" data-event-click="set_speed(1)">1x</button>
+            <button data-class-active="speed == 2" data-event-click="set_speed(2)">5x</button>
+            <button data-class-active="speed == 3" data-event-click="set_speed(3)">20x</button>
+            <button data-event-click="step">Step day</button>
+            <span class="gap"></span>
+            <button class="small" data-event-click="save">Save</button>
+            <button class="small" data-event-click="load">Load</button>
+            <button class="small" data-event-click="new_game">New game</button>
+        </div>
+    </div>
+
+    <div id="body">
+        <div id="nav">
+            <button data-class-active="tab == 0" data-event-click="set_tab(0)">Dashboard</button>
+            <button data-class-active="tab == 1" data-event-click="set_tab(1)">Plots</button>
+            <button data-class-active="tab == 2" data-event-click="set_tab(2)">Market</button>
+            <button data-class-active="tab == 3" data-event-click="set_tab(3)">Research</button>
+            <button data-class-active="tab == 4" data-event-click="set_tab(4)">Finance</button>
+            <button data-class-active="tab == 5" data-event-click="set_tab(5)">Log</button>
+            <p class="muted" style="margin-top: 20dp; font-size: 12dp;">Space pauses, 1 2 3 set speed, period steps one day, F8 opens the debugger.</p>
+        </div>
+
+        <div id="content">
+            <!-- Dashboard -->
+            <div data-if="tab == 0">
+                <h1>Dashboard</h1>
+                <div class="cards">
+                    <div class="card">
+                        <h2>Company</h2>
+                        <p>{{plots_summary}}</p>
+                        <p>{{mines_summary}}</p>
+                        <p>{{research_summary}}</p>
+                        <p class="muted">Mine opex today {{mine_opex}}, survey error {{survey_noise}}</p>
+                    </div>
+                    <div class="card">
+                        <h2>Finance</h2>
+                        <p>Cash {{cash}}</p>
+                        <p>Debt {{debt}}, can still borrow {{loan_capacity}}</p>
+                        <p>Storage {{storage_cost}}</p>
+                    </div>
+                    <div class="card">
+                        <h2>Competitors</h2>
+                        <p data-for="rival : rivals">{{rival}}</p>
+                    </div>
+                    <div class="card">
+                        <h2>World events</h2>
+                        <p data-for="event : events" class="warning">{{event}}</p>
+                        <p class="muted" data-if="events.size == 0">Nothing unusual.</p>
+                    </div>
+                </div>
+                <h2>Warehouse</h2>
+                <table>
+                    <tr><th>Resource</th><th>Stock</th><th>Price</th><th>Value</th><th></th></tr>
+                    <tr data-for="r : resources">
+                        <td>{{r.name}}</td><td>{{r.stock}}</td><td>{{r.price}}</td><td>{{r.stock_value}}</td>
+                        <td><button class="small" data-if="r.has_stock" data-event-click="sell_all(r.index)">Sell all</button></td>
+                    </tr>
+                </table>
+                <h2>Recent</h2>
+                <div data-for="entry : log" data-if="it_index < 8" class="log-row">
+                    <span class="log-day">{{entry.day}}</span><span data-class-warning="entry.warning">{{entry.text}}</span>
+                </div>
+            </div>
+
+            <!-- Plots -->
+            <div data-if="tab == 1">
+                <h1>Plots</h1>
+                <p class="muted">Surveys cost money and take time; they estimate what lies beneath. Bids are sealed; the highest at close wins and pays its bid.</p>
+                <table>
+                    <tr><th>Plot</th><th>Region</th><th>Area</th><th>Status</th><th>Ask</th><th>Auction</th><th>Survey</th><th>Mine</th></tr>
+                    <tr data-for="p : plots" class="clickable" data-class-selected="p.index == selected_plot" data-event-click="select_plot(p.index)">
+                        <td>{{p.name}}</td><td>{{p.region}}</td><td>{{p.area}}</td><td>{{p.status}}</td>
+                        <td>{{p.ask}}</td><td>{{p.auction}}</td><td>{{p.survey}}</td><td>{{p.mine}}</td>
+                    </tr>
+                </table>
+                <div class="card" style="margin-top: 12dp;">
+                    <h2>{{selected_plot_title}}</h2>
+                    <div data-for="p : plots" data-if="p.index == selected_plot">
+                        <p>Mine here would cost {{p.capex}} to build.</p>
+                        <div class="row">
+                            <button data-if="p.can_survey" data-event-click="survey(p.index)">Survey</button>
+                            <button class="disabled" data-if="!p.can_survey">Survey</button>
+                            <span data-if="p.listed" class="row">
+                                <input class="text" type="text" data-value="bid_input"/>
+                                <button class="primary" data-event-click="bid(p.index)">Place bid</button>
+                            </span>
+                            <button class="primary" data-if="p.can_build" data-event-click="build(p.index)">Build mine ({{p.capex}})</button>
+                            <button data-if="p.can_toggle_mine" data-event-click="toggle_mine(p.mine_index)">
+                                <span data-if="p.mine_operating">Mothball</span><span data-if="!p.mine_operating">Reopen</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Market -->
+            <div data-if="tab == 2">
+                <h1>Market</h1>
+                <table>
+                    <tr><th>Resource</th><th>Price</th><th>Base</th><th>vs base</th><th>Industry sales</th><th>Your stock</th><th>Value</th><th>Sell</th></tr>
+                    <tr data-for="r : resources" class="clickable" data-class-selected="r.index == selected_resource" data-event-click="select_resource(r.index)">
+                        <td>{{r.name}}</td><td>{{r.price}}</td><td>{{r.base}}</td><td>{{r.ratio}}</td><td>{{r.supply}}</td><td>{{r.stock}}</td><td>{{r.stock_value}}</td>
+                        <td>
+                            <span data-if="r.has_stock" class="row">
+                                <input class="text" type="text" data-value="sell_input" style="width: 80dp;"/>
+                                <button class="small" data-event-click="sell(r.index)">Sell</button>
+                                <button class="small" data-event-click="sell_all(r.index)">All</button>
+                            </span>
+                        </td>
+                    </tr>
+                </table>
+                <h2>{{selected_resource_title}}</h2>
+                <price-chart data-attr-resource="selected_resource"/>
+                <p class="muted">Columns are daily prices; the light line is the base price. Selling into the market lowers tomorrow's price; demand drifts and world events move it too.</p>
+            </div>
+
+            <!-- Research -->
+            <div data-if="tab == 3">
+                <h1>Research</h1>
+                <p>{{research_summary}}</p>
+                <table>
+                    <tr><th>Technology</th><th>Cost</th><th>Time</th><th>Effects</th><th>Status</th><th></th></tr>
+                    <tr data-for="t : techs">
+                        <td>{{t.name}}</td><td>{{t.cost}}</td><td>{{t.duration}}</td><td>{{t.effects}}</td><td>{{t.status}}</td>
+                        <td><button class="small primary" data-if="t.can_start" data-event-click="research(t.index)">Start</button></td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Finance -->
+            <div data-if="tab == 4">
+                <h1>Finance</h1>
+                <div class="cards">
+                    <div class="card">
+                        <h2>Borrow</h2>
+                        <p>Capacity {{loan_capacity}}. Repaid in equal monthly instalments plus interest.</p>
+                        <div class="row">
+                            <input class="text" type="text" data-value="loan_input"/>
+                            <button class="primary" data-event-click="take_loan">Take loan</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h2>Costs</h2>
+                        <p>Storage {{storage_cost}}</p>
+                        <p>Each operating mine {{mine_opex}}</p>
+                    </div>
+                </div>
+                <h2>Loans</h2>
+                <table>
+                    <tr><th>Remaining</th><th>Instalment</th><th>Term</th><th>Repay early</th></tr>
+                    <tr data-for="l : loans" data-if="l.active">
+                        <td>{{l.remaining}}</td><td>{{l.instalment}}</td><td>{{l.months}}</td>
+                        <td class="row">
+                            <input class="text" type="text" data-value="repay_input"/>
+                            <button class="small" data-event-click="repay(l.index)">Repay</button>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Log -->
+            <div data-if="tab == 5">
+                <h1>Log</h1>
+                <div data-for="entry : log" class="log-row">
+                    <span class="log-day">{{entry.day}}</span><span data-class-warning="entry.warning">{{entry.text}}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="status">{{status_line}}</div>
+
+    <div id="overlay" data-if="game_over">
+        <div class="panel">
+            <h1>Bankrupt</h1>
+            <p>{{company}} could not cover its debts for too long. The courts have closed the mines.</p>
+            <button class="primary" data-event-click="new_game">Start a new company</button>
+            <button data-event-click="load">Load last save</button>
+        </div>
+    </div>
+</body>
+</rml>

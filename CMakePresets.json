@@ -1,56 +1,123 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
       "hidden": true,
       "binaryDir": "${sourceDir}/build/${presetName}",
       "toolchainFile": "${sourceDir}/external/vcpkg/scripts/buildsystems/vcpkg.cmake",
-      "cacheVariables": { "DC_WARNINGS_AS_ERRORS": "ON" }
+      "cacheVariables": {
+        "DC_WARNINGS_AS_ERRORS": "ON"
+      }
     },
     {
       "name": "debug",
       "displayName": "Debug",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     },
     {
       "name": "release",
       "displayName": "Release",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     },
     {
       "name": "asan",
       "displayName": "Debug + ASan/UBSan (sim stack only)",
       "inherits": "debug",
-      "cacheVariables": { "DC_SANITIZE": "ON", "DC_BUILD_GAME": "OFF" }
+      "cacheVariables": {
+        "DC_SANITIZE": "ON",
+        "DC_BUILD_GAME": "OFF"
+      }
+    },
+    {
+      "name": "debug-game",
+      "displayName": "Debug + game client (SDL3/RmlUi via vcpkg)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "DC_BUILD_GAME": "ON",
+        "VCPKG_MANIFEST_FEATURES": "game"
+      }
+    },
+    {
+      "name": "release-game",
+      "displayName": "Release + game client",
+      "inherits": "release",
+      "cacheVariables": {
+        "DC_BUILD_GAME": "ON",
+        "VCPKG_MANIFEST_FEATURES": "game"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "debug", "configurePreset": "debug", "configuration": "Debug" },
-    { "name": "release", "configurePreset": "release", "configuration": "Release" },
-    { "name": "asan", "configurePreset": "asan", "configuration": "Debug" }
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "configuration": "Debug"
+    },
+    {
+      "name": "debug-game",
+      "configurePreset": "debug-game",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release-game",
+      "configurePreset": "release-game",
+      "configuration": "Release"
+    }
   ],
   "testPresets": [
     {
       "name": "debug",
       "configurePreset": "debug",
       "configuration": "Debug",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "release",
       "configurePreset": "release",
       "configuration": "Release",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "asan",
       "configurePreset": "asan",
       "configuration": "Debug",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-game",
+      "configurePreset": "debug-game",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

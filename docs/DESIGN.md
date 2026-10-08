@@ -432,3 +432,45 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   elasticities softened (0.5/0.7/0.8/1.0), and world demand now compounds
   by `demand_growth_per_year` (4%), evaluated continuously, so expansion is
   absorbed over a twenty-year game (about 2.2x by the end).
+
+## Client (steps 15 to 18)
+
+- Three layers above the sim: `platform/` (Services interface, NullServices
+  now, Steamworks later), `game/session/` (Session: time control, player
+  command binding, AI rivals, notice log, save/load, text formatting; no SDL
+  or RmlUi, unit tested), and `game/` (SDL3 window and OpenGL context through
+  RmlUi's reference backend, one RmlUi context, App + data model).
+- RmlUi 6.3 and SDL3 come from vcpkg behind the manifest feature `game`,
+  enabled by the `debug-game` and `release-game` presets. vcpkg prunes
+  packages outside the active feature set, so the client has its own build
+  directory. SDL3 is pinned to the x11 and wayland features: the default
+  IBus feature pulls in dbus, systemd and libxcrypt (autotools) for nothing
+  this game needs.
+- The reference SDL + GL3 backend is vendored under `game/backends/` (MIT)
+  because RmlUi ships it as sample code, not as part of the library. One
+  edit: the SDL_image texture loader was removed; the interface uses no
+  bitmap images. The GL3 renderer carries its own GLAD loader, so no system
+  OpenGL headers are needed to compile.
+- The interface is one RML document with tabs (dashboard, plots, market,
+  research, finance, log) driven by a single data model. `UiModel` holds
+  string-formatted copies of the CompanyView; `refreshModel` rebuilds it
+  whenever a day ticks or an order is placed, and the handle marks every
+  variable dirty. The RML never sees sim types.
+- Orders from the interface become sim commands through the session, which
+  binds them to the player; results arrive the next day as notices in the
+  log and a transient status line confirms the order was queued. The sim's
+  own validation is the only validation; the interface merely greys out
+  buttons it knows cannot succeed.
+- `<price-chart>` is a custom RmlUi element drawing the last 90 daily prices
+  as columns with the base price as a reference line, from a provider the
+  app installs over `Simulation::priceHistory`.
+- Keyboard: space pauses, 1/2/3 set speed, period steps one day, F8 opens
+  the RmlUi debugger. Time advances by whole days from real time with a
+  catch-up cap of two seconds' worth, so a stalled frame never fast-forwards.
+- Saves go to SDL's per-user preference directory (`autosave.dcsave`); the
+  log is not part of the save and restarts with a "Game loaded" entry.
+- Fonts: DejaVu Sans (Bitstream Vera licence) bundled under
+  `game/assets/fonts/`.
+- This sandbox has no X11 or OpenGL headers, so the client is compile-checked
+  locally with SDL3's dummy video driver and run on the developer's machine;
+  CI builds it on Ubuntu (with the X11/Wayland dev packages) and Windows.
