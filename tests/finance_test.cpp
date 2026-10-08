@@ -87,19 +87,61 @@ TEST_CASE("Loan commands are validated against the capacity", "[finance]") {
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 1, test::setup());
     simulation.submit(sim::TakeLoan{kPlayer, sim::Money::zero()});
+    simulation.submit(sim::TakeLoan{kPlayer, sim::Money::fromUnits(1)});  // below the minimum
     simulation.submit(
         sim::TakeLoan{kPlayer, content.balance.loanMaxPrincipal + sim::Money::fromCents(1)});
     simulation.submit(sim::TakeLoan{kPlayer, content.balance.loanMaxPrincipal});
-    simulation.submit(sim::TakeLoan{kPlayer, sim::Money::fromUnits(1)});  // over capacity now
+    simulation.submit(sim::TakeLoan{kPlayer, content.balance.loanMinPrincipal});  // over capacity
     const sim::TickReport& report = simulation.tick();
     using R = sim::RejectReason;
     CHECK(hasNotice(report.notices, sim::NoticeKind::CommandRejected, R::InvalidAmount));
+    CHECK(hasNotice(report.notices, sim::NoticeKind::CommandRejected, R::LoanTooSmall));
     CHECK(std::count_if(report.notices.begin(), report.notices.end(), [](const sim::Notice& n) {
               return n.kind == sim::NoticeKind::CommandRejected &&
                      n.reason == sim::RejectReason::LoanLimitExceeded;
           }) == 2);
     CHECK(simulation.state().loans.size() == 1);
     CHECK(simulation.view(kPlayer).loanCapacity == sim::Money::zero());
+}
+
+TEST_CASE("The number of active loans is capped", "[finance]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    for (std::uint32_t i = 0; i <= content.balance.maxActiveLoans; ++i) {
+        simulation.submit(sim::TakeLoan{kPlayer, content.balance.loanMinPrincipal});
+    }
+    const sim::TickReport& report = simulation.tick();
+    CHECK(hasNotice(report.notices, sim::NoticeKind::CommandRejected,
+                    sim::RejectReason::TooManyLoans));
+    CHECK(simulation.state().loans.size() == content.balance.maxActiveLoans);
+}
+
+TEST_CASE("Bankrupt bidders never win and compulsory charges respect the cash bound",
+          "[finance][market]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    sim::PlotId plot;
+    for (std::uint32_t i = 0; i < simulation.state().plots.size(); ++i) {
+        if (simulation.state().plots[i].listing == sim::PlotListing::Listed) {
+            plot = sim::PlotId(i);
+            break;
+        }
+    }
+    simulation.submit(
+        sim::BidOnPlot{kRival, plot, simulation.state().plots[plot.index()].askPrice});
+    simulation.tick();
+    // Bankrupt the rival before the auction closes: deep in the red with a loan.
+    simulation.submit(sim::TakeLoan{kRival, content.balance.loanMaxPrincipal});
+    simulation.tick();
+    setCash(simulation, content, kRival, sim::Money::fromCents(-sim::kMaxCashCents + 1));
+    while (simulation.state().plots[plot.index()].listing == sim::PlotListing::Listed &&
+           simulation.state().day < 400) {
+        simulation.tick();
+        CHECK(simulation.state().companies[1].cash.cents() >= -sim::kMaxCashCents);
+    }
+    CHECK(simulation.state().companies[1].bankrupt == 1);
+    CHECK(simulation.state().plots[plot.index()].owner != kRival);
+    CHECK(sim::validateWorld(content, simulation.state()));
 }
 
 TEST_CASE("Early repayment reduces principal and can close the loan", "[finance]") {
@@ -244,5 +286,15 @@ TEST_CASE("Loan state survives save and load and is validated", "[finance][save]
     broken = simulation.state();
     broken.companies[0].monthsInsolvent = 99;
     CHECK_FALSE(simulation.load(saveOf(broken)));
+    broken = simulation.state();
+    broken.loans[0].principalPerMonth = sim::Money::fromCents(1);  // not the canonical instalment
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+    broken = simulation.state();
+    broken.loans[0].monthsRemaining = 0;  // active loan with no schedule left
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+    broken = simulation.state();
+    broken.loans[0].principal = broken.loans[0].remaining =
+        sim::Money::fromCents(9'000'000'000'000'000'000LL);
+    CHECK_FALSE(simulation.load(saveOf(broken)));  // forged balance must not overflow validation
     CHECK(simulation.load(saveOf(simulation.state())));
 }

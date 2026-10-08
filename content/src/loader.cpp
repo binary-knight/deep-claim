@@ -757,6 +757,8 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "loan_annual_rate",
                     "loan_term_months",
                     "loan_max_principal",
+                    "loan_min_principal",
+                    "max_active_loans",
                     "survey_cost",
                     "survey_duration_days",
                     "survey_base_noise",
@@ -784,6 +786,13 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     balance.loanTermMonths =
         static_cast<std::uint32_t>(valueOr(node.integer("loan_term_months", true, 1, 1200), 1LL));
     balance.loanMaxPrincipal = valueOr(node.money("loan_max_principal", true, zero), zero);
+    balance.loanMinPrincipal =
+        valueOr(node.money("loan_min_principal", true, sim::Money::fromCents(1)), zero);
+    if (balance.loanMinPrincipal > balance.loanMaxPrincipal) {
+        node.report("loan_min_principal", "must not exceed loan_max_principal");
+    }
+    balance.maxActiveLoans =
+        static_cast<std::uint32_t>(valueOr(node.integer("max_active_loans", true, 1, 100), 1LL));
     balance.surveyCost = valueOr(node.money("survey_cost", true, zero), zero);
     balance.surveyDurationDays = static_cast<sim::Day>(
         valueOr(node.integer("survey_duration_days", true, 1, kMaxDays), 1LL));

@@ -25,5 +25,7 @@ constexpr Day kMaxDeadline = kMaxDay + kDaysPerYear * 200;
 constexpr std::int64_t kMaxDepositTonnes = 1'000'000'000'000'000LL;
 constexpr std::int64_t kMaxStockTonnes = 1'000'000'000'000'000'000LL;
 constexpr std::int64_t kMaxCashCents = 100'000'000'000'000'000LL;
+// Daily market sales above this no longer move the supply average.
+constexpr std::int64_t kMaxSupplyPerDay = 1'000'000'000'000LL;
 
 }  // namespace sim

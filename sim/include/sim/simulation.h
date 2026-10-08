@@ -44,6 +44,11 @@ public:
     // Precondition: company is a valid index; violating it aborts.
     [[nodiscard]] CompanyView view(CompanyId company) const;
 
+    // Public market data for charts: one price per day since the start.
+    [[nodiscard]] const std::vector<Money>& priceHistory(ResourceId resource) const {
+        return state_.markets[resource.index()].priceHistory;
+    }
+
     [[nodiscard]] const Content& content() const { return *content_; }
     [[nodiscard]] const WorldState& state() const { return state_; }
     [[nodiscard]] std::uint64_t stateHash() const;

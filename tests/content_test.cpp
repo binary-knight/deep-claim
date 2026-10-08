@@ -42,7 +42,7 @@ content::Sources goodSources() {
     ])";
     s.balance = R"({
       "starting_capital": 5000000, "loan_annual_rate": 0.08, "loan_term_months": 60,
-      "loan_max_principal": 10000000, "survey_cost": 150000, "survey_duration_days": 45,
+      "loan_max_principal": 10000000, "loan_min_principal": 250000, "max_active_loans": 4, "survey_cost": 150000, "survey_duration_days": 45,
       "survey_base_noise": 0.5, "mine_capex_per_hectare": 4000, "mine_build_days": 180,
       "mine_opex_per_day": 12000, "mine_mothball_opex_mult": 0.2,
       "auction_window_days": 30, "plots_listed_at_start": 3, "plots_listed_per_month": 1,

@@ -291,7 +291,17 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   they have not seen. Proceeds are checked against the cash bound; a sale
   that would overflow is rejected as SaleTooLarge.
 - Elasticity is bounded to [0.01, 5] in the loader so the power law stays
-  inside fixedExp's domain.
+  inside fixedExp's domain. Demand, supply and their ratio are kept in
+  fractional tonnes (Fixed) so a five-tonne-a-day lithium market reaches its
+  exact equilibrium instead of truncating to four.
+- Known limitation: a stockpile sells at the quoted price however large it
+  is; the impact arrives over the following days. Batching sales therefore
+  beats selling daily. Storage costs are set at 5% of base price per month
+  to make hoarding expensive; a per-day sale cap or intra-day price impact
+  is the next lever if runner sweeps show batching dominates.
+- Views carry only the last 90 days of prices (`recentPrices`); the UI reads
+  the full history through `Simulation::priceHistory` for charts, so AI
+  controllers do not copy years of history every day.
 - With the shipped numbers one iron mine (400 t/day into a base demand of
   800) pushes the price to about 0.78x base; two mines to 0.66x; three to
   0.57x.
@@ -300,9 +310,13 @@ and clang-tidy are enforced in CI. Warnings are errors by default
 
 - Loans: equal monthly principal instalments (ceil(principal / term)) plus
   interest on the remaining balance at `loan_annual_rate` / 12. A company
-  may borrow up to `loan_max_principal` minus what it still owes. Early
-  repayment (RepayLoan) pays down principal and must come from available
-  cash.
+  may borrow up to `loan_max_principal` minus what it still owes, at least
+  `loan_min_principal` per loan (so tiny loans cannot dodge interest through
+  rounding) and at most `max_active_loans` at once. Early repayment
+  (RepayLoan) pays down principal and must come from available cash.
+- Compulsory charges (opex, storage, instalments) go through `debitCash`,
+  which saturates at -1e17 cents, so the sim can never produce a state its
+  own loader rejects. Borrowing is rejected when it would exceed +1e17.
 - Month end (every 30th day, pipeline step 6), for each solvent company in
   id order: storage charge (`storage_cost_per_tonne_month` x inventory x
   storage techs), then loan instalments, then the insolvency check. Charges

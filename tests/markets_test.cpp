@@ -70,7 +70,29 @@ TEST_CASE("Without sales or volatility the price stays at base", "[markets]") {
     sim::Simulation simulation(content, 1, test::setup());
     simulation.tick(100);
     CHECK(simulation.state().markets[0].price == content.resources[0].basePrice);
-    CHECK(simulation.state().markets[0].priceHistory.size() == 101);
+    CHECK(simulation.priceHistory(kIron).size() == 101);
+    CHECK(simulation.view(kPlayer).markets[0].recentPrices.size() == sim::kRecentPriceDays);
+}
+
+TEST_CASE("Small markets settle at the exact power-law equilibrium", "[markets]") {
+    const sim::Content content = calmContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::ResourceId lithium(2);
+    // A stockpile large enough for the run but cheap enough to store: 10M tonnes
+    // would cost 80M a month and bankrupt the seller mid-test.
+    grantOre(simulation, content, kPlayer, lithium, 5'000);
+    for (int day = 0; day < 600; ++day) {
+        simulation.submit(sim::SellOre{kPlayer, lithium, 5});
+        simulation.tick();
+    }
+    // supply = 8 + 5 = 13, ratio 8/13, elasticity 1.1 => 0.5862 of base.
+    const std::int64_t base = content.resources[2].basePrice.cents();
+    const std::int64_t price = simulation.state().markets[2].price.cents();
+    CHECK(price > base * 580 / 1000);
+    CHECK(price < base * 592 / 1000);
+    CHECK(simulation.state().markets[2].supplySmoothed.raw() > 4'990'000);
+    CHECK(simulation.state().companies[0].inventoryTonnes[2] == 5'000 - 600 * 5);
+    CHECK(simulation.state().companies[0].bankrupt == 0);
 }
 
 TEST_CASE("Selling ore pays today's price and depresses tomorrow's", "[markets]") {
@@ -173,6 +195,9 @@ TEST_CASE("Market state survives save and load and is validated", "[markets][sav
     CHECK_FALSE(simulation.load(saveOf(broken)));
     broken = simulation.state();
     broken.markets.pop_back();
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+    broken = simulation.state();
+    broken.markets[0].priceHistory.back() += sim::Money::fromCents(1);  // disagrees with price
     CHECK_FALSE(simulation.load(saveOf(broken)));
     CHECK(simulation.load(saveOf(simulation.state())));
 }

@@ -3,6 +3,8 @@
   "loan_annual_rate": 0.08,
   "loan_term_months": 60,
   "loan_max_principal": 10000000,
+  "loan_min_principal": 250000,
+  "max_active_loans": 4,
   "survey_cost": 150000,
   "survey_duration_days": 20,
   "survey_base_noise": 0.5,

@@ -10,6 +10,7 @@
 #include "sim/types.h"
 #include "sim/world_state.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 
@@ -20,6 +21,10 @@ namespace {
 Money ceilDiv(Money amount, std::int64_t divisor) {
     const std::int64_t cents = amount.cents();
     return Money::fromCents((cents + divisor - 1) / divisor);
+}
+
+std::int64_t saturatingAddCents(std::int64_t a, std::int64_t b) {
+    return b > kMaxCashCents - a ? kMaxCashCents : a + b;
 }
 
 Notice loanNotice(NoticeKind kind, CompanyId company, LoanId loan, Money amount = Money::zero()) {
@@ -34,7 +39,8 @@ void chargeStorage(const Content& content, WorldState& state, CompanyId companyI
     if (cost == Money::zero()) {
         return;
     }
-    state.companies[companyId.index()].cash -= cost;
+    Company& company = state.companies[companyId.index()];
+    company.cash = debitCash(company.cash, cost);
     report.notices.push_back(makeNotice(NoticeKind::StorageCharged, companyId, PlotId(), cost));
 }
 
@@ -47,13 +53,13 @@ void payLoans(const Content& content, WorldState& state, CompanyId companyId, Ti
             continue;
         }
         const Money interest = loan.remaining.scaled(monthlyRate);
-        const Money principalPart =
-            loan.principalPerMonth < loan.remaining ? loan.principalPerMonth : loan.remaining;
+        const Money principalPart = std::min(loan.principalPerMonth, loan.remaining);
         loan.remaining -= principalPart;
         if (loan.monthsRemaining > 0) {
             --loan.monthsRemaining;
         }
-        state.companies[companyId.index()].cash -= interest + principalPart;
+        Company& company = state.companies[companyId.index()];
+        company.cash = debitCash(company.cash, interest + principalPart);
         report.notices.push_back(
             loanNotice(NoticeKind::LoanPayment, companyId, LoanId(i), interest + principalPart));
         if (loan.remaining == Money::zero()) {
@@ -75,6 +81,7 @@ void declareBankrupt(WorldState& state, CompanyId companyId, TickReport& report)
     for (Loan& loan : state.loans) {
         if (loan.company == companyId) {
             loan.active = 0;  // written off; the company is finished anyway
+            loan.monthsRemaining = 0;
         }
     }
     report.notices.push_back(makeNotice(NoticeKind::Bankrupt, companyId, PlotId()));
@@ -100,6 +107,13 @@ void checkSolvency(const Content& content, WorldState& state, CompanyId companyI
 
 }  // namespace
 
+Money debitCash(Money cash, Money charge) {
+    // Both operands are inside the persisted bound, so the subtraction cannot
+    // overflow; only the result needs clamping.
+    const Money result = cash - charge;
+    return result < Money::fromCents(-kMaxCashCents) ? Money::fromCents(-kMaxCashCents) : result;
+}
+
 Money outstandingPrincipal(const WorldState& state, CompanyId company) {
     Money total = Money::zero();
     for (const Loan& loan : state.loans) {
@@ -110,22 +124,36 @@ Money outstandingPrincipal(const WorldState& state, CompanyId company) {
     return total;
 }
 
+std::uint32_t activeLoanCount(const WorldState& state, CompanyId company) {
+    std::uint32_t count = 0;
+    for (const Loan& loan : state.loans) {
+        if (loan.active != 0 && loan.company == company) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 Money monthlyStorageCost(const Content& content, const WorldState& state, CompanyId companyId) {
     const Company& company = state.companies[companyId.index()];
     const Fixed mult = techMultiplier(content, company, TechEffectType::StorageCostMult);
-    Money total = Money::zero();
+    std::int64_t totalCents = 0;
     for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
         const std::int64_t tonnes = company.inventoryTonnes[r];
         if (tonnes == 0) {
             continue;
         }
-        // Checked: tonnes <= 1e18 and cost <= 1e13 cents could overflow.
-        const std::int64_t cents =
+        // Every step is checked and saturates at the cash bound: tonnes reach
+        // 1e18 and per-tonne costs 1e13 cents in valid content.
+        const std::int64_t base =
             checkedMulDiv(content.resources[r].storageCostPerTonneMonth.cents(), tonnes, 1)
                 .value_or(kMaxCashCents);
-        total += Money::fromCents(cents < kMaxCashCents ? cents : kMaxCashCents).scaled(mult);
+        const std::int64_t scaled =
+            checkedMulDiv(std::min(base, kMaxCashCents), mult.raw(), Fixed::kScale)
+                .value_or(kMaxCashCents);
+        totalCents = saturatingAddCents(totalCents, std::min(scaled, kMaxCashCents));
     }
-    return total;
+    return Money::fromCents(totalCents);
 }
 
 std::optional<RejectReason> validateTakeLoan(const Content& content, const WorldState& state,
@@ -140,10 +168,19 @@ std::optional<RejectReason> validateTakeLoan(const Content& content, const World
     if (command.principal <= Money::zero()) {
         return RejectReason::InvalidAmount;
     }
+    if (command.principal < content.balance.loanMinPrincipal) {
+        return RejectReason::LoanTooSmall;
+    }
     const Money capacity =
         content.balance.loanMaxPrincipal - outstandingPrincipal(state, command.company);
     if (command.principal > capacity) {
         return RejectReason::LoanLimitExceeded;
+    }
+    if (activeLoanCount(state, command.company) >= content.balance.maxActiveLoans) {
+        return RejectReason::TooManyLoans;
+    }
+    if (command.principal.cents() > kMaxCashCents - company.cash.cents()) {
+        return RejectReason::CashLimitExceeded;
     }
     return std::nullopt;
 }

@@ -63,7 +63,14 @@ bool validateCompany(const Content& content, const Company& company) {
     if (company.cash.cents() > kMaxCashCents || company.cash.cents() < -kMaxCashCents) {
         return false;
     }
-    if (company.monthsInsolvent > content.balance.bankruptcyGraceMonths + 1) {
+    // Solvent companies are within the grace period; bankrupt ones stopped
+    // exactly when they exceeded it, with the negative cash that caused it.
+    const std::uint32_t grace = content.balance.bankruptcyGraceMonths;
+    if (company.bankrupt == 0 && company.monthsInsolvent > grace) {
+        return false;
+    }
+    if (company.bankrupt != 0 &&
+        (company.monthsInsolvent != grace + 1 || company.cash >= Money::zero())) {
         return false;
     }
     const bool stocksOk = std::ranges::all_of(company.inventoryTonnes, [](std::int64_t tonnes) {
@@ -342,40 +349,63 @@ bool validateMarkets(const Content& content, const WorldState& state) {
             market.demandMult < content.balance.demandMultMin ||
             market.demandMult > content.balance.demandMultMax ||
             market.supplySmoothed < Fixed::zero() ||
-            market.priceHistory.size() != static_cast<std::size_t>(state.day) + 1) {
+            market.supplySmoothed > Fixed::fromInt(kMaxSupplyPerDay) ||
+            market.priceHistory.size() != static_cast<std::size_t>(state.day) + 1 ||
+            market.priceHistory.front() != resource.basePrice ||
+            market.priceHistory.back() != market.price) {
             return false;
         }
         if (!std::ranges::all_of(market.priceHistory,
-                                 [](Money price) { return price >= Money::zero(); })) {
+                                 [&](Money price) { return price >= floor && price <= cap; })) {
             return false;
         }
     }
     return true;
 }
 
-bool validateLoans(const Content& content, const WorldState& state) {
-    std::vector<std::int64_t> outstanding(state.companies.size(), 0);
-    for (const Loan& loan : state.loans) {
-        if (!loan.company.valid() || loan.company.index() >= state.companies.size() ||
-            loan.active > 1 || loan.principal <= Money::zero() || loan.remaining < Money::zero() ||
-            loan.remaining > loan.principal || loan.principalPerMonth <= Money::zero() ||
-            loan.monthsRemaining > content.balance.loanTermMonths || loan.takenDay > state.day) {
+bool validateLoan(const Content& content, const WorldState& state, const Loan& loan,
+                  std::vector<std::int64_t>& outstanding) {
+    const BalanceParams& balance = content.balance;
+    if (!loan.company.valid() || loan.company.index() >= state.companies.size() ||
+        loan.active > 1 || loan.principal <= Money::zero() ||
+        loan.principal > balance.loanMaxPrincipal || loan.remaining < Money::zero() ||
+        loan.remaining > loan.principal || loan.takenDay > state.day ||
+        loan.monthsRemaining > balance.loanTermMonths) {
+        return false;
+    }
+    // Canonical instalment: ceil(principal / term).
+    const std::int64_t term = balance.loanTermMonths;
+    const Money instalment = Money::fromCents((loan.principal.cents() + term - 1) / term);
+    if (loan.principalPerMonth != instalment) {
+        return false;
+    }
+    const Company& company = state.companies[loan.company.index()];
+    if (loan.active != 0) {
+        if (company.bankrupt != 0 || loan.remaining == Money::zero() || loan.monthsRemaining == 0) {
             return false;
         }
-        const Company& company = state.companies[loan.company.index()];
-        if (loan.active != 0) {
-            if (company.bankrupt != 0 || loan.remaining == Money::zero()) {
-                return false;
-            }
-            outstanding[loan.company.index()] += loan.remaining.cents();
-            if (outstanding[loan.company.index()] > content.balance.loanMaxPrincipal.cents()) {
-                return false;
-            }
-        } else if (loan.remaining != Money::zero() && company.bankrupt == 0) {
-            return false;  // an inactive loan with a balance is only a bankruptcy write-off
+        // The schedule must be able to clear the balance in the time left.
+        if (loan.remaining.cents() >
+            mulDiv(instalment.cents(), static_cast<std::int64_t>(loan.monthsRemaining), 1)) {
+            return false;
         }
+        // Check capacity before adding so a forged balance cannot overflow.
+        std::int64_t& total = outstanding[loan.company.index()];
+        if (loan.remaining.cents() > balance.loanMaxPrincipal.cents() - total) {
+            return false;
+        }
+        total += loan.remaining.cents();
+        return true;
     }
-    return true;
+    // Inactive: paid off (zero balance) or written off at bankruptcy.
+    return loan.monthsRemaining == 0 && (loan.remaining == Money::zero() || company.bankrupt != 0);
+}
+
+bool validateLoans(const Content& content, const WorldState& state) {
+    std::vector<std::int64_t> outstanding(state.companies.size(), 0);
+    return std::ranges::all_of(state.loans, [&](const Loan& loan) {
+        return validateLoan(content, state, loan, outstanding);
+    });
 }
 
 bool validateWorldImpl(const Content& content, const WorldState& state) {

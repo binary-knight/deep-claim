@@ -8,14 +8,22 @@
 #include "sim/money.h"
 #include "sim/world_state.h"
 
+#include <cstdint>
 #include <optional>
 
 namespace sim {
 
-// Principal a company still owes across its active loans.
-[[nodiscard]] Money outstandingPrincipal(const WorldState& state, CompanyId company);
+// Subtracts a charge from a balance, saturating at -kMaxCashCents so that
+// compulsory costs can never push a company outside the persisted bound.
+[[nodiscard]] Money debitCash(Money cash, Money charge);
 
-// What a month-end would charge for storing the company's current inventory.
+// Principal a company still owes across its active loans, and how many
+// loans it has running.
+[[nodiscard]] Money outstandingPrincipal(const WorldState& state, CompanyId company);
+[[nodiscard]] std::uint32_t activeLoanCount(const WorldState& state, CompanyId company);
+
+// What a month-end would charge for storing the company's current inventory,
+// bounded to kMaxCashCents.
 [[nodiscard]] Money monthlyStorageCost(const Content& content, const WorldState& state,
                                        CompanyId company);
 

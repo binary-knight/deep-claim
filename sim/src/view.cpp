@@ -9,6 +9,8 @@
 #include "sim/plot_market.h"
 #include "sim/world_state.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 
 namespace sim {
@@ -96,7 +98,10 @@ void addMarkets(const Content& content, const WorldState& state, CompanyView& vi
         marketView.basePrice = content.resources[i].basePrice;
         marketView.baseDemandTonnesPerDay = content.resources[i].baseDemandTonnesPerDay;
         marketView.recentSupplyTonnesPerDay = market.supplySmoothed.truncToInt();
-        marketView.priceHistory = market.priceHistory;
+        const std::size_t count = std::min(market.priceHistory.size(), kRecentPriceDays);
+        marketView.recentPrices.assign(
+            market.priceHistory.end() - static_cast<std::ptrdiff_t>(count),
+            market.priceHistory.end());
         view.markets.push_back(marketView);
     }
 }

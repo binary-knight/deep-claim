@@ -110,6 +110,8 @@ inline sim::Content makeContent() {
     c.balance.loanAnnualRate = sim::Fixed::fromRatio(8, 100);
     c.balance.loanTermMonths = 60;
     c.balance.loanMaxPrincipal = sim::Money::fromUnits(10'000'000);
+    c.balance.loanMinPrincipal = sim::Money::fromUnits(250'000);
+    c.balance.maxActiveLoans = 4;
     c.balance.surveyCost = sim::Money::fromUnits(150'000);
     c.balance.surveyDurationDays = 20;
     c.balance.surveyBaseNoise = sim::Fixed::fromRatio(1, 2);

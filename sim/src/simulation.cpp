@@ -110,7 +110,11 @@ void Simulation::handle(const SetMineState& c) {
 
 void Simulation::handle(const SellOre& c) {
     if (const auto reason = validateSell(state_, c)) {
-        reject(c.company, PlotId(), Money::zero(), *reason);
+        Notice notice =
+            makeNotice(NoticeKind::CommandRejected, c.company, PlotId(), Money::zero(), *reason);
+        notice.resource = c.resource;
+        notice.tonnes = c.tonnes;
+        report_.notices.push_back(notice);
     } else {
         applySell(state_, c, report_);
     }
@@ -126,7 +130,10 @@ void Simulation::handle(const TakeLoan& c) {
 
 void Simulation::handle(const RepayLoan& c) {
     if (const auto reason = validateRepayLoan(state_, c)) {
-        reject(c.company, PlotId(), c.amount, *reason);
+        Notice notice =
+            makeNotice(NoticeKind::CommandRejected, c.company, PlotId(), c.amount, *reason);
+        notice.loan = c.loan;
+        report_.notices.push_back(notice);
     } else {
         applyRepayLoan(state_, c, report_);
     }

@@ -2,6 +2,7 @@
 
 #include "sim/commands.h"
 #include "sim/content.h"
+#include "sim/finance.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/money.h"
@@ -175,7 +176,7 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
                 anythingLeft = anythingLeft || truth.tonnesRemaining > 0;
             }
             // Today's production day is paid for even if it emptied the mine.
-            owner.cash -= mineDailyOpex(content, owner, MineState::Operating);
+            owner.cash = debitCash(owner.cash, mineDailyOpex(content, owner, MineState::Operating));
             if (!anythingLeft) {
                 mine.state = MineState::Depleted;
                 report.notices.push_back(mineNotice(NoticeKind::MineDepleted, mine, id));
@@ -183,7 +184,7 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
             continue;
         }
 
-        owner.cash -= mineDailyOpex(content, owner, mine.state);
+        owner.cash = debitCash(owner.cash, mineDailyOpex(content, owner, mine.state));
     }
 }
 

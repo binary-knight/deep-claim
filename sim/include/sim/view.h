@@ -65,8 +65,12 @@ struct MarketView {
     Money basePrice;
     std::int64_t baseDemandTonnesPerDay = 0;
     std::int64_t recentSupplyTonnesPerDay = 0;  // smoothed company sales
-    std::vector<Money> priceHistory;            // index = day
+    // The most recent prices, oldest first, at most kRecentPriceDays entries.
+    // The full history is available from Simulation::priceHistory for charts.
+    std::vector<Money> recentPrices;
 };
+
+constexpr std::size_t kRecentPriceDays = 90;
 
 struct LoanView {
     LoanId id;

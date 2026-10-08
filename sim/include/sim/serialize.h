@@ -257,10 +257,11 @@ void serialize(Archive& ar, EventDef& def) {
 template <class Archive>
 void serialize(Archive& ar, BalanceParams& balance) {
     ar(balance.startingCapital, balance.loanAnnualRate, balance.loanTermMonths,
-       balance.loanMaxPrincipal, balance.surveyCost, balance.surveyDurationDays,
-       balance.surveyBaseNoise, balance.mineCapexPerHectare, balance.mineBuildDays,
-       balance.mineOpexPerDay, balance.mineMothballOpexMult, balance.auctionWindowDays,
-       balance.plotsListedAtStart, balance.plotsListedPerMonth, balance.bankruptcyGraceMonths,
+       balance.loanMaxPrincipal, balance.loanMinPrincipal, balance.maxActiveLoans,
+       balance.surveyCost, balance.surveyDurationDays, balance.surveyBaseNoise,
+       balance.mineCapexPerHectare, balance.mineBuildDays, balance.mineOpexPerDay,
+       balance.mineMothballOpexMult, balance.auctionWindowDays, balance.plotsListedAtStart,
+       balance.plotsListedPerMonth, balance.bankruptcyGraceMonths,
        balance.marketSupplySmoothingDays, balance.marketPriceAdjustDays,
        balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
        balance.priceFloorMult, balance.priceCapMult);

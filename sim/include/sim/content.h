@@ -99,6 +99,8 @@ struct BalanceParams {
     Fixed loanAnnualRate;
     std::uint32_t loanTermMonths = 0;
     Money loanMaxPrincipal;
+    Money loanMinPrincipal;
+    std::uint32_t maxActiveLoans = 0;
     Money surveyCost;
     Day surveyDurationDays = 0;
     Fixed surveyBaseNoise;  // relative standard deviation of tonnage estimates
