@@ -1,0 +1,18 @@
+{
+  "name": "deep-claim",
+  "version-string": "0.1.0",
+  "description": "Asteroid mining company simulation (working title: Deep Claim)",
+  "dependencies": [
+    "catch2"
+  ],
+  "features": {
+    "game": {
+      "description": "Dependencies for the SDL3/RmlUi game client",
+      "dependencies": [
+        "sdl3",
+        "rmlui"
+      ]
+    }
+  },
+  "builtin-baseline": "2750401336fb7c95f6619657a46a7e798661341c"
+}
