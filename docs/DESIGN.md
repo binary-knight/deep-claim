@@ -14,8 +14,8 @@ with a null implementation.
 ## Dependency manager: vcpkg manifest mode
 
 vcpkg is a git submodule at `external/vcpkg`, pinned by `builtin-baseline`.
-Reasons: the RmlUi port wires up FreeType, binary caching via the GitHub
-Actions cache keeps Windows CI fast, and the sim-only side needs only Catch2.
+Reasons: the RmlUi port wires up FreeType, binary caching (vcpkg `files` backend
+persisted with actions/cache) keeps Windows CI fast, and the sim-only side needs only Catch2.
 Game-client dependencies live behind the `game` manifest feature so CI does
 not build SDL3 and RmlUi until the client exists.
 

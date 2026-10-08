@@ -18,19 +18,21 @@ jobs:
           - { os: windows-2022, preset: debug }
           - { os: windows-2022, preset: release }
     env:
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      # vcpkg removed its x-gha backend; cache built packages as files and
+      # let actions/cache persist the directory between runs.
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg-cache,readwrite"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
-      - name: Export GitHub Actions cache variables for vcpkg
-        uses: actions/github-script@v7
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          path: ${{ github.workspace }}/vcpkg-cache
+          key: vcpkg-${{ matrix.os }}-${{ matrix.preset }}-${{ hashFiles('vcpkg.json', '.gitmodules') }}
+          restore-keys: |
+            vcpkg-${{ matrix.os }}-${{ matrix.preset }}-
 
       - name: Bootstrap vcpkg (Linux)
         if: runner.os == 'Linux'
@@ -53,7 +55,7 @@ jobs:
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: sudo apt-get update && sudo apt-get install -y clang-format-18
       - run: git ls-files '*.cpp' '*.h' | xargs clang-format-18 --dry-run -Werror
 
@@ -61,7 +63,7 @@ jobs:
     name: clang-tidy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
       # The sim library and runner have no third-party dependencies, so this
       # job needs no vcpkg bootstrap.
