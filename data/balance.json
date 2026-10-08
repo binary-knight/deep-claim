@@ -22,5 +22,6 @@
   "demand_mult_min": 0.3,
   "demand_mult_max": 3,
   "price_floor_mult": 0.1,
-  "price_cap_mult": 10
+  "price_cap_mult": 10,
+  "demand_growth_per_year": 0.04
 }

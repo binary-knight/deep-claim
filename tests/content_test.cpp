@@ -48,7 +48,8 @@ content::Sources goodSources() {
       "auction_window_days": 30, "plots_listed_at_start": 3, "plots_listed_per_month": 1,
       "bankruptcy_grace_months": 3, "market_supply_smoothing_days": 30,
       "market_price_adjust_days": 10, "demand_reversion_rate": 0.01, "demand_mult_min": 0.3,
-      "demand_mult_max": 3, "price_floor_mult": 0.1, "price_cap_mult": 10
+      "demand_mult_max": 3, "price_floor_mult": 0.1, "price_cap_mult": 10,
+      "demand_growth_per_year": 0.04
     })";
     return s;
 }

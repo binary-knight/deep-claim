@@ -424,3 +424,11 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   the net value to cover land plus capex by 20%, borrows its one bootstrap
   loan only for a specific surveyed plot it could not otherwise afford, and
   repays an idle loan rather than paying interest while it waits.
+- Third sweep finding (seed 8 trace): the loser's mine was fine; the market
+  was not. One rival with twenty mines held copper and nickel at a quarter
+  of base for years, so every small producer bled out. Base demand was
+  sized for one or two mines per resource in a thirty-plot world. Changes:
+  base demand doubled (iron 1600 t/day, copper 200, nickel 60, lithium 16),
+  elasticities softened (0.5/0.7/0.8/1.0), and world demand now compounds
+  by `demand_growth_per_year` (4%), evaluated continuously, so expansion is
+  absorbed over a twenty-year game (about 2.2x by the end).

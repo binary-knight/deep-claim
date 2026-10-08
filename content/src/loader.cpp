@@ -775,6 +775,7 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "demand_mult_max",
                     "price_floor_mult",
                     "price_cap_mult",
+                    "demand_growth_per_year",
                     "plots_listed_per_month",
                     "bankruptcy_grace_months"});
     const sim::Money zero = sim::Money::zero();
@@ -837,6 +838,9 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     balance.priceCapMult =
         valueOr(node.fixed("price_cap_mult", true, sim::Fixed::one(), sim::Fixed::fromInt(100)),
                 sim::Fixed::one());
+    balance.demandGrowthPerYear = valueOr(
+        node.fixed("demand_growth_per_year", true, sim::Fixed::zero(), sim::Fixed::fromRatio(1, 2)),
+        sim::Fixed::zero());
 }
 
 std::optional<std::string> readFile(const std::filesystem::path& path) {

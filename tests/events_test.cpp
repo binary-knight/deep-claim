@@ -99,6 +99,7 @@ TEST_CASE("Demand events move the price", "[events][markets]") {
     for (sim::ResourceDef& r : content.resources) {
         r.volatility = sim::Fixed::zero();
     }
+    content.balance.demandGrowthPerYear = sim::Fixed::zero();
     content.events[0].durationDays = 300;
     sim::Simulation simulation(content, 1, test::setup());
     simulation.tick(200);

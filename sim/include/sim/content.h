@@ -120,6 +120,7 @@ struct BalanceParams {
     Fixed demandMultMax;
     Fixed priceFloorMult;  // relative to base price
     Fixed priceCapMult;
+    Fixed demandGrowthPerYear;  // compound growth of every resource's base demand
 };
 
 struct Content {

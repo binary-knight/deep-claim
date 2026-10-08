@@ -284,7 +284,7 @@ void serialize(Archive& ar, BalanceParams& balance) {
        balance.plotsListedPerMonth, balance.bankruptcyGraceMonths,
        balance.marketSupplySmoothingDays, balance.marketPriceAdjustDays,
        balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
-       balance.priceFloorMult, balance.priceCapMult);
+       balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear);
 }
 
 template <class Archive>

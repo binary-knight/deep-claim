@@ -81,8 +81,21 @@ void applySell(WorldState& state, const SellOre& command, TickReport& report) {
     report.notices.push_back(notice);
 }
 
+// The world economy grows: base demand compounds by demand_growth_per_year,
+// evaluated continuously so there is no step at year boundaries.
+Fixed demandGrowth(const BalanceParams& balance, Day day) {
+    if (balance.demandGrowthPerYear == Fixed::zero()) {
+        return Fixed::one();
+    }
+    const Fixed years = Fixed::fromRatio(day, kDaysPerYear);
+    const Fixed exponent = clampFixed(years * fixedLn(Fixed::one() + balance.demandGrowthPerYear),
+                                      Fixed::zero(), Fixed::fromInt(20));
+    return fixedExp(exponent);
+}
+
 void runMarkets(const Content& content, WorldState& state) {
     const BalanceParams& balance = content.balance;
+    const Fixed growth = demandGrowth(balance, state.day);
     for (std::uint32_t i = 0; i < state.markets.size(); ++i) {
         Market& market = state.markets[i];
         const ResourceDef& resource = content.resources[i];
@@ -112,7 +125,7 @@ void runMarkets(const Content& content, WorldState& state) {
         // Combined demand factor is bounded before it meets base demand so the
         // product fits Fixed for any valid content (1e9 t x 1000 = 1e12 t).
         const Fixed demandFactor = clampFixed(
-            market.demandMult *
+            market.demandMult * growth *
                 eventMultiplier(content, state, EventEffectType::DemandMult, ResourceId(i)),
             Fixed::fromRatio(1, 100), Fixed::fromInt(1000));
         const Fixed demand = baseDemand * demandFactor;

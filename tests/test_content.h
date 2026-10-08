@@ -130,6 +130,7 @@ inline sim::Content makeContent() {
     c.balance.demandMultMax = sim::Fixed::fromInt(3);
     c.balance.priceFloorMult = sim::Fixed::fromRatio(1, 10);
     c.balance.priceCapMult = sim::Fixed::fromInt(10);
+    c.balance.demandGrowthPerYear = sim::Fixed::fromRatio(4, 100);
     return c;
 }
 

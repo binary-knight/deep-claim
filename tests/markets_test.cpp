@@ -44,6 +44,7 @@ sim::Content calmContent() {
         r.volatility = sim::Fixed::zero();
     }
     c.events.clear();  // the fixture's lithium demand boom would move prices
+    c.balance.demandGrowthPerYear = sim::Fixed::zero();  // a growing world lifts prices
     return c;
 }
 
@@ -201,4 +202,16 @@ TEST_CASE("Market state survives save and load and is validated", "[markets][sav
     broken.markets[0].priceHistory.back() += sim::Money::fromCents(1);  // disagrees with price
     CHECK_FALSE(simulation.load(saveOf(broken)));
     CHECK(simulation.load(saveOf(simulation.state())));
+}
+
+TEST_CASE("Demand growth lifts prices slowly in an otherwise calm world", "[markets]") {
+    sim::Content content = calmContent();
+    content.balance.demandGrowthPerYear = sim::Fixed::fromRatio(4, 100);
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(sim::kDaysPerYear * 5);
+    // Demand 1.04^5 = 1.217x; ratio^0.6 => about 1.125x base for iron.
+    const std::int64_t base = content.resources[0].basePrice.cents();
+    const std::int64_t price = simulation.state().markets[0].price.cents();
+    CHECK(price > base * 110 / 100);
+    CHECK(price < base * 115 / 100);
 }
