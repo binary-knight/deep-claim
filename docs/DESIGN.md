@@ -53,3 +53,30 @@ CI leg runs on Ubuntu only; Windows CI builds debug and release.
 Catch2 v3 for tests. clang-format (Google base, 4-space indent, 100 columns)
 and clang-tidy are enforced in CI. Warnings are errors by default
 (`DC_WARNINGS_AS_ERRORS`).
+
+## Core types (step 2)
+
+- `Fixed` is decimal fixed-point with six fractional digits (raw = value x
+  1,000,000). Decimal rather than binary so JSON values like 0.7 convert
+  exactly and debug output is readable.
+- All Fixed and Money multiplies and divides truncate toward zero and funnel
+  through one `mulDiv(a, b, c)` with a 128-bit intermediate (`__int128` on
+  GCC/Clang, `_umul128`/`_udiv128` on MSVC). `checkedMulDiv` reports overflow;
+  `mulDiv` asserts on it. Tests pin literal results so the MSVC path is
+  verified on every CI run.
+- `Fixed::fromDouble` rounds to nearest and exists only for the content
+  loader boundary. Sim logic never touches floating point.
+- `StrongId<Tag>` is a uint32 index into the owning vector. Entities are never
+  erased from WorldState vectors; dead ones carry a flag. This keeps ids stable
+  for saves, replays and UI references.
+- `RngStreams` holds one PCG32 per system (world, market, survey, event, ai)
+  derived from the seed with distinct stream ids.
+- `approxNormal` is the Irwin-Hall sum of twelve uniforms: integer-only,
+  bounded to six sigma, good enough for noise models.
+- Serialization is one `serialize(archive, value)` per type driving three
+  archives: hash (FNV-1a), write and read. The read path never throws; it sets
+  a failure flag and the caller checks it once. Length prefixes are checked
+  against remaining bytes before allocation. `hashOf(x)` equals FNV-1a over
+  `toBytes(x)` by construction.
+- Save files are the magic "DCSV", a uint32 format version, then the
+  WorldState. Unknown versions are rejected; no migrations until ship.
