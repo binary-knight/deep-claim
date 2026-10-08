@@ -121,7 +121,12 @@ TEST_CASE("Truncated and oversized streams fail cleanly", "[archive]") {
 }
 
 TEST_CASE("Huge length prefixes are rejected before allocating", "[archive]") {
-    const std::vector<std::uint8_t> bytes{0xFF, 0xFF, 0xFF, 0xFF};
+    // The byte comes through a volatile so GCC cannot constant-fold the whole
+    // parse; with literal bytes GCC 13 -O2 emits a spurious -Warray-bounds on
+    // the allocation path that the length check makes unreachable.
+    volatile std::uint8_t opaque = 0xFF;
+    const std::uint8_t fill = opaque;
+    const std::vector<std::uint8_t> bytes(4, fill);
     std::vector<std::uint32_t> list;
     CHECK_FALSE(sim::fromBytes(bytes, list));
     CHECK(list.empty());

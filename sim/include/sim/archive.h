@@ -2,6 +2,7 @@
 
 #include "sim/hash.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -108,8 +109,8 @@ private:
             if (!self().checkLength(count, minSerializedSize<T>())) {
                 return;
             }
-            values.clear();
-            values.resize(count);
+            const std::size_t bounded = std::min<std::size_t>(count, Derived::kMaxLength);
+            values = std::vector<T>(bounded);
         }
         for (T& element : values) {
             field(element);
@@ -123,7 +124,8 @@ private:
             if (!self().checkLength(count, 1)) {
                 return;
             }
-            value.assign(count, '\0');
+            const std::size_t bounded = std::min<std::size_t>(count, Derived::kMaxLength);
+            value = std::string(bounded, '\0');
         }
         for (char& character : value) {
             integral(character);
@@ -199,10 +201,16 @@ public:
         return bits;
     }
 
+    // Largest element count any one container may claim. Real saves hold a few
+    // thousand entities; the constant bound also lets the compiler see that
+    // the allocation below it is of sane size.
+    static constexpr std::uint32_t kMaxLength = 1U << 26U;
+
     // A length prefix can never need more bytes than remain, so reject it
     // before allocating anything.
     [[nodiscard]] bool checkLength(std::uint32_t count, std::size_t minElementSize) {
-        if (failed_ || static_cast<std::uint64_t>(count) * minElementSize > remaining()) {
+        if (failed_ || count > kMaxLength ||
+            static_cast<std::uint64_t>(count) * minElementSize > remaining()) {
             failed_ = true;
             return false;
         }
