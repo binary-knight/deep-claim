@@ -12,9 +12,9 @@ namespace sim {
 [[nodiscard]] std::optional<std::int64_t> checkedMulDiv(std::int64_t a, std::int64_t b,
                                                         std::int64_t c);
 
-// Same as checkedMulDiv but asserts the preconditions (release builds return 0
-// on violation). Every Fixed and Money multiply or divide funnels through here,
-// so it is the only platform-specific arithmetic in the sim.
+// Same as checkedMulDiv but aborts (in every build type) on violation.
+// Every Fixed and Money multiply or divide funnels through here, so it is the
+// only platform-specific arithmetic in the sim.
 [[nodiscard]] std::int64_t mulDiv(std::int64_t a, std::int64_t b, std::int64_t c);
 
 // Decimal fixed-point number with six fractional digits (one unit = 1,000,000

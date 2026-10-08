@@ -1,6 +1,7 @@
 #include "sim/fixed.h"
 
-#include <cassert>
+#include "sim/fatal.h"
+
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -85,8 +86,10 @@ std::optional<std::int64_t> checkedMulDiv(std::int64_t a, std::int64_t b, std::i
 
 std::int64_t mulDiv(std::int64_t a, std::int64_t b, std::int64_t c) {
     const std::optional<std::int64_t> result = checkedMulDiv(a, b, c);
-    assert(result.has_value() && "mulDiv overflow or division by zero");
-    return result.value_or(0);
+    if (!result.has_value()) {
+        fatal("mulDiv: overflow or division by zero");
+    }
+    return *result;
 }
 
 Fixed Fixed::fromDouble(double value) {
