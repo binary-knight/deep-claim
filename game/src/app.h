@@ -6,6 +6,7 @@
 #include "sim/content.h"
 
 #include "game/session.h"
+#include "game/trace.h"
 #include "platform/services.h"
 #include "ui_model.h"
 
@@ -16,15 +17,23 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace game {
 
 class App {
 public:
+    // `playtestDir` empty turns the playtest trace off; otherwise every
+    // session writes a trace, save copies and screenshots there (see
+    // game/trace.h). `buildId` is recorded in the trace header.
     App(Rml::Context& context, platform::Services& services, const sim::Content& content,
-        std::filesystem::path assetsDir);
+        std::filesystem::path assetsDir, std::filesystem::path playtestDir = {},
+        std::string buildId = {});
     ~App();
     App(const App&) = delete;
     App& operator=(const App&) = delete;
@@ -34,11 +43,23 @@ public:
     [[nodiscard]] bool loadDocument();
     // Advances the session by real time and refreshes the interface.
     void update(double seconds);
-    // Keyboard shortcuts: space pauses, 1/2/3 set speed, period steps a day.
+    // Keyboard shortcuts: space pauses, 1/2/3 set speed, period steps a day,
+    // F9 marks the trace and takes a screenshot, F12 takes a screenshot.
     bool onKey(Rml::Input::KeyIdentifier key);
+
+    // Screenshots are captured by the host between rendering and presenting:
+    // it asks for a pending request, writes the file, then reports back.
+    [[nodiscard]] std::optional<std::filesystem::path> takeScreenshotRequest();
+    void screenshotDone(const std::filesystem::path& file, bool ok);
+    [[nodiscard]] const std::filesystem::path& tracePath() const { return tracePath_; }
 
 private:
     void newGame(std::uint64_t seed);
+    void openTrace();
+    void traceUi(std::string_view kind, std::string_view detail);
+    // Keeps a copy of save bytes next to the trace so a replay can follow a load.
+    std::string keepSaveCopy(const char* role, const std::vector<std::uint8_t>& bytes);
+    void requestScreenshot();
     void bindModel();
     void refresh();
     void setStatus(std::string text);
@@ -72,6 +93,16 @@ private:
     double statusAge_ = 0.0;
     sim::Day lastRefreshedDay_ = 0;
     std::size_t seenLogEntries_ = 0;  // log entries already checked for rejections
+
+    std::filesystem::path playtestDir_;
+    std::string buildId_;
+    std::string traceStem_;  // "trace-YYYYMMDD-HHMMSS", shared by the trace's files
+    std::filesystem::path tracePath_;
+    std::ofstream traceFile_;
+    std::unique_ptr<TraceWriter> trace_;
+    int saveCopies_ = 0;
+    int screenshots_ = 0;
+    std::optional<std::filesystem::path> screenshotRequest_;
 };
 
 }  // namespace game

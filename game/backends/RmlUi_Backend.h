@@ -38,4 +38,10 @@ void BeginFrame();
 // Presents the rendered frame to the screen, call after rendering the RmlUi context.
 void PresentFrame();
 
+// Deep Claim addition: a callback invoked by PresentFrame after the frame has
+// been drawn to the default framebuffer and before the buffers are swapped,
+// with the drawable size in pixels. Used to capture screenshots.
+using PreSwapCallback = void (*)(int width, int height);
+void SetPreSwapCallback(PreSwapCallback callback);
+
 } // namespace Backend

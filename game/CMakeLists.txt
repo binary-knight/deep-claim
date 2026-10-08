@@ -27,6 +27,7 @@ add_executable(deep_claim
     src/main.cpp
     src/app.cpp
     src/chart_element.cpp
+    src/screenshot.cpp
     src/ui_model.cpp)
 target_include_directories(deep_claim PRIVATE src)
 target_link_libraries(deep_claim PRIVATE dc::game_session dc::content dc::platform rmlui_backend
@@ -34,7 +35,9 @@ target_link_libraries(deep_claim PRIVATE dc::game_session dc::content dc::platfo
 # Development fallback: the repository's data and assets, so the client runs
 # from the build tree. Shipped builds find both next to the executable.
 target_compile_definitions(deep_claim PRIVATE DC_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
-                                              DC_ASSETS_DIR="${CMAKE_SOURCE_DIR}/game/assets")
+                                              DC_ASSETS_DIR="${CMAKE_SOURCE_DIR}/game/assets"
+                                              DC_PLAYTEST_DIR="${CMAKE_SOURCE_DIR}/playtest"
+                                              DC_BUILD_ID="${DC_BUILD_ID}")
 
 # Copy data and assets next to the binary so a zipped build directory runs.
 # A separate target that always runs, so editing an .rml or .json and

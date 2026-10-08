@@ -500,3 +500,49 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   `deep_claim_layout_probe` loads the real interface with a stub renderer
   and prints computed boxes, and runs as a test in the game presets so a
   collapsed layout fails CI.
+
+## Monitored playtesting: trace, screenshots, replay
+
+The client cannot be watched directly from the development sandbox (no
+display there), so it leaves a trail that can be read, and reproduced, from
+the files it writes. Everything lives in `game/session` except the two
+pieces that need OpenGL.
+
+- **Trace** (`game/trace.h`): one JSON object per line, flushed per line so
+  a crash keeps the record. Records: `new_game` (seed, player, AI names,
+  content hash, build id), `load` and `save` (with a copy of the save bytes
+  written next to the trace, because the real save lives in the pref path
+  and may be overwritten), `command` (the player's order, tagged with the
+  day it was submitted), `day` (day and state hash after every tick),
+  `notice` (each player-visible log entry with its text), `state` (monthly
+  summary: cash, reserved, debt, capacity, plots, mines with output, stock,
+  prices, rivals), `ui` (tab, select_plot, select_resource, speed, status),
+  `marker`, `screenshot` and `end`. Seeds travel as decimal strings and
+  hashes as hex strings so JSON tools that read numbers as doubles do not
+  corrupt them. The trace is written by the session (orders, ticks,
+  notices, monthly state) and the app (new games, loads, saves, interface
+  events); the sim knows nothing about it.
+- **Where**: the `DEEP_CLAIM_PLAYTEST` environment variable if set (`off`
+  disables tracing); otherwise `playtest/` in the repository for a
+  development build (gitignored); otherwise `playtest/` under the per-user
+  data directory. The build id is the short git revision captured at
+  configure time.
+- **Screenshots**: F9 writes a `marker` record and takes a screenshot, F12
+  takes one. The frame is read back from the default framebuffer in a
+  pre-swap callback added to the vendored backend (the only other edit
+  besides the SDL_image removal), after RmlUi's EndFrame has composited
+  the layers into the back buffer and before SDL swaps it. The PNG encoder
+  (`game/png.h`) writes 8-bit RGB with stored deflate blocks, so there is
+  no image or zlib dependency; a 1366x820 frame is about 3.4 MB and a
+  session is capped at 200 shots.
+- **Replay** (`game/replay.h`, `deep_claim_replay`): runs the same Session
+  the client ran from the recorded seed and setup, submits each order on
+  its recorded day, ticks once per `day` record and compares the state hash,
+  so the first day where the replay stops matching the client is reported.
+  `--day N` stops early and prints the player's full view at that day,
+  `--save` writes a `.dcsave` of it, `--log` prints the player's log. It is
+  built in every preset (no client dependencies) and the trace round trip,
+  divergence detection, stop day and load-following are unit tested. The
+  headless layout probe also checks that the app writes a trace header.
+- Rejected: tracing from inside the sim (it must stay free of I/O) and a
+  per-frame screenshot stream (too much data for too little signal).

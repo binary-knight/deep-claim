@@ -8,16 +8,19 @@
 #include "chart_element.h"
 #include "content/loader.h"
 #include "platform/services.h"
+#include "screenshot.h"
 
 #include <RmlUi/Core.h>
 #include <RmlUi/Debugger.h>
 #include <SDL3/SDL.h>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -58,6 +61,37 @@ std::filesystem::path utf8Path(const char* text) {
 std::string utf8String(const std::filesystem::path& path) {
     const std::u8string text = path.u8string();
     return {text.begin(), text.end()};
+}
+
+// Where the playtest trace, save copies and screenshots go. The
+// DEEP_CLAIM_PLAYTEST environment variable overrides ("off" disables); a
+// development build uses the repository's playtest/ directory; a shipped
+// build uses the per-user data directory.
+std::filesystem::path playtestDirectory(const std::filesystem::path& prefPath) {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe) read once at startup
+    if (const char* env = std::getenv("DEEP_CLAIM_PLAYTEST"); env != nullptr) {
+        const std::string_view value(env);
+        if (value.empty() || value == "off" || value == "0") {
+            return {};
+        }
+        return utf8Path(env);
+    }
+    std::filesystem::path dev = DC_PLAYTEST_DIR;
+    if (std::filesystem::is_directory(dev.parent_path())) {
+        return dev;
+    }
+    return prefPath / "playtest";
+}
+
+// Runs after each frame is drawn and before it is presented.
+void preSwap(int width, int height) {
+    if (gApp == nullptr) {
+        return;
+    }
+    const std::optional<std::filesystem::path> request = gApp->takeScreenshotRequest();
+    if (request.has_value()) {
+        gApp->screenshotDone(*request, game::captureFramebufferPng(width, height, *request));
+    }
 }
 
 std::filesystem::path locate(const char* subdir, const char* devFallback) {
@@ -112,11 +146,19 @@ int main(int /*argc*/, char** /*argv*/) {
     SDL_free(prefPath);
     std::unique_ptr<platform::Services> services =
         platform::makeNullServices(saveBase, "Deep Claim Mining");
+    const std::filesystem::path playtestDir = playtestDirectory(saveBase);
 
     int exitCode = 0;
     {
-        game::App app(*context, *services, *loaded.content, assetsDir);
+        game::App app(*context, *services, *loaded.content, assetsDir, playtestDir, DC_BUILD_ID);
         gApp = &app;
+        Backend::SetPreSwapCallback(&preSwap);
+        if (!app.tracePath().empty()) {
+            std::cout << std::format(
+                "Playtest trace: {} (F9 marks a moment and takes a "
+                "screenshot, F12 takes a screenshot)\n",
+                utf8String(app.tracePath()));
+        }
         if (!app.loadDocument()) {
             exitCode = 1;
         }
@@ -133,6 +175,7 @@ int main(int /*argc*/, char** /*argv*/) {
             context->Render();
             Backend::PresentFrame();
         }
+        Backend::SetPreSwapCallback(nullptr);
         gApp = nullptr;
     }
 

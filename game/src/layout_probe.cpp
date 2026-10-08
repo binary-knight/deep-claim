@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <span>
@@ -90,10 +91,25 @@ int main(int argc, char** argv) {
     game::registerChartElement();
     Rml::Context* context = Rml::CreateContext("main", Rml::Vector2i(1366, 820));
     auto services = platform::makeNullServices(std::filesystem::temp_directory_path(), "Probe");
+    // The playtest trace is exercised too: the app writes one into a scratch
+    // directory and it must start with a new_game record.
+    const std::filesystem::path playtest =
+        std::filesystem::temp_directory_path() / "deep_claim_probe_playtest";
+    std::filesystem::remove_all(playtest);
     {
-        game::App app(*context, *services, *loaded.content, assets);
+        game::App app(*context, *services, *loaded.content, assets, playtest, "probe");
         if (!app.loadDocument()) {
             return 2;
+        }
+        std::ifstream trace(app.tracePath());
+        std::string firstLine;
+        std::getline(trace, firstLine);
+        std::cout << std::format("trace: {}\n  {}\n", app.tracePath().string(), firstLine);
+        if (firstLine.find(R"("t":"new_game")") == std::string::npos ||
+            firstLine.find(R"("build":"probe")") == std::string::npos) {
+            std::cout << "TRACE FAILURE: no new_game record\n";
+            Rml::Shutdown();
+            return 4;
         }
         context->Update();
         Rml::ElementDocument* doc = context->GetDocument(0);

@@ -4,12 +4,14 @@
 #include "sim/content.h"
 #include "sim/ids.h"
 #include "sim/money.h"
+#include "sim/save.h"
 #include "sim/types.h"
 #include "sim/view.h"
 
 #include "chart_element.h"
 #include "game/format.h"
 #include "game/session.h"
+#include "game/trace.h"
 #include "platform/services.h"
 #include "ui_model.h"
 
@@ -21,15 +23,20 @@
 #include <RmlUi/Core/Log.h>
 #include <RmlUi/Core/Variant.h>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -39,20 +46,48 @@ namespace game {
 namespace {
 
 constexpr double kStatusSeconds = 6.0;
+constexpr int kMaxScreenshots = 200;  // about 3.4 MB each, uncompressed
 const char* const kSaveFile = "autosave.dcsave";
+constexpr std::array<const char*, 6> kTabNames = {"dashboard", "plots",   "market",
+                                                  "research",  "finance", "log"};
 
 std::uint64_t clockSeed() {
     return static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
 }
 
+// Local wall-clock stamp for file names: "20261008-143015".
+std::string timeStamp() {
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    return std::format("{:04}{:02}{:02}-{:02}{:02}{:02}", local.tm_year + 1900, local.tm_mon + 1,
+                       local.tm_mday, local.tm_hour, local.tm_min, local.tm_sec);
+}
+
+bool writeFile(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) byte buffer to stream
+    file.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+    file.close();
+    return static_cast<bool>(file);
+}
+
 }  // namespace
 
 App::App(Rml::Context& context, platform::Services& services, const sim::Content& content,
-         std::filesystem::path assetsDir)
+         std::filesystem::path assetsDir, std::filesystem::path playtestDir, std::string buildId)
     : context_(&context),
       services_(&services),
       content_(&content),
-      assetsDir_(std::move(assetsDir)) {
+      assetsDir_(std::move(assetsDir)),
+      playtestDir_(std::move(playtestDir)),
+      buildId_(std::move(buildId)) {
+    openTrace();
     newGame(clockSeed());
     bindModel();
     PriceChartElement::setProvider([this](int resource) {
@@ -72,6 +107,9 @@ App::App(Rml::Context& context, platform::Services& services, const sim::Content
 }
 
 App::~App() {
+    if (trace_) {
+        trace_->end(session_->day());
+    }
     PriceChartElement::setProvider(nullptr);
     if (document_ != nullptr) {
         document_->Close();
@@ -84,10 +122,76 @@ void App::newGame(std::uint64_t seed) {
     setup.playerName = std::string(services_->playerName());
     setup.aiNames = {"Northfield Minerals"};
     session_ = std::make_unique<Session>(*content_, seed, setup);
+    session_->setTrace(trace_.get());
+    if (trace_) {
+        trace_->newGame(seed, setup, sim::hashContent(*content_), buildId_);
+    }
     model_.selected_plot = -1;
     model_.selected_resource = 0;
     model_.tab = 0;
     lastRefreshedDay_ = session_->day();
+}
+
+void App::openTrace() {
+    if (playtestDir_.empty()) {
+        return;
+    }
+    std::error_code error;
+    std::filesystem::create_directories(playtestDir_, error);
+    traceStem_ = "trace-" + timeStamp();
+    tracePath_ = playtestDir_ / (traceStem_ + ".jsonl");
+    traceFile_.open(tracePath_, std::ios::trunc);
+    if (!traceFile_) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg) RmlUi logging is printf-style
+        Rml::Log::Message(Rml::Log::LT_WARNING, "Could not open the playtest trace %s",
+                          tracePath_.string().c_str());
+        tracePath_.clear();
+        return;
+    }
+    trace_ = std::make_unique<TraceWriter>(traceFile_);
+}
+
+void App::traceUi(std::string_view kind, std::string_view detail) {
+    if (trace_) {
+        trace_->ui(session_->day(), kind, detail);
+    }
+}
+
+std::string App::keepSaveCopy(const char* role, const std::vector<std::uint8_t>& bytes) {
+    if (!trace_) {
+        return {};
+    }
+    ++saveCopies_;
+    std::string name = std::format("{}-{}-{}.dcsave", traceStem_, role, saveCopies_);
+    if (!writeFile(playtestDir_ / name, bytes)) {
+        return {};
+    }
+    return name;
+}
+
+void App::requestScreenshot() {
+    if (!trace_ || screenshots_ >= kMaxScreenshots || screenshotRequest_.has_value()) {
+        return;
+    }
+    ++screenshots_;
+    screenshotRequest_ = playtestDir_ / std::format("{}-shot-{:03}.png", traceStem_, screenshots_);
+}
+
+std::optional<std::filesystem::path> App::takeScreenshotRequest() {
+    std::optional<std::filesystem::path> request;
+    request.swap(screenshotRequest_);
+    return request;
+}
+
+void App::screenshotDone(const std::filesystem::path& file, bool ok) {
+    if (!ok) {
+        setStatus("Screenshot failed.");
+        return;
+    }
+    if (trace_) {
+        trace_->screenshot(session_->day(), file.filename().string());
+    }
+    setStatus("Screenshot saved: " + file.filename().string());
 }
 
 void App::bindModel() {
@@ -303,6 +407,7 @@ void App::refresh() {
 }
 
 void App::setStatus(std::string text) {
+    traceUi("status", text);
     model_.status_line = std::move(text);
     statusAge_ = 0.0;
     if (handle_) {
@@ -342,12 +447,24 @@ bool App::onKey(Rml::Input::KeyIdentifier key) {
         case Rml::Input::KI_OEM_PERIOD:
             onStep();
             return true;
+        case Rml::Input::KI_F9:
+            if (trace_) {
+                trace_->marker(session_->day(), "F9");
+            }
+            requestScreenshot();
+            return true;
+        case Rml::Input::KI_F12:
+            requestScreenshot();
+            return true;
         default:
             return false;
     }
 }
 
 void App::onSetTab(int tab) {
+    if (tab >= 0 && tab < static_cast<int>(kTabNames.size())) {
+        traceUi("tab", kTabNames.at(static_cast<std::size_t>(tab)));
+    }
     model_.tab = tab;
     handle_.DirtyVariable("tab");
 }
@@ -363,6 +480,7 @@ void App::onStep() {
 }
 
 void App::onSelectPlot(int index) {
+    traceUi("select_plot", "#" + std::to_string(index));
     model_.selected_plot = index;
     if (index >= 0 && index < static_cast<int>(session_->view().plots.size())) {
         // Exact text so the default bid is the ask to the cent, not a rounded label.
@@ -373,6 +491,9 @@ void App::onSelectPlot(int index) {
 }
 
 void App::onSelectResource(int index) {
+    if (index >= 0 && index < static_cast<int>(content_->resources.size())) {
+        traceUi("select_resource", content_->resources[static_cast<std::size_t>(index)].id);
+    }
     model_.selected_resource = index;
     refresh();
 }
@@ -462,16 +583,9 @@ void App::onSave() {
     const std::filesystem::path path = services_->saveDirectory() / kSaveFile;
     const std::filesystem::path temp = path.string() + ".tmp";
     const std::vector<std::uint8_t> bytes = session_->save();
-    {
-        std::ofstream file(temp, std::ios::binary | std::ios::trunc);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) byte buffer to stream
-        const auto* chars = reinterpret_cast<const char*>(bytes.data());
-        file.write(chars, static_cast<std::streamsize>(bytes.size()));
-        file.close();
-        if (!file) {
-            setStatus("Could not write " + temp.string());
-            return;
-        }
+    if (!writeFile(temp, bytes)) {
+        setStatus("Could not write " + temp.string());
+        return;
     }
     // Replace the previous save only once the new one is fully on disk.
     std::error_code error;
@@ -481,6 +595,9 @@ void App::onSave() {
         return;
     }
     setStatus("Saved to " + path.string());
+    if (trace_) {
+        trace_->saved(session_->day(), keepSaveCopy("save", bytes));
+    }
 }
 
 void App::onLoad() {
@@ -497,6 +614,15 @@ void App::onLoad() {
         return;
     }
     model_.selected_plot = -1;
+    if (trace_) {
+        const std::string copy = keepSaveCopy("load", bytes);
+        trace_->loaded(session_->day(), copy, session_->stateHash());
+        if (copy.empty()) {
+            setStatus("Game loaded, but the playtest copy of the save could not be written.");
+            refresh();
+            return;
+        }
+    }
     refresh();
     setStatus("Game loaded.");
 }

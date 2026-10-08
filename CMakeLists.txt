@@ -12,6 +12,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Short git revision, recorded in playtest traces so a trace can be matched
+# to the code that produced it. Captured at configure time; reconfigure
+# after committing if it matters.
+set(DC_BUILD_ID "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE DC_GIT_REV
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE DC_GIT_RESULT
+        ERROR_QUIET)
+    if(DC_GIT_RESULT EQUAL 0)
+        set(DC_BUILD_ID "${DC_GIT_REV}")
+    endif()
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(Warnings)
 include(Sanitizers)

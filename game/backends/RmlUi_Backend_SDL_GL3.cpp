@@ -10,6 +10,8 @@
 // Deep Claim: SDL_image removed. The interface uses no bitmap images beyond
 // what RmlUi's built-in TGA loader handles, so the base render interface's
 // LoadTexture is used unchanged (see RenderInterface_GL3_SDL below).
+// Deep Claim: a pre-swap callback was added to PresentFrame for screenshots
+// (see SetPreSwapCallback below). No other changes.
 
 #if defined RMLUI_PLATFORM_EMSCRIPTEN
 	#include <emscripten.h>
@@ -45,6 +47,7 @@ struct BackendData {
 	bool running = true;
 };
 static Rml::UniquePtr<BackendData> data;
+static Backend::PreSwapCallback pre_swap_callback = nullptr;
 
 bool Backend::Initialize(const char* window_name, int width, int height, bool allow_resize)
 {
@@ -309,11 +312,22 @@ void Backend::BeginFrame()
 	data->render_interface.BeginFrame();
 }
 
+void Backend::SetPreSwapCallback(PreSwapCallback callback)
+{
+	pre_swap_callback = callback;
+}
+
 void Backend::PresentFrame()
 {
 	RMLUI_ASSERT(data);
 
 	data->render_interface.EndFrame();
+	if (pre_swap_callback)
+	{
+		int width = 0, height = 0;
+		SDL_GetWindowSizeInPixels(data->window, &width, &height);
+		pre_swap_callback(width, height);
+	}
 	SDL_GL_SwapWindow(data->window);
 
 	// Optional, used to mark frames during performance profiling.
