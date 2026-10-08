@@ -21,8 +21,9 @@ struct ResourceDef {
     std::string name;
     Money basePrice;  // per tonne
     std::int64_t baseDemandTonnesPerDay = 0;
-    Fixed elasticity;  // price response to supply/demand imbalance
-    Fixed volatility;  // daily demand random-walk step as a fraction
+    std::int64_t baseOutputTonnesPerDay = 0;  // one mine at tech level zero
+    Fixed elasticity;                         // price response to supply/demand imbalance
+    Fixed volatility;                         // daily demand random-walk step as a fraction
     Money storageCostPerTonneMonth;
     TechId unlockedBy;  // invalid when available from the start
 };
@@ -103,7 +104,6 @@ struct BalanceParams {
     Fixed surveyBaseNoise;  // relative standard deviation of tonnage estimates
     Money mineCapexPerHectare;
     Day mineBuildDays = 0;
-    std::int64_t mineBaseOutputTonnesPerDay = 0;
     Money mineOpexPerDay;
     Day auctionWindowDays = 0;
     std::uint32_t plotsListedPerMonth = 0;

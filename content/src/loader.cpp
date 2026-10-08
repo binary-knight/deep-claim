@@ -32,6 +32,11 @@ using nlohmann::json;
 
 constexpr std::int64_t kMaxDays = 36000;  // 100 in-game years
 
+// Largest magnitudes accepted from data files. Chosen so that a double keeps
+// well over the required resolution (0.01 or 0.000001) at the extreme.
+constexpr double kMaxMoneyMagnitude = 1e11;  // currency units
+constexpr double kMaxFixedMagnitude = 1e6;
+
 // ---------------------------------------------------------------------------
 // Error collection and typed JSON access
 // ---------------------------------------------------------------------------
@@ -82,12 +87,26 @@ std::string_view typeName(const json& value) {
     }
 }
 
+const json& emptyObject() {
+    static const json kEmpty = json::object();
+    return kEmpty;
+}
+
 // A JSON object with its path, offering typed accessors that report problems
 // to the sink and return nullopt so parsing can continue.
 class Node {
 public:
     Node(const json& value, std::string path, ErrorSink& sink)
         : value_(&value), path_(std::move(path)), sink_(&sink) {}
+
+    // Stand-in for an array element that was not an object. It keeps array
+    // indices aligned with later diagnostics while reporting nothing itself,
+    // because the element has already been reported once.
+    static Node placeholder(std::string path, ErrorSink& sink) {
+        Node node(emptyObject(), std::move(path), sink);
+        node.silent_ = true;
+        return node;
+    }
 
     [[nodiscard]] const json& raw() const { return *value_; }
     [[nodiscard]] const std::string& path() const { return path_; }
@@ -148,7 +167,7 @@ public:
     [[nodiscard]] std::optional<sim::Fixed> fixed(std::string_view key, bool required,
                                                   sim::Fixed min, sim::Fixed max) const {
         const std::optional<double> number =
-            decimal(key, required, static_cast<double>(sim::Fixed::kScale), 6);
+            decimal(key, required, static_cast<double>(sim::Fixed::kScale), 6, kMaxFixedMagnitude);
         if (!number) {
             return std::nullopt;
         }
@@ -162,8 +181,8 @@ public:
 
     [[nodiscard]] std::optional<sim::Money> money(std::string_view key, bool required,
                                                   sim::Money min) const {
-        const std::optional<double> number =
-            decimal(key, required, static_cast<double>(sim::Money::kCentsPerUnit), 2);
+        const std::optional<double> number = decimal(
+            key, required, static_cast<double>(sim::Money::kCentsPerUnit), 2, kMaxMoneyMagnitude);
         if (!number) {
             return std::nullopt;
         }
@@ -241,7 +260,7 @@ private:
     [[nodiscard]] const json* get(std::string_view key, bool required) const {
         const auto it = value_->find(key);
         if (it == value_->end() || it->is_null()) {
-            if (required) {
+            if (required && !silent_) {
                 report(key, "missing required key");
             }
             return nullptr;
@@ -249,9 +268,13 @@ private:
         return &*it;
     }
 
-    // Finite number representable with `decimals` fractional digits.
+    // Finite number of bounded magnitude representable with `decimals`
+    // fractional digits. The magnitude bound keeps the double's spacing far
+    // below the smallest unit so the precision check and the final rounding
+    // are reliable; excess digits below a thousandth of a unit are rounded
+    // away silently, which is the accepted limit of parsing via double.
     [[nodiscard]] std::optional<double> decimal(std::string_view key, bool required, double scale,
-                                                int decimals) const {
+                                                int decimals, double maxMagnitude) const {
         const json* value = get(key, required);
         if (value == nullptr) {
             return std::nullopt;
@@ -265,12 +288,13 @@ private:
             report(key, "must be a finite number");
             return std::nullopt;
         }
-        const double scaled = number * scale;
-        if (std::abs(scaled) > 9.0e18) {
-            report(key, "number is too large");
+        if (std::abs(number) > maxMagnitude) {
+            report(key, "magnitude must not exceed " +
+                            std::to_string(static_cast<std::int64_t>(maxMagnitude)));
             return std::nullopt;
         }
-        if (std::abs(scaled - std::round(scaled)) > 1e-3) {
+        const double scaled = number * scale;
+        if (std::abs(scaled - std::round(scaled)) > 1e-2) {
             report(key, "at most " + std::to_string(decimals) + " decimal places allowed");
             return std::nullopt;
         }
@@ -280,6 +304,7 @@ private:
     const json* value_;
     std::string path_;
     ErrorSink* sink_;
+    bool silent_ = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -308,6 +333,7 @@ std::optional<std::vector<Node>> topLevelArray(const json& document, ErrorSink& 
         const json& element = document[i];
         if (!element.is_object()) {
             sink.add(indexPath("", i), "expected an object, got " + std::string(typeName(element)));
+            nodes.push_back(Node::placeholder(indexPath("", i), sink));
             continue;
         }
         nodes.emplace_back(element, indexPath("", i), sink);
@@ -375,6 +401,18 @@ constexpr std::array<EventEffectName, 3> kEventEffectNames = {{
     {"land_price_mult", sim::EventEffectType::LandPriceMult, false},
 }};
 
+// Pointer-returning lookup so the result type is the same on every standard
+// library (MSVC's std::array iterator is a class, libstdc++'s is a pointer).
+template <class Table>
+const typename Table::value_type* findByName(const Table& table, std::string_view name) {
+    for (const auto& entry : table) {
+        if (entry.name == name) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
 const sim::Fixed kMultiplierMin = sim::Fixed::fromRaw(1);
 const sim::Fixed kMultiplierMax = sim::Fixed::fromInt(1000);
 
@@ -392,15 +430,18 @@ std::vector<std::string> parseResources(const json& document, sim::Content& cont
     }
     std::vector<std::string> seen;
     for (const Node& node : *nodes) {
-        node.allowKeys({"id", "name", "base_price", "base_demand_tonnes_per_day", "elasticity",
-                        "volatility", "storage_cost_per_tonne_month", "unlocked_by"});
+        node.allowKeys({"id", "name", "base_price", "base_demand_tonnes_per_day",
+                        "base_output_tonnes_per_day", "elasticity", "volatility",
+                        "storage_cost_per_tonne_month", "unlocked_by"});
         sim::ResourceDef def;
         def.id = readId(node, seen);
         def.name = valueOr(node.string("name", true), std::string());
         def.basePrice =
             valueOr(node.money("base_price", true, sim::Money::fromCents(1)), sim::Money::zero());
         def.baseDemandTonnesPerDay =
-            valueOr(node.integer("base_demand_tonnes_per_day", true, 1, 1'000'000'000'000LL), 0LL);
+            valueOr(node.integer("base_demand_tonnes_per_day", true, 1, 1'000'000'000LL), 0LL);
+        def.baseOutputTonnesPerDay =
+            valueOr(node.integer("base_output_tonnes_per_day", true, 1, 1'000'000LL), 0LL);
         def.elasticity = valueOr(
             node.fixed("elasticity", true, sim::Fixed::fromRaw(1), sim::Fixed::fromInt(100)),
             sim::Fixed::zero());
@@ -422,9 +463,8 @@ void parseTechEffect(const Node& node, const sim::Content& content, sim::TechDef
     if (!typeName) {
         return;
     }
-    const auto* entry = std::find_if(kTechEffectNames.begin(), kTechEffectNames.end(),
-                                     [&](const TechEffectName& e) { return e.name == *typeName; });
-    if (entry == kTechEffectNames.end()) {
+    const TechEffectName* entry = findByName(kTechEffectNames, *typeName);
+    if (entry == nullptr) {
         node.report("type", "unknown tech effect type '" + *typeName + "'");
         return;
     }
@@ -617,9 +657,9 @@ void parseDeposits(const Node& region, const sim::Content& content, sim::RegionD
             valueOr(node.fixed("presence_prob", true, sim::Fixed::zero(), sim::Fixed::one()),
                     sim::Fixed::zero());
         prior.tonnesMedian =
-            valueOr(node.integer("tonnes_median", true, 1, 1'000'000'000'000'000LL), 0LL);
+            valueOr(node.integer("tonnes_median", true, 1, 1'000'000'000'000LL), 0LL);
         prior.tonnesSpread =
-            valueOr(node.fixed("tonnes_spread", true, sim::Fixed::one(), sim::Fixed::fromInt(1000)),
+            valueOr(node.fixed("tonnes_spread", true, sim::Fixed::one(), sim::Fixed::fromInt(20)),
                     sim::Fixed::one());
         def.deposits.push_back(prior);
     }
@@ -655,9 +695,8 @@ void parseEventEffect(const Node& node, const sim::Content& content, sim::EventD
     if (!typeName) {
         return;
     }
-    const auto* entry = std::find_if(kEventEffectNames.begin(), kEventEffectNames.end(),
-                                     [&](const EventEffectName& e) { return e.name == *typeName; });
-    if (entry == kEventEffectNames.end()) {
+    const EventEffectName* entry = findByName(kEventEffectNames, *typeName);
+    if (entry == nullptr) {
         node.report("type", "unknown event effect type '" + *typeName + "'");
         return;
     }
@@ -715,8 +754,8 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     node.allowKeys({"starting_capital", "loan_annual_rate", "loan_term_months",
                     "loan_max_principal", "survey_cost", "survey_duration_days",
                     "survey_base_noise", "mine_capex_per_hectare", "mine_build_days",
-                    "mine_base_output_tonnes_per_day", "mine_opex_per_day", "auction_window_days",
-                    "plots_listed_per_month", "bankruptcy_grace_months"});
+                    "mine_opex_per_day", "auction_window_days", "plots_listed_per_month",
+                    "bankruptcy_grace_months"});
     const sim::Money zero = sim::Money::zero();
     balance.startingCapital =
         valueOr(node.money("starting_capital", true, sim::Money::fromCents(1)), zero);
@@ -735,8 +774,6 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     balance.mineCapexPerHectare = valueOr(node.money("mine_capex_per_hectare", true, zero), zero);
     balance.mineBuildDays =
         static_cast<sim::Day>(valueOr(node.integer("mine_build_days", true, 1, kMaxDays), 1LL));
-    balance.mineBaseOutputTonnesPerDay =
-        valueOr(node.integer("mine_base_output_tonnes_per_day", true, 1, 1'000'000'000LL), 1LL);
     balance.mineOpexPerDay = valueOr(node.money("mine_opex_per_day", true, zero), zero);
     balance.auctionWindowDays = static_cast<sim::Day>(
         valueOr(node.integer("auction_window_days", true, 1, sim::kDaysPerYear), 1LL));

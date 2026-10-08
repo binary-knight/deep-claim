@@ -92,6 +92,32 @@ std::int64_t mulDiv(std::int64_t a, std::int64_t b, std::int64_t c) {
     return *result;
 }
 
+std::int64_t checkedAdd(std::int64_t a, std::int64_t b) {
+    // Unsigned wrap is defined; the sign test detects signed overflow.
+    const auto sum =
+        static_cast<std::int64_t>(static_cast<std::uint64_t>(a) + static_cast<std::uint64_t>(b));
+    if ((a >= 0) == (b >= 0) && (sum >= 0) != (a >= 0)) {
+        fatal("checkedAdd: overflow");
+    }
+    return sum;
+}
+
+std::int64_t checkedSub(std::int64_t a, std::int64_t b) {
+    const auto difference =
+        static_cast<std::int64_t>(static_cast<std::uint64_t>(a) - static_cast<std::uint64_t>(b));
+    if ((a >= 0) != (b >= 0) && (difference >= 0) != (a >= 0)) {
+        fatal("checkedSub: overflow");
+    }
+    return difference;
+}
+
+std::int64_t checkedNegate(std::int64_t a) {
+    if (a == std::numeric_limits<std::int64_t>::min()) {
+        fatal("checkedNegate: overflow");
+    }
+    return -a;
+}
+
 Fixed Fixed::fromDouble(double value) {
     return fromRaw(static_cast<std::int64_t>(std::llround(value * static_cast<double>(kScale))));
 }

@@ -17,6 +17,12 @@ namespace sim {
 // only platform-specific arithmetic in the sim.
 [[nodiscard]] std::int64_t mulDiv(std::int64_t a, std::int64_t b, std::int64_t c);
 
+// Signed add, subtract and negate that abort on overflow instead of invoking
+// undefined behaviour. All Fixed and Money arithmetic goes through these.
+[[nodiscard]] std::int64_t checkedAdd(std::int64_t a, std::int64_t b);
+[[nodiscard]] std::int64_t checkedSub(std::int64_t a, std::int64_t b);
+[[nodiscard]] std::int64_t checkedNegate(std::int64_t a);
+
 // Decimal fixed-point number with six fractional digits (one unit = 1,000,000
 // raw). Used for ratios, probabilities and multipliers. All arithmetic
 // truncates toward zero. The sim never uses floating point for state.
@@ -31,13 +37,12 @@ public:
         result.raw_ = raw;
         return result;
     }
-    [[nodiscard]] static constexpr Fixed fromInt(std::int64_t whole) {
-        return fromRaw(whole * kScale);
+    [[nodiscard]] static Fixed fromInt(std::int64_t whole) {
+        return fromRaw(mulDiv(whole, kScale, 1));
     }
-    // numerator / denominator, truncated. |numerator| must be below 9.2e12.
-    [[nodiscard]] static constexpr Fixed fromRatio(std::int64_t numerator,
-                                                   std::int64_t denominator) {
-        return fromRaw(numerator * kScale / denominator);
+    // numerator / denominator, truncated toward zero.
+    [[nodiscard]] static Fixed fromRatio(std::int64_t numerator, std::int64_t denominator) {
+        return fromRaw(mulDiv(numerator, kScale, denominator));
     }
     // Content-loading boundary only. Rounds to nearest so that a JSON value
     // such as 0.7 becomes exactly 700000 raw. Never call this from sim logic.
@@ -51,21 +56,21 @@ public:
 
     friend constexpr auto operator<=>(Fixed, Fixed) = default;
 
-    constexpr Fixed operator-() const { return fromRaw(-raw_); }
-    friend constexpr Fixed operator+(Fixed a, Fixed b) { return fromRaw(a.raw_ + b.raw_); }
-    friend constexpr Fixed operator-(Fixed a, Fixed b) { return fromRaw(a.raw_ - b.raw_); }
+    Fixed operator-() const { return fromRaw(checkedNegate(raw_)); }
+    friend Fixed operator+(Fixed a, Fixed b) { return fromRaw(checkedAdd(a.raw_, b.raw_)); }
+    friend Fixed operator-(Fixed a, Fixed b) { return fromRaw(checkedSub(a.raw_, b.raw_)); }
     friend Fixed operator*(Fixed a, Fixed b) { return fromRaw(mulDiv(a.raw_, b.raw_, kScale)); }
     friend Fixed operator/(Fixed a, Fixed b) { return fromRaw(mulDiv(a.raw_, kScale, b.raw_)); }
-    friend constexpr Fixed operator*(Fixed a, std::int64_t n) { return fromRaw(a.raw_ * n); }
-    friend constexpr Fixed operator*(std::int64_t n, Fixed a) { return fromRaw(a.raw_ * n); }
-    friend constexpr Fixed operator/(Fixed a, std::int64_t n) { return fromRaw(a.raw_ / n); }
+    friend Fixed operator*(Fixed a, std::int64_t n) { return fromRaw(mulDiv(a.raw_, n, 1)); }
+    friend Fixed operator*(std::int64_t n, Fixed a) { return fromRaw(mulDiv(a.raw_, n, 1)); }
+    friend Fixed operator/(Fixed a, std::int64_t n) { return fromRaw(mulDiv(a.raw_, 1, n)); }
 
-    constexpr Fixed& operator+=(Fixed other) {
-        raw_ += other.raw_;
+    Fixed& operator+=(Fixed other) {
+        raw_ = checkedAdd(raw_, other.raw_);
         return *this;
     }
-    constexpr Fixed& operator-=(Fixed other) {
-        raw_ -= other.raw_;
+    Fixed& operator-=(Fixed other) {
+        raw_ = checkedSub(raw_, other.raw_);
         return *this;
     }
 

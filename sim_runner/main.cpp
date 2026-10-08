@@ -5,11 +5,14 @@
 
 #include "content/loader.h"
 
+#include <algorithm>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -33,14 +36,24 @@ bool parseArgs(std::span<char*> args, Options& out) {
             continue;
         }
         if (arg == "--seed" || arg == "--days") {
-            char* end = nullptr;
-            const unsigned long long value = std::strtoull(args[++i], &end, 10);
-            if (end == nullptr || *end != '\0') {
+            const std::string_view text = args[++i];
+            const bool digitsOnly =
+                !text.empty() &&
+                std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; });
+            if (!digitsOnly) {
+                return false;
+            }
+            errno = 0;
+            const unsigned long long value = std::strtoull(text.data(), nullptr, 10);
+            if (errno == ERANGE) {
                 return false;
             }
             if (arg == "--seed") {
                 out.seed = value;
             } else {
+                if (value > std::numeric_limits<sim::Day>::max()) {
+                    return false;
+                }
                 out.days = static_cast<sim::Day>(value);
             }
             continue;

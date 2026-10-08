@@ -16,11 +16,11 @@ namespace {
 content::Sources goodSources() {
     content::Sources s;
     s.resources = R"([
-      {"id": "iron", "name": "Iron", "base_price": 110, "base_demand_tonnes_per_day": 4000,
-       "elasticity": 0.6, "volatility": 0.02, "storage_cost_per_tonne_month": 1.5,
+      {"id": "iron", "name": "Iron", "base_price": 110, "base_demand_tonnes_per_day": 800,
+       "base_output_tonnes_per_day": 400, "elasticity": 0.6, "volatility": 0.02, "storage_cost_per_tonne_month": 1.5,
        "unlocked_by": null},
       {"id": "lithium", "name": "Lithium", "base_price": 14000.25,
-       "base_demand_tonnes_per_day": 40, "elasticity": 1.1, "volatility": 0.05,
+       "base_demand_tonnes_per_day": 8, "base_output_tonnes_per_day": 5, "elasticity": 1.1, "volatility": 0.05,
        "storage_cost_per_tonne_month": 8, "unlocked_by": "lithium_processing"}
     ])";
     s.techs = R"([
@@ -44,7 +44,7 @@ content::Sources goodSources() {
       "starting_capital": 5000000, "loan_annual_rate": 0.08, "loan_term_months": 60,
       "loan_max_principal": 10000000, "survey_cost": 150000, "survey_duration_days": 45,
       "survey_base_noise": 0.5, "mine_capex_per_hectare": 4000, "mine_build_days": 180,
-      "mine_base_output_tonnes_per_day": 400, "mine_opex_per_day": 12000,
+      "mine_opex_per_day": 12000,
       "auction_window_days": 30, "plots_listed_per_month": 1, "bankruptcy_grace_months": 3
     })";
     return s;
@@ -77,6 +77,7 @@ TEST_CASE("Valid content loads with resolved references and converted numbers", 
     CHECK(c.resources[0].basePrice == sim::Money::fromUnits(110));
     CHECK(c.resources[0].elasticity == sim::Fixed::fromRatio(6, 10));
     CHECK(c.resources[0].storageCostPerTonneMonth == sim::Money::fromCents(150));
+    CHECK(c.resources[0].baseOutputTonnesPerDay == 400);
     CHECK_FALSE(c.resources[0].unlockedBy.valid());
     CHECK(c.resources[1].basePrice == sim::Money::fromCents(1'400'025));
     CHECK(c.resources[1].unlockedBy == c.findTech("lithium_processing"));
@@ -142,10 +143,13 @@ TEST_CASE("Numbers with too much precision or out of range are rejected", "[cont
     s.resources = replaceOnce(s.resources, R"("base_price": 110)", R"("base_price": 110.005)");
     s.resources = replaceOnce(s.resources, R"("elasticity": 0.6)", R"("elasticity": 0.1234567)");
     s.balance = replaceOnce(s.balance, R"("survey_cost": 150000)", R"("survey_cost": 1e999)");
+    s.resources =
+        replaceOnce(s.resources, R"("base_price": 14000.25)", R"("base_price": 200000000000)");
     const auto result = content::loadFromStrings(s);
     CHECK_FALSE(result.ok());
     CHECK(hasError(result, "resources.json", "[0].base_price", "2 decimal places"));
     CHECK(hasError(result, "resources.json", "[0].elasticity", "6 decimal places"));
+    CHECK(hasError(result, "resources.json", "[1].base_price", "magnitude"));
     // nlohmann rejects 1e999 while parsing; the loader's own finite check is a
     // second line of defence that JSON text cannot normally reach.
     CHECK(hasError(result, "balance.json", "", "number overflow"));
@@ -213,6 +217,30 @@ TEST_CASE("Effect fields are validated against the effect type", "[content]") {
     CHECK(hasError(result, "techs.json", "[1].effects[0].value", "not allowed"));
     CHECK(hasError(result, "events.json", "[0].effects[1].resource", "not allowed"));
     CHECK(hasError(result, "events.json", "[0].effects[0].type", "unknown event effect type"));
+}
+
+TEST_CASE("Large valid money values with cents are accepted", "[content]") {
+    content::Sources s = goodSources();
+    s.balance = replaceOnce(s.balance, R"("loan_max_principal": 10000000)",
+                            R"("loan_max_principal": 99999999999.99)");
+    const auto result = content::loadFromStrings(s);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    CHECK(result.content->balance.loanMaxPrincipal == sim::Money::fromCents(9'999'999'999'999LL));
+}
+
+TEST_CASE("Non-object array entries keep later error paths aligned", "[content]") {
+    content::Sources s = goodSources();
+    s.resources =
+        replaceOnce(s.resources, "[\n      {\"id\": \"iron\"", "[ 5,\n      {\"id\": \"iron\"");
+    s.resources = replaceOnce(s.resources, R"("unlocked_by": "lithium_processing")",
+                              R"("unlocked_by": "nope")");
+    const auto result = content::loadFromStrings(s);
+    CHECK_FALSE(result.ok());
+    CHECK(hasError(result, "resources.json", "[0]", "expected an object"));
+    CHECK(hasError(result, "resources.json", "[2].unlocked_by", "unknown tech 'nope'"));
+    // The placeholder element reports nothing beyond the type error.
+    CHECK_FALSE(hasError(result, "resources.json", "[0].id", "missing"));
 }
 
 TEST_CASE("Range objects must be ordered", "[content]") {

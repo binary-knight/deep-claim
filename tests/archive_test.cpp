@@ -146,6 +146,19 @@ TEST_CASE("Simulation save and load reproduce the state exactly", "[archive][sav
     CHECK(restored.stateHash() == original.stateHash());
 }
 
+TEST_CASE("Invalid bool bytes and even RNG increments are rejected", "[archive][save]") {
+    bool flag = false;
+    const std::vector<std::uint8_t> two{2};
+    CHECK_FALSE(sim::fromBytes(two, flag));
+
+    sim::Pcg32 rng(1, 1);
+    std::vector<std::uint8_t> bytes = sim::toBytes(rng);
+    // Layout: 8 bytes state, 8 bytes increment (little-endian); clear bit 0.
+    bytes[8] = static_cast<std::uint8_t>(bytes[8] & 0xFEU);
+    sim::Pcg32 restored;
+    CHECK_FALSE(sim::fromBytes(bytes, restored));
+}
+
 TEST_CASE("Saves with a bad header are rejected and leave the state alone", "[save]") {
     sim::Simulation original(9);
     original.tick(10);

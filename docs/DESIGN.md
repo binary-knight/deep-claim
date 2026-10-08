@@ -82,6 +82,10 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   WorldState. Until the first public build, `kSaveVersion` stays at 1 and
   saves are simply not compatible across commits; versioning and migration
   start when players have saves worth keeping.
+- All Fixed and Money arithmetic is checked: add, subtract and negate go
+  through `checkedAdd`/`checkedSub`/`checkedNegate`, and every multiply or
+  divide (including by plain integers) goes through `mulDiv`. There is no
+  unchecked signed arithmetic on sim quantities.
 - `mulDiv` aborts in every build type on overflow or division by zero. A
   crash with a message is easier to find than a silently corrupted balance,
   and overflow indicates a design bug, not a runtime condition.
@@ -96,7 +100,12 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   JSON strings without touching disk.
 - Numbers in JSON are human units: money in whole currency units with up to
   two decimals, ratios as decimals with up to six. The loader parses doubles,
-  rejects non-finite values and excess precision, then rounds to nearest.
+  rejects non-finite values, magnitudes above 1e11 (money) or 1e6 (ratios),
+  and excess precision down to a thousandth of a unit, then rounds to
+  nearest. Finer excess digits are rounded silently; that is the accepted
+  limit of parsing via double (decision: double-then-round over digit-string
+  parsing). Duplicate JSON keys are not detected (last one wins), a known gap
+  of DOM parsing.
   Truncation is the rule inside the sim, never at the content boundary.
 - Validation collects every error (file, JSON path, message) and fails the
   whole load. Unknown keys are errors so typos cannot silently become
@@ -105,6 +114,12 @@ and clang-tidy are enforced in CI. Warnings are errors by default
 - Tests and sim_runner locate `data/` through a compile definition set by
   CMake; the runner's `--data` flag overrides it. The game will later ship
   data next to its executable.
+- Mine output is per resource (`base_output_tonnes_per_day`) rather than a
+  single global number, so that a lithium mine moves tonnes at a scale that
+  matches lithium demand. Demand baselines are set at roughly one and a half
+  to two mines' output.
+- Saves will carry a fingerprint of the loaded content once WorldState holds
+  content ids (step 5), so a save cannot be opened against reordered data.
 - Deposit priors are log-normal, written as `tonnes_median` and
   `tonnes_spread` (ratio between the 84th percentile and the median) because
   those are easier to tune by hand than log-space parameters. World
@@ -121,10 +136,14 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   but a bad first mine can bankrupt.
 - Survey at 150k and 45 days with base relative noise 0.5; the three survey
   techs bring it down to 0.5 x 0.8 x 0.7 x 0.6 = 0.17.
-- Mine output 400 t/day with opex 12k/day: iron at 110/t grosses 44k/day, so
-  an iron mine pays back capex in one to two years; lithium at 14000/t is
-  the late-game prize behind a 240-day tech.
-- Demand baselines sit a little above what one or two mines produce, so a
-  third mine on the same resource visibly depresses the price.
-- Event daily weights of 0.0015 to 0.003 give roughly one event every one to
-  two in-game years.
+- Mine opex is 12k/day for every mine. Net margins per mine at base prices:
+  iron 400 t x 60 = 24k gross, 12k net; copper 60 t x 900 = 54k gross, 42k
+  net; nickel 20 t x 2200 = 44k gross, 32k net; lithium 5 t x 14000 = 70k
+  gross, 58k net. An iron mine on a 4M plot pays back in about a year;
+  richer resources pay back faster but are rarer and, for lithium, gated
+  behind a 240-day tech chain.
+- Demand baselines: iron 800 t/day (2 mines), copper 100 (1.7 mines), nickel
+  30 (1.5 mines), lithium 8 (1.6 mines). A second mine on the same resource
+  starts to depress the price; a third does so visibly.
+- Event daily weights sum to 0.0021 once all are eligible, so about one event
+  starts every 480 days.

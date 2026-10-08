@@ -21,6 +21,11 @@ void serialize(Archive& ar, Pcg32& rng) {
     std::uint64_t increment = rng.increment();
     ar(state, increment);
     if constexpr (Archive::kReading) {
+        // Pcg32 increments are always odd by construction; an even one means
+        // the stream is corrupt (and zero would make the generator absorbing).
+        if ((increment & 1U) == 0U) {
+            ar.fail();
+        }
         rng.restore(state, increment);
     }
 }

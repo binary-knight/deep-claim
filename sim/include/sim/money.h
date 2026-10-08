@@ -20,8 +20,8 @@ public:
         result.cents_ = cents;
         return result;
     }
-    [[nodiscard]] static constexpr Money fromUnits(std::int64_t units) {
-        return fromCents(units * kCentsPerUnit);
+    [[nodiscard]] static Money fromUnits(std::int64_t units) {
+        return fromCents(mulDiv(units, kCentsPerUnit, 1));
     }
     [[nodiscard]] static constexpr Money zero() { return fromCents(0); }
 
@@ -38,19 +38,19 @@ public:
 
     friend constexpr auto operator<=>(Money, Money) = default;
 
-    constexpr Money operator-() const { return fromCents(-cents_); }
-    friend constexpr Money operator+(Money a, Money b) { return fromCents(a.cents_ + b.cents_); }
-    friend constexpr Money operator-(Money a, Money b) { return fromCents(a.cents_ - b.cents_); }
-    friend constexpr Money operator*(Money a, std::int64_t n) { return fromCents(a.cents_ * n); }
-    friend constexpr Money operator*(std::int64_t n, Money a) { return fromCents(a.cents_ * n); }
-    friend constexpr Money operator/(Money a, std::int64_t n) { return fromCents(a.cents_ / n); }
+    Money operator-() const { return fromCents(checkedNegate(cents_)); }
+    friend Money operator+(Money a, Money b) { return fromCents(checkedAdd(a.cents_, b.cents_)); }
+    friend Money operator-(Money a, Money b) { return fromCents(checkedSub(a.cents_, b.cents_)); }
+    friend Money operator*(Money a, std::int64_t n) { return fromCents(mulDiv(a.cents_, n, 1)); }
+    friend Money operator*(std::int64_t n, Money a) { return fromCents(mulDiv(a.cents_, n, 1)); }
+    friend Money operator/(Money a, std::int64_t n) { return fromCents(mulDiv(a.cents_, 1, n)); }
 
-    constexpr Money& operator+=(Money other) {
-        cents_ += other.cents_;
+    Money& operator+=(Money other) {
+        cents_ = checkedAdd(cents_, other.cents_);
         return *this;
     }
-    constexpr Money& operator-=(Money other) {
-        cents_ -= other.cents_;
+    Money& operator-=(Money other) {
+        cents_ = checkedSub(cents_, other.cents_);
         return *this;
     }
 

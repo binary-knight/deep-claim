@@ -43,16 +43,26 @@ public:
     template <class T>
     void field(T& value) {
         if constexpr (std::is_same_v<T, bool>) {
-            std::uint8_t byte = value ? 1 : 0;
-            integral(byte);
             if constexpr (Derived::kReading) {
-                value = byte != 0;
+                std::uint8_t byte = 0;
+                integral(byte);
+                if (byte > 1) {
+                    self().fail();
+                }
+                value = byte == 1;
+            } else {
+                std::uint8_t byte = value ? 1 : 0;
+                integral(byte);
             }
         } else if constexpr (std::is_enum_v<T>) {
-            auto underlying = static_cast<std::underlying_type_t<T>>(value);
-            integral(underlying);
+            using Underlying = std::underlying_type_t<T>;
             if constexpr (Derived::kReading) {
+                Underlying underlying = 0;
+                integral(underlying);
                 value = static_cast<T>(underlying);
+            } else {
+                auto underlying = static_cast<Underlying>(value);
+                integral(underlying);
             }
         } else if constexpr (std::is_integral_v<T>) {
             integral(value);
@@ -80,12 +90,22 @@ private:
         }
     }
 
+    // Smallest serialized size of one T, used to bound allocations when reading.
+    template <class T>
+    static constexpr std::size_t minSerializedSize() {
+        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
+            return sizeof(T);
+        } else {
+            return 1;
+        }
+    }
+
     template <class T>
     void vector(std::vector<T>& values) {
         auto count = static_cast<std::uint32_t>(values.size());
         integral(count);
         if constexpr (Derived::kReading) {
-            if (!self().checkLength(count)) {
+            if (!self().checkLength(count, minSerializedSize<T>())) {
                 return;
             }
             values.clear();
@@ -100,7 +120,7 @@ private:
         auto count = static_cast<std::uint32_t>(value.size());
         integral(count);
         if constexpr (Derived::kReading) {
-            if (!self().checkLength(count)) {
+            if (!self().checkLength(count, 1)) {
                 return;
             }
             value.assign(count, '\0');
@@ -179,15 +199,19 @@ public:
         return bits;
     }
 
-    // A length prefix can never exceed the bytes left, so reject it before
-    // allocating anything. Each element occupies at least one byte.
-    [[nodiscard]] bool checkLength(std::uint32_t count) {
-        if (failed_ || count > remaining()) {
+    // A length prefix can never need more bytes than remain, so reject it
+    // before allocating anything.
+    [[nodiscard]] bool checkLength(std::uint32_t count, std::size_t minElementSize) {
+        if (failed_ || static_cast<std::uint64_t>(count) * minElementSize > remaining()) {
             failed_ = true;
             return false;
         }
         return true;
     }
+
+    // For serialize() overloads that detect an invariant violation while
+    // reading, such as an impossible RNG state.
+    void fail() { failed_ = true; }
 
     [[nodiscard]] bool failed() const { return failed_; }
     [[nodiscard]] std::size_t remaining() const { return bytes_.size() - position_; }
