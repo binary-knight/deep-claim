@@ -13,6 +13,7 @@
 #include <RmlUi/Core/DataModelHandle.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Input.h>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -70,6 +71,7 @@ private:
     Rml::ElementDocument* document_ = nullptr;
     double statusAge_ = 0.0;
     sim::Day lastRefreshedDay_ = 0;
+    std::size_t seenLogEntries_ = 0;  // log entries already checked for rejections
 };
 
 }  // namespace game

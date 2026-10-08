@@ -29,6 +29,8 @@ struct PlotRow {
     std::string survey;   // latest own survey summary or ""
     std::string mine;     // mine state or ""
     std::string capex;    // capex quote
+    std::string odds;     // the region's chance of each resource
+    bool can_afford_mine = false;
     bool listed = false;
     bool mine_here = false;
     bool owned = false;  // by the player

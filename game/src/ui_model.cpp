@@ -135,11 +135,10 @@ std::string surveyText(const sim::Content& content, const sim::CompanyView& view
                                 formatTonnes(e.tonnesEstimate));
         }
         if (text.empty()) {
-            text = "nothing found";
+            text = "nothing found";  // presence is certain; no error band applies
+        } else {
+            text += std::format(" (error {})", formatRatio(latest->estimates[0].relativeError));
         }
-        const sim::Fixed error =
-            latest->estimates.empty() ? view.surveyNoiseQuote : latest->estimates[0].relativeError;
-        text += std::format(" (error {})", formatRatio(error));
     }
     if (pending) {
         text += text.empty() ? "survey in progress" : "; new survey in progress";
@@ -184,6 +183,14 @@ PlotRow makePlotRow(const sim::Content& content, const sim::CompanyView& view,
     row.region = content.regions[plot.region.index()].name;
     row.area = std::format("{} ha", plot.areaHectares);
     row.capex = formatMoney(plot.mineCapexQuote);
+    row.can_afford_mine = plot.mineCapexQuote <= view.cash - view.reservedCash;
+    for (const sim::DepositPrior& prior : content.regions[plot.region.index()].deposits) {
+        if (!row.odds.empty()) {
+            row.odds += ", ";
+        }
+        const std::int64_t percent = prior.presenceProb.raw() / (sim::Fixed::kScale / 100);
+        row.odds += std::format("{} {}%", content.resources[prior.resource.index()].name, percent);
+    }
     row.listed = plot.listing == sim::PlotListing::Listed;
     row.owned = plot.owner == Session::kPlayer;
     row.status = plotStatus(view, plot);

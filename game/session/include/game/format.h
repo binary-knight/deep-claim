@@ -34,6 +34,9 @@ std::string formatRatio(sim::Fixed ratio);
 // Exact text for an amount the player can submit unchanged: "1234567.89".
 [[nodiscard]] std::string exactMoney(sim::Money amount);
 
+// Plain-language reason for a rejected order.
+[[nodiscard]] const char* rejectReasonText(sim::RejectReason reason);
+
 // One-line human description of a notice for the player's log.
 std::string describeNotice(const sim::Content& content, const sim::CompanyView& view,
                            const sim::Notice& notice);

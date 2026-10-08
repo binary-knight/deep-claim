@@ -217,13 +217,94 @@ std::string exactMoney(sim::Money amount) {
     return std::format("{}{}.{:02}", cents < 0 ? "-" : "", magnitude / 100, magnitude % 100);
 }
 
+const char* rejectReasonText(sim::RejectReason reason) {
+    using R = sim::RejectReason;
+    switch (reason) {
+        case R::None:
+            return "accepted";
+        case R::UnknownCompany:
+            return "unknown company";
+        case R::CompanyBankrupt:
+            return "the company is bankrupt";
+        case R::UnknownPlot:
+            return "no such plot";
+        case R::PlotNotForSale:
+            return "that plot is not up for auction";
+        case R::BidBelowAsk:
+            return "the bid is below the asking price";
+        case R::InsufficientFunds:
+            return "not enough spendable cash (cash minus standing bids)";
+        case R::PlotOwnedByOther:
+            return "another company owns that plot";
+        case R::NotPlotOwner:
+            return "you do not own that plot";
+        case R::SurveyInProgress:
+            return "a survey of that plot is already under way";
+        case R::MineExists:
+            return "that plot already has a mine";
+        case R::UnknownMine:
+            return "no such mine";
+        case R::NotMineOwner:
+            return "you do not own that mine";
+        case R::MineNotSwitchable:
+            return "that mine cannot be switched in its current state";
+        case R::UnknownResource:
+            return "no such resource";
+        case R::InvalidQuantity:
+            return "the quantity must be positive";
+        case R::InsufficientInventory:
+            return "you do not hold that much ore";
+        case R::SaleTooLarge:
+            return "that sale is too large to process";
+        case R::InvalidAmount:
+            return "the amount must be positive and within the balance";
+        case R::LoanLimitExceeded:
+            return "that exceeds your remaining borrowing capacity";
+        case R::LoanTooSmall:
+            return "that is below the minimum loan";
+        case R::TooManyLoans:
+            return "you already have the maximum number of loans";
+        case R::CashLimitExceeded:
+            return "that would exceed the cash limit";
+        case R::UnknownLoan:
+            return "no such loan";
+        case R::NotLoanHolder:
+            return "that is not your loan";
+        case R::LoanNotActive:
+            return "that loan is already settled";
+        case R::UnknownTech:
+            return "no such technology";
+        case R::TechAlreadyKnown:
+            return "you already know that technology";
+        case R::ResearchBusy:
+            return "your lab is already working on something";
+        case R::PrerequisitesMissing:
+            return "its prerequisites are not researched";
+    }
+    return "rejected";
+}
+
 std::string describeNotice(const sim::Content& content, const sim::CompanyView& view,
                            const sim::Notice& n) {
     using K = sim::NoticeKind;
     const std::string who = companyName(view, n.company);
     switch (n.kind) {
-        case K::CommandRejected:
-            return std::format("Order rejected: {}", sim::rejectReasonName(n.reason));
+        case K::CommandRejected: {
+            std::string what = "Order";
+            if (n.plot.valid()) {
+                what += " on " + plotName(n.plot);
+            } else if (n.resource.valid()) {
+                what += " to sell " + resourceName(content, n.resource);
+            } else if (n.tech.valid()) {
+                what += " to research " + content.techs[n.tech.index()].name;
+            } else if (n.loan.valid()) {
+                what += " on a loan";
+            }
+            if (n.amount != sim::Money::zero()) {
+                what += " for " + formatMoney(n.amount);
+            }
+            return std::format("{} rejected: {}", what, rejectReasonText(n.reason));
+        }
         case K::PlotListed:
             return std::format("{} listed for auction, asking {}", plotName(n.plot),
                                formatMoney(n.amount));

@@ -100,6 +100,7 @@
                 <div class="card" style="margin-top: 12dp;">
                     <h2>{{selected_plot_title}}</h2>
                     <div data-for="p : plots" data-if="p.index == selected_plot">
+                        <p>{{p.region}} odds of holding each resource: {{p.odds}}.</p>
                         <p>A mine here costs {{p.capex}} and takes {{mine_build_days}} days to build; a survey costs {{survey_cost}} and reports in {{survey_days}} days.</p>
                         <div class="row">
                             <button data-if="p.can_survey" data-event-click="survey(p.index)">Survey</button>
@@ -108,7 +109,8 @@
                                 <input class="text" type="text" data-value="bid_input"/>
                                 <button class="primary" data-event-click="bid(p.index)">Place bid</button>
                             </span>
-                            <button class="primary" data-if="p.can_build" data-event-click="build(p.index)">Build mine ({{p.capex}})</button>
+                            <button class="primary" data-if="p.can_build && p.can_afford_mine" data-event-click="build(p.index)">Build mine ({{p.capex}})</button>
+                            <button class="disabled" data-if="p.can_build && !p.can_afford_mine">Build mine ({{p.capex}}): not enough spendable cash, see Finance for a loan</button>
                             <button data-if="p.can_toggle_mine" data-event-click="toggle_mine(p.mine_index)">
                                 <span data-if="p.mine_operating">Mothball</span><span data-if="!p.mine_operating">Reopen</span>
                             </button>

@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -107,6 +108,8 @@ void App::bindModel() {
         h.RegisterMember("survey", &PlotRow::survey);
         h.RegisterMember("mine", &PlotRow::mine);
         h.RegisterMember("capex", &PlotRow::capex);
+        h.RegisterMember("odds", &PlotRow::odds);
+        h.RegisterMember("can_afford_mine", &PlotRow::can_afford_mine);
         h.RegisterMember("listed", &PlotRow::listed);
         h.RegisterMember("mine_here", &PlotRow::mine_here);
         h.RegisterMember("owned", &PlotRow::owned);
@@ -278,6 +281,19 @@ bool App::loadDocument() {
 }
 
 void App::refresh() {
+    // Any order the sim rejected since the last refresh is the most useful
+    // thing to tell the player right now.
+    const std::vector<LogEntry>& log = session_->log();
+    if (seenLogEntries_ > log.size()) {
+        seenLogEntries_ = 0;  // the log was reset by a load or new game
+    }
+    for (std::size_t i = seenLogEntries_; i < log.size(); ++i) {
+        if (log[i].notice.kind == sim::NoticeKind::CommandRejected) {
+            model_.status_line = log[i].text;
+            statusAge_ = 0.0;
+        }
+    }
+    seenLogEntries_ = log.size();
     refreshModel(*session_, model_);
     if (handle_) {
         handle_.DirtyAllVariables();
