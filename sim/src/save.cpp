@@ -63,6 +63,9 @@ bool validateCompany(const Content& content, const Company& company) {
     if (company.cash.cents() > kMaxCashCents || company.cash.cents() < -kMaxCashCents) {
         return false;
     }
+    if (company.monthsInsolvent > content.balance.bankruptcyGraceMonths + 1) {
+        return false;
+    }
     const bool stocksOk = std::ranges::all_of(company.inventoryTonnes, [](std::int64_t tonnes) {
         return tonnes >= 0 && tonnes <= kMaxStockTonnes;
     });
@@ -266,39 +269,52 @@ bool validateMineAccounting(const Content& content, const WorldState& state, con
         case MineState::Operating:
         case MineState::Mothballed:
             return anythingLeft;
+        case MineState::Closed:
+            return true;
     }
     return false;
+}
+
+// Ids, dates, state enum and the link back to the plot for one mine.
+bool validateMineShape(const Content& content, const WorldState& state, const Mine& mine,
+                       MineId id) {
+    if (!mine.plot.valid() || mine.plot.index() >= state.plots.size() || !mine.owner.valid() ||
+        mine.owner.index() >= state.companies.size() ||
+        mine.operationalDay != mine.builtDay + content.balance.mineBuildDays ||
+        mine.operationalDay > kMaxDeadline ||
+        mine.extractedTonnes.size() != content.resources.size()) {
+        return false;
+    }
+    if (mine.state != MineState::Building && mine.state != MineState::Operating &&
+        mine.state != MineState::Mothballed && mine.state != MineState::Depleted &&
+        mine.state != MineState::Closed) {
+        return false;
+    }
+    // Closed mines belong to bankrupt companies and vice versa.
+    const bool ownerBankrupt = state.companies[mine.owner.index()].bankrupt != 0;
+    if ((mine.state == MineState::Closed) != ownerBankrupt) {
+        return false;
+    }
+    // Mines become operational while processing operationalDay.
+    const bool shouldBeBuilding = mine.operationalDay >= state.day;
+    if (mine.state != MineState::Closed &&
+        (mine.state == MineState::Building) != shouldBeBuilding) {
+        return false;
+    }
+    const Plot& plot = state.plots[mine.plot.index()];
+    if (plot.owner != mine.owner || plot.mine != id) {
+        return false;  // exactly one mine per plot, owned by the plot's owner
+    }
+    return std::ranges::all_of(mine.extractedTonnes, [](std::int64_t tonnes) {
+        return tonnes >= 0 && tonnes <= kMaxStockTonnes;
+    });
 }
 
 bool validateMines(const Content& content, const WorldState& state) {
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         const Mine& mine = state.mines[i];
-        if (!mine.plot.valid() || mine.plot.index() >= state.plots.size() || !mine.owner.valid() ||
-            mine.owner.index() >= state.companies.size() ||
-            mine.operationalDay != mine.builtDay + content.balance.mineBuildDays ||
-            mine.operationalDay > kMaxDeadline ||
-            mine.extractedTonnes.size() != content.resources.size()) {
-            return false;
-        }
-        if (mine.state != MineState::Building && mine.state != MineState::Operating &&
-            mine.state != MineState::Mothballed && mine.state != MineState::Depleted) {
-            return false;
-        }
-        // Mines become operational while processing operationalDay.
-        const bool shouldBeBuilding = mine.operationalDay >= state.day;
-        if ((mine.state == MineState::Building) != shouldBeBuilding) {
-            return false;
-        }
-        const Plot& plot = state.plots[mine.plot.index()];
-        if (plot.owner != mine.owner || plot.mine != MineId(i)) {
-            return false;  // exactly one mine per plot, owned by the plot's owner
-        }
-        for (const std::int64_t tonnes : mine.extractedTonnes) {
-            if (tonnes < 0 || tonnes > kMaxStockTonnes) {
-                return false;
-            }
-        }
-        if (!validateMineAccounting(content, state, mine)) {
+        if (!validateMineShape(content, state, mine, MineId(i)) ||
+            !validateMineAccounting(content, state, mine)) {
             return false;
         }
     }
@@ -313,6 +329,55 @@ bool validateMines(const Content& content, const WorldState& state) {
     return true;
 }
 
+bool validateMarkets(const Content& content, const WorldState& state) {
+    if (state.markets.size() != content.resources.size()) {
+        return false;
+    }
+    for (std::uint32_t i = 0; i < state.markets.size(); ++i) {
+        const Market& market = state.markets[i];
+        const ResourceDef& resource = content.resources[i];
+        const Money floor = resource.basePrice.scaled(content.balance.priceFloorMult);
+        const Money cap = resource.basePrice.scaled(content.balance.priceCapMult);
+        if (market.price < floor || market.price > cap || market.soldToday != 0 ||
+            market.demandMult < content.balance.demandMultMin ||
+            market.demandMult > content.balance.demandMultMax ||
+            market.supplySmoothed < Fixed::zero() ||
+            market.priceHistory.size() != static_cast<std::size_t>(state.day) + 1) {
+            return false;
+        }
+        if (!std::ranges::all_of(market.priceHistory,
+                                 [](Money price) { return price >= Money::zero(); })) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool validateLoans(const Content& content, const WorldState& state) {
+    std::vector<std::int64_t> outstanding(state.companies.size(), 0);
+    for (const Loan& loan : state.loans) {
+        if (!loan.company.valid() || loan.company.index() >= state.companies.size() ||
+            loan.active > 1 || loan.principal <= Money::zero() || loan.remaining < Money::zero() ||
+            loan.remaining > loan.principal || loan.principalPerMonth <= Money::zero() ||
+            loan.monthsRemaining > content.balance.loanTermMonths || loan.takenDay > state.day) {
+            return false;
+        }
+        const Company& company = state.companies[loan.company.index()];
+        if (loan.active != 0) {
+            if (company.bankrupt != 0 || loan.remaining == Money::zero()) {
+                return false;
+            }
+            outstanding[loan.company.index()] += loan.remaining.cents();
+            if (outstanding[loan.company.index()] > content.balance.loanMaxPrincipal.cents()) {
+                return false;
+            }
+        } else if (loan.remaining != Money::zero() && company.bankrupt == 0) {
+            return false;  // an inactive loan with a balance is only a bankruptcy write-off
+        }
+    }
+    return true;
+}
+
 bool validateWorldImpl(const Content& content, const WorldState& state) {
     if (state.day > kMaxDay || state.plots.size() != state.hidden.plotDeposits.size()) {
         return false;
@@ -321,7 +386,8 @@ bool validateWorldImpl(const Content& content, const WorldState& state) {
     return validateDeposits(content, state) && validateCompanies(content, state) &&
            validatePlots(content, state) && validateAuctions(state) &&
            validateListingQueue(state) && validateSurveys(content, state) &&
-           validateMines(content, state);
+           validateMines(content, state) && validateMarkets(content, state) &&
+           validateLoans(content, state);
 }
 
 }  // namespace

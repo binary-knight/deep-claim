@@ -46,7 +46,9 @@ content::Sources goodSources() {
       "survey_base_noise": 0.5, "mine_capex_per_hectare": 4000, "mine_build_days": 180,
       "mine_opex_per_day": 12000, "mine_mothball_opex_mult": 0.2,
       "auction_window_days": 30, "plots_listed_at_start": 3, "plots_listed_per_month": 1,
-      "bankruptcy_grace_months": 3
+      "bankruptcy_grace_months": 3, "market_supply_smoothing_days": 30,
+      "market_price_adjust_days": 10, "demand_reversion_rate": 0.01, "demand_mult_min": 0.3,
+      "demand_mult_max": 3, "price_floor_mult": 0.1, "price_cap_mult": 10
     })";
     return s;
 }

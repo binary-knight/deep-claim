@@ -110,6 +110,14 @@ struct BalanceParams {
     std::uint32_t plotsListedAtStart = 0;
     std::uint32_t plotsListedPerMonth = 0;
     std::uint32_t bankruptcyGraceMonths = 0;
+    // Commodity market dynamics (see DESIGN.md, step 9).
+    std::uint32_t marketSupplySmoothingDays = 0;  // EMA window for company supply
+    std::uint32_t marketPriceAdjustDays = 0;      // days for price to close most of the gap
+    Fixed demandReversionRate;                    // daily pull of the demand walk toward 1
+    Fixed demandMultMin;
+    Fixed demandMultMax;
+    Fixed priceFloorMult;  // relative to base price
+    Fixed priceCapMult;
 };
 
 struct Content {

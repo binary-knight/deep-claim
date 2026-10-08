@@ -445,7 +445,7 @@ std::vector<std::string> parseResources(const json& document, sim::Content& cont
         def.baseOutputTonnesPerDay =
             valueOr(node.integer("base_output_tonnes_per_day", true, 1, 1'000'000LL), 0LL);
         def.elasticity = valueOr(
-            node.fixed("elasticity", true, sim::Fixed::fromRaw(1), sim::Fixed::fromInt(100)),
+            node.fixed("elasticity", true, sim::Fixed::fromRatio(1, 100), sim::Fixed::fromInt(5)),
             sim::Fixed::zero());
         def.volatility =
             valueOr(node.fixed("volatility", true, sim::Fixed::zero(), sim::Fixed::one()),
@@ -753,11 +753,28 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
         return;
     }
     const Node node(document, "", sink);
-    node.allowKeys({"starting_capital", "loan_annual_rate", "loan_term_months",
-                    "loan_max_principal", "survey_cost", "survey_duration_days",
-                    "survey_base_noise", "mine_capex_per_hectare", "mine_build_days",
-                    "mine_opex_per_day", "mine_mothball_opex_mult", "auction_window_days",
-                    "plots_listed_at_start", "plots_listed_per_month", "bankruptcy_grace_months"});
+    node.allowKeys({"starting_capital",
+                    "loan_annual_rate",
+                    "loan_term_months",
+                    "loan_max_principal",
+                    "survey_cost",
+                    "survey_duration_days",
+                    "survey_base_noise",
+                    "mine_capex_per_hectare",
+                    "mine_build_days",
+                    "mine_opex_per_day",
+                    "mine_mothball_opex_mult",
+                    "auction_window_days",
+                    "plots_listed_at_start",
+                    "market_supply_smoothing_days",
+                    "market_price_adjust_days",
+                    "demand_reversion_rate",
+                    "demand_mult_min",
+                    "demand_mult_max",
+                    "price_floor_mult",
+                    "price_cap_mult",
+                    "plots_listed_per_month",
+                    "bankruptcy_grace_months"});
     const sim::Money zero = sim::Money::zero();
     balance.startingCapital =
         valueOr(node.money("starting_capital", true, sim::Money::fromCents(1)), zero);
@@ -792,6 +809,25 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
         valueOr(node.integer("plots_listed_per_month", true, 0, 1000), 0LL));
     balance.bankruptcyGraceMonths = static_cast<std::uint32_t>(
         valueOr(node.integer("bankruptcy_grace_months", true, 0, 120), 0LL));
+    balance.marketSupplySmoothingDays = static_cast<std::uint32_t>(
+        valueOr(node.integer("market_supply_smoothing_days", true, 1, 3600), 1LL));
+    balance.marketPriceAdjustDays = static_cast<std::uint32_t>(
+        valueOr(node.integer("market_price_adjust_days", true, 1, 3600), 1LL));
+    balance.demandReversionRate =
+        valueOr(node.fixed("demand_reversion_rate", true, sim::Fixed::zero(), sim::Fixed::one()),
+                sim::Fixed::zero());
+    balance.demandMultMin = valueOr(
+        node.fixed("demand_mult_min", true, sim::Fixed::fromRatio(1, 100), sim::Fixed::one()),
+        sim::Fixed::one());
+    balance.demandMultMax =
+        valueOr(node.fixed("demand_mult_max", true, sim::Fixed::one(), sim::Fixed::fromInt(100)),
+                sim::Fixed::one());
+    balance.priceFloorMult = valueOr(
+        node.fixed("price_floor_mult", true, sim::Fixed::fromRatio(1, 100), sim::Fixed::one()),
+        sim::Fixed::one());
+    balance.priceCapMult =
+        valueOr(node.fixed("price_cap_mult", true, sim::Fixed::one(), sim::Fixed::fromInt(100)),
+                sim::Fixed::one());
 }
 
 std::optional<std::string> readFile(const std::filesystem::path& path) {

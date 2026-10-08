@@ -78,7 +78,19 @@ void serialize(Archive& ar, Plot& plot) {
 template <class Archive>
 void serialize(Archive& ar, Company& company) {
     ar(company.name, company.kind, company.cash, company.inventoryTonnes, company.completedTechs,
-       company.bankrupt);
+       company.monthsInsolvent, company.bankrupt);
+}
+
+template <class Archive>
+void serialize(Archive& ar, Market& market) {
+    ar(market.price, market.demandMult, market.supplySmoothed, market.soldToday,
+       market.priceHistory);
+}
+
+template <class Archive>
+void serialize(Archive& ar, Loan& loan) {
+    ar(loan.company, loan.principal, loan.remaining, loan.principalPerMonth, loan.takenDay,
+       loan.monthsRemaining, loan.active);
 }
 
 template <class Archive>
@@ -126,7 +138,8 @@ void serialize(Archive& ar, HiddenState& hidden) {
 template <class Archive>
 void serialize(Archive& ar, WorldState& state) {
     ar(state.day, state.rng, state.companies, state.plots, state.auctions, state.surveys,
-       state.mines, state.listingQueue, state.nextListing, state.bidCounter, state.hidden);
+       state.mines, state.markets, state.loans, state.listingQueue, state.nextListing,
+       state.bidCounter, state.hidden);
 }
 
 // ---- commands (queued commands travel with saves) ----
@@ -152,6 +165,21 @@ void serialize(Archive& ar, SetMineState& command) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, SellOre& command) {
+    ar(command.company, command.resource, command.tonnes);
+}
+
+template <class Archive>
+void serialize(Archive& ar, TakeLoan& command) {
+    ar(command.company, command.principal);
+}
+
+template <class Archive>
+void serialize(Archive& ar, RepayLoan& command) {
+    ar(command.company, command.loan, command.amount);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Command& command) {
     auto index = static_cast<std::uint8_t>(command.index());
     ar(index);
@@ -168,6 +196,15 @@ void serialize(Archive& ar, Command& command) {
                 break;
             case 3:
                 command = SetMineState{};
+                break;
+            case 4:
+                command = SellOre{};
+                break;
+            case 5:
+                command = TakeLoan{};
+                break;
+            case 6:
+                command = RepayLoan{};
                 break;
             default:
                 ar.fail();
@@ -223,7 +260,10 @@ void serialize(Archive& ar, BalanceParams& balance) {
        balance.loanMaxPrincipal, balance.surveyCost, balance.surveyDurationDays,
        balance.surveyBaseNoise, balance.mineCapexPerHectare, balance.mineBuildDays,
        balance.mineOpexPerDay, balance.mineMothballOpexMult, balance.auctionWindowDays,
-       balance.plotsListedAtStart, balance.plotsListedPerMonth, balance.bankruptcyGraceMonths);
+       balance.plotsListedAtStart, balance.plotsListedPerMonth, balance.bankruptcyGraceMonths,
+       balance.marketSupplySmoothingDays, balance.marketPriceAdjustDays,
+       balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
+       balance.priceFloorMult, balance.priceCapMult);
 }
 
 template <class Archive>

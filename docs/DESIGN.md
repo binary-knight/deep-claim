@@ -269,3 +269,50 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   consistency for surveys and mines, one pending survey per company and
   plot, estimates only for present resources, prerequisite closure of
   completed techs, and reverse plot-to-mine links.
+
+## Commodity markets (step 9)
+
+- One market per resource, public to everyone: price, price history (one
+  entry per day), and a smoothed figure for how much companies have been
+  selling. The demand factor is hidden; players infer it from price.
+- The world outside the game supplies exactly `base_demand_tonnes_per_day`
+  at `base_price`, so with no company sales and no demand shock the price
+  sits at base. Each day: demand = base demand x demand factor; supply =
+  base demand + EMA of company sales (`market_supply_smoothing_days`);
+  target = base price x (demand / supply)^elasticity with the ratio clamped
+  to [0.2, 5]; price moves 1/`market_price_adjust_days` of the way to the
+  target; price is clamped to [floor, cap] multiples of base.
+- The demand factor is a mean-reverting random walk from the market RNG
+  stream: factor += (1 - factor) x `demand_reversion_rate` + volatility x z,
+  clamped to [`demand_mult_min`, `demand_mult_max`]. Event effects (step 12)
+  multiply demand on top.
+- SellOre sells at the price shown that day (yesterday's close), before the
+  day's extraction and price update, so a player cannot react to a price
+  they have not seen. Proceeds are checked against the cash bound; a sale
+  that would overflow is rejected as SaleTooLarge.
+- Elasticity is bounded to [0.01, 5] in the loader so the power law stays
+  inside fixedExp's domain.
+- With the shipped numbers one iron mine (400 t/day into a base demand of
+  800) pushes the price to about 0.78x base; two mines to 0.66x; three to
+  0.57x.
+
+## Finance (step 10)
+
+- Loans: equal monthly principal instalments (ceil(principal / term)) plus
+  interest on the remaining balance at `loan_annual_rate` / 12. A company
+  may borrow up to `loan_max_principal` minus what it still owes. Early
+  repayment (RepayLoan) pays down principal and must come from available
+  cash.
+- Month end (every 30th day, pipeline step 6), for each solvent company in
+  id order: storage charge (`storage_cost_per_tonne_month` x inventory x
+  storage techs), then loan instalments, then the insolvency check. Charges
+  are taken even when cash is negative; debt simply grows.
+- Insolvency: a month-end with negative cash increments `monthsInsolvent`
+  and emits a private warning with the months left; a month-end with
+  non-negative cash resets it. When the count exceeds
+  `bankruptcy_grace_months` the company is bankrupt: a public notice, all
+  its mines Closed (no output, no opex), its loans written off, and every
+  future command rejected. Its plots stay in its name for Milestone 1. For
+  the player this is the lose condition the UI shows.
+- `monthsInsolvent` and `bankrupt` are private to the company; only the
+  final Bankrupt notice is public.

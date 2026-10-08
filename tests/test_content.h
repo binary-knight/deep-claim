@@ -121,6 +121,13 @@ inline sim::Content makeContent() {
     c.balance.plotsListedAtStart = 3;
     c.balance.plotsListedPerMonth = 1;
     c.balance.bankruptcyGraceMonths = 3;
+    c.balance.marketSupplySmoothingDays = 30;
+    c.balance.marketPriceAdjustDays = 10;
+    c.balance.demandReversionRate = sim::Fixed::fromRatio(1, 100);
+    c.balance.demandMultMin = sim::Fixed::fromRatio(3, 10);
+    c.balance.demandMultMax = sim::Fixed::fromInt(3);
+    c.balance.priceFloorMult = sim::Fixed::fromRatio(1, 10);
+    c.balance.priceCapMult = sim::Fixed::fromInt(10);
     return c;
 }
 

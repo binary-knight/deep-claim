@@ -41,7 +41,29 @@ struct SetMineState {
     std::uint8_t operate = 1;  // 1 = Operating, 0 = Mothballed
 };
 
-using Command = std::variant<BidOnPlot, CommissionSurvey, BuildMine, SetMineState>;
+// Sell stored ore at today's market price.
+struct SellOre {
+    CompanyId company;
+    ResourceId resource;
+    std::int64_t tonnes = 0;
+};
+
+// Borrow up to the remaining loan capacity; repaid in equal monthly
+// principal instalments plus interest on the balance.
+struct TakeLoan {
+    CompanyId company;
+    Money principal;
+};
+
+// Pay down a loan's principal early.
+struct RepayLoan {
+    CompanyId company;
+    LoanId loan;
+    Money amount;
+};
+
+using Command = std::variant<BidOnPlot, CommissionSurvey, BuildMine, SetMineState, SellOre,
+                             TakeLoan, RepayLoan>;
 
 [[nodiscard]] CompanyId commandCompany(const Command& command);
 void setCommandCompany(Command& command, CompanyId company);
@@ -61,22 +83,38 @@ enum class RejectReason : std::uint8_t {
     UnknownMine,
     NotMineOwner,
     MineNotSwitchable,
+    UnknownResource,
+    InvalidQuantity,
+    InsufficientInventory,
+    SaleTooLarge,
+    InvalidAmount,
+    LoanLimitExceeded,
+    UnknownLoan,
+    NotLoanHolder,
+    LoanNotActive,
 };
 
 // Private notices are visible only to `company`; public ones to everyone.
 enum class NoticeKind : std::uint8_t {
-    CommandRejected,  // private: company, plot/mine, amount, reason
-    PlotListed,       // public: plot, auction, amount = ask price
-    PlotRelisted,     // public: plot, auction (the new one), amount = new ask
-    PlotSold,         // public: company (buyer), plot, auction, amount paid
-    AuctionLost,      // private: company was outbid on plot/auction
-    BidForfeited,     // private: company could no longer pay its bid at close
-    SurveyStarted,    // private: company, plot, amount = cost
-    SurveyComplete,   // private: company, plot
-    MineStarted,      // public: company, plot, mine, amount = capex
-    MineOperational,  // private: company, plot, mine
-    MineDepleted,     // private: company, plot, mine
-    MineSwitched,     // private: company, plot, mine (state changed)
+    CommandRejected,    // private: company, plot/mine, amount, reason
+    PlotListed,         // public: plot, auction, amount = ask price
+    PlotRelisted,       // public: plot, auction (the new one), amount = new ask
+    PlotSold,           // public: company (buyer), plot, auction, amount paid
+    AuctionLost,        // private: company was outbid on plot/auction
+    BidForfeited,       // private: company could no longer pay its bid at close
+    SurveyStarted,      // private: company, plot, amount = cost
+    SurveyComplete,     // private: company, plot
+    MineStarted,        // public: company, plot, mine, amount = capex
+    MineOperational,    // private: company, plot, mine
+    MineDepleted,       // private: company, plot, mine
+    MineSwitched,       // private: company, plot, mine (state changed)
+    OreSold,            // private: company, resource, tonnes, amount = proceeds
+    StorageCharged,     // private: company, amount
+    LoanTaken,          // private: company, loan, amount = principal
+    LoanPayment,        // private: company, loan, amount = interest + principal paid
+    LoanRepaid,         // private: company, loan (fully paid off)
+    InsolvencyWarning,  // private: company, amount = cash (negative), tonnes = months left
+    Bankrupt,           // public: company
 };
 
 struct Notice {
@@ -85,6 +123,9 @@ struct Notice {
     PlotId plot;
     AuctionId auction;
     MineId mine;
+    ResourceId resource;
+    LoanId loan;
+    std::int64_t tonnes = 0;
     Money amount;
     RejectReason reason = RejectReason::None;
 };

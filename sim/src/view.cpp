@@ -2,6 +2,7 @@
 #include "sim/view.h"
 
 #include "sim/content.h"
+#include "sim/finance.h"
 #include "sim/ids.h"
 #include "sim/mines.h"
 #include "sim/money.h"
@@ -86,6 +87,37 @@ void addOwnMines(const Content& content, const WorldState& state, CompanyId view
     }
 }
 
+void addMarkets(const Content& content, const WorldState& state, CompanyView& view) {
+    for (std::uint32_t i = 0; i < state.markets.size(); ++i) {
+        const Market& market = state.markets[i];
+        MarketView marketView;
+        marketView.resource = ResourceId(i);
+        marketView.price = market.price;
+        marketView.basePrice = content.resources[i].basePrice;
+        marketView.baseDemandTonnesPerDay = content.resources[i].baseDemandTonnesPerDay;
+        marketView.recentSupplyTonnesPerDay = market.supplySmoothed.truncToInt();
+        marketView.priceHistory = market.priceHistory;
+        view.markets.push_back(marketView);
+    }
+}
+
+void addOwnLoans(const WorldState& state, CompanyId viewer, CompanyView& view) {
+    for (std::uint32_t i = 0; i < state.loans.size(); ++i) {
+        const Loan& loan = state.loans[i];
+        if (loan.company != viewer) {
+            continue;
+        }
+        LoanView loanView;
+        loanView.id = LoanId(i);
+        loanView.principal = loan.principal;
+        loanView.remaining = loan.remaining;
+        loanView.principalPerMonth = loan.principalPerMonth;
+        loanView.monthsRemaining = loan.monthsRemaining;
+        loanView.active = loan.active != 0;
+        view.loans.push_back(loanView);
+    }
+}
+
 void addCompanies(const WorldState& state, CompanyView& view) {
     for (std::uint32_t i = 0; i < state.companies.size(); ++i) {
         const Company& other = state.companies[i];
@@ -115,6 +147,11 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     view.reservedCash = reservedCash(state, company);
     view.inventoryTonnes = self.inventoryTonnes;
     view.completedTechs = self.completedTechs;
+    view.outstandingPrincipal = outstandingPrincipal(state, company);
+    view.loanCapacity = content.balance.loanMaxPrincipal - view.outstandingPrincipal;
+    view.monthlyStorageCost = monthlyStorageCost(content, state, company);
+    view.monthsInsolvent = self.monthsInsolvent;
+    view.bankrupt = self.bankrupt != 0;
 
     view.plots.reserve(state.plots.size());
     for (std::uint32_t i = 0; i < state.plots.size(); ++i) {
@@ -122,6 +159,8 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     }
     addOwnSurveys(state, company, view);
     addOwnMines(content, state, company, view);
+    addMarkets(content, state, view);
+    addOwnLoans(state, company, view);
     addCompanies(state, view);
     return view;
 }

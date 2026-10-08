@@ -56,7 +56,28 @@ struct Company {
     Money cash;                                 // may go negative; see finance
     std::vector<std::int64_t> inventoryTonnes;  // indexed by ResourceId
     std::vector<TechId> completedTechs;
+    std::uint32_t monthsInsolvent = 0;  // consecutive month-ends with negative cash
     std::uint8_t bankrupt = 0;
+};
+
+// One commodity market per resource. Everything here is public.
+struct Market {
+    Money price;                      // today's trading price
+    Fixed demandMult;                 // random-walk demand factor around 1
+    Fixed supplySmoothed;             // EMA of tonnes sold per day by all companies
+    std::int64_t soldToday = 0;       // reset by the daily price update
+    std::vector<Money> priceHistory;  // one entry per day, index = day
+};
+
+// Equal principal instalments plus interest on the remaining balance.
+struct Loan {
+    CompanyId company;
+    Money principal;          // original amount
+    Money remaining;          // principal still owed
+    Money principalPerMonth;  // ceil(principal / term)
+    Day takenDay = 0;
+    std::uint32_t monthsRemaining = 0;
+    std::uint8_t active = 1;
 };
 
 // Sealed bid. A company holds at most one bid per auction; a new bid replaces
@@ -101,6 +122,7 @@ enum class MineState : std::uint8_t {
     Operating,   // producing, full opex
     Mothballed,  // not producing, reduced opex
     Depleted,    // every deposit exhausted; no opex
+    Closed,      // owner went bankrupt; permanently shut, no opex
 };
 
 struct Mine {
@@ -124,6 +146,8 @@ struct WorldState {
     std::vector<Auction> auctions;
     std::vector<Survey> surveys;
     std::vector<Mine> mines;
+    std::vector<Market> markets;  // indexed by ResourceId
+    std::vector<Loan> loans;
     std::vector<PlotId> listingQueue;  // shuffled at generation; listed in order
     std::uint32_t nextListing = 0;     // index into listingQueue
     std::uint32_t bidCounter = 0;      // monotonic order stamp for tie-breaks

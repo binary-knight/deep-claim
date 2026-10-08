@@ -40,6 +40,7 @@ Money mineDailyOpex(const Content& content, const Company& company, MineState st
                 .scaled(content.balance.mineMothballOpexMult);
         case MineState::Building:
         case MineState::Depleted:
+        case MineState::Closed:
             return Money::zero();
     }
     return Money::zero();
@@ -146,6 +147,9 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
         const MineId id(i);
         Company& owner = state.companies[mine.owner.index()];
 
+        if (mine.state == MineState::Closed || mine.state == MineState::Depleted) {
+            continue;
+        }
         if (mine.state == MineState::Building) {
             if (mine.operationalDay <= state.day) {
                 mine.state = MineState::Operating;

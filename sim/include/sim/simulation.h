@@ -58,6 +58,13 @@ public:
 private:
     void applyCommands();
     void dispatch(const Command& command);
+    void handle(const BidOnPlot& c);
+    void handle(const CommissionSurvey& c);
+    void handle(const BuildMine& c);
+    void handle(const SetMineState& c);
+    void handle(const SellOre& c);
+    void handle(const TakeLoan& c);
+    void handle(const RepayLoan& c);
     void reject(CompanyId company, PlotId plot, Money amount, RejectReason reason);
 
     const Content* content_;

@@ -58,6 +58,25 @@ struct SurveyView {
     std::vector<SurveyEstimateView> estimates;
 };
 
+// Public commodity market data.
+struct MarketView {
+    ResourceId resource;
+    Money price;
+    Money basePrice;
+    std::int64_t baseDemandTonnesPerDay = 0;
+    std::int64_t recentSupplyTonnesPerDay = 0;  // smoothed company sales
+    std::vector<Money> priceHistory;            // index = day
+};
+
+struct LoanView {
+    LoanId id;
+    Money principal;
+    Money remaining;
+    Money principalPerMonth;
+    std::uint32_t monthsRemaining = 0;
+    bool active = false;
+};
+
 // One of the viewer's own mines, with what extraction has revealed so far.
 struct MineView {
     MineId id;
@@ -81,11 +100,18 @@ struct CompanyView {
     Day day = 0;
     Money cash;
     Money reservedCash;  // committed to standing bids
+    Money outstandingPrincipal;
+    Money loanCapacity;        // how much more may be borrowed
+    Money monthlyStorageCost;  // at current inventory
+    std::uint32_t monthsInsolvent = 0;
+    bool bankrupt = false;
     std::vector<std::int64_t> inventoryTonnes;
     std::vector<TechId> completedTechs;  // own research only
     std::vector<PlotView> plots;
     std::vector<SurveyView> surveys;
     std::vector<MineView> mines;
+    std::vector<MarketView> markets;  // indexed by ResourceId
+    std::vector<LoanView> loans;      // own loans only
     std::vector<CompanyPublicView> companies;
 };
 

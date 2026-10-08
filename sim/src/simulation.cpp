@@ -2,6 +2,8 @@
 
 #include "sim/commands.h"
 #include "sim/fatal.h"
+#include "sim/finance.h"
+#include "sim/markets.h"
 #include "sim/mines.h"
 #include "sim/plot_market.h"
 #include "sim/save.h"
@@ -33,6 +35,7 @@ Simulation::Simulation(const Content& content, Seed seed, const GameSetup& setup
     : content_(&content), contentHash_(hashContent(content)) {
     state_.rng = RngStreams(seed);
     generateWorld(content, state_);
+    initMarkets(content, state_);
     state_.companies.push_back(makeCompany(content, setup.playerName, CompanyKind::Player));
     for (const std::string& name : setup.aiNames) {
         state_.companies.push_back(makeCompany(content, name, CompanyKind::Ai));
@@ -70,40 +73,67 @@ void Simulation::applyCommands() {
     pending_.clear();
 }
 
+void Simulation::handle(const BidOnPlot& c) {
+    if (const auto reason = validateBid(state_, c)) {
+        reject(c.company, c.plot, c.amount, *reason);
+    } else {
+        applyBid(state_, c);
+    }
+}
+
+void Simulation::handle(const CommissionSurvey& c) {
+    if (const auto reason = validateSurvey(*content_, state_, c)) {
+        reject(c.company, c.plot, Money::zero(), *reason);
+    } else {
+        applySurvey(*content_, state_, c, report_);
+    }
+}
+
+void Simulation::handle(const BuildMine& c) {
+    if (const auto reason = validateBuildMine(*content_, state_, c)) {
+        reject(c.company, c.plot, Money::zero(), *reason);
+    } else {
+        applyBuildMine(*content_, state_, c, report_);
+    }
+}
+
+void Simulation::handle(const SetMineState& c) {
+    if (const auto reason = validateSetMineState(state_, c)) {
+        Notice notice =
+            makeNotice(NoticeKind::CommandRejected, c.company, PlotId(), Money::zero(), *reason);
+        notice.mine = c.mine;
+        report_.notices.push_back(notice);
+    } else {
+        applySetMineState(state_, c, report_);
+    }
+}
+
+void Simulation::handle(const SellOre& c) {
+    if (const auto reason = validateSell(state_, c)) {
+        reject(c.company, PlotId(), Money::zero(), *reason);
+    } else {
+        applySell(state_, c, report_);
+    }
+}
+
+void Simulation::handle(const TakeLoan& c) {
+    if (const auto reason = validateTakeLoan(*content_, state_, c)) {
+        reject(c.company, PlotId(), c.principal, *reason);
+    } else {
+        applyTakeLoan(*content_, state_, c, report_);
+    }
+}
+
+void Simulation::handle(const RepayLoan& c) {
+    if (const auto reason = validateRepayLoan(state_, c)) {
+        reject(c.company, PlotId(), c.amount, *reason);
+    } else {
+        applyRepayLoan(state_, c, report_);
+    }
+}
+
 void Simulation::dispatch(const Command& command) {
-    std::visit(
-        [&](const auto& concrete) {
-            using T = std::decay_t<decltype(concrete)>;
-            if constexpr (std::is_same_v<T, BidOnPlot>) {
-                if (const auto reason = validateBid(state_, concrete)) {
-                    reject(concrete.company, concrete.plot, concrete.amount, *reason);
-                } else {
-                    applyBid(state_, concrete);
-                }
-            } else if constexpr (std::is_same_v<T, CommissionSurvey>) {
-                if (const auto reason = validateSurvey(*content_, state_, concrete)) {
-                    reject(concrete.company, concrete.plot, Money::zero(), *reason);
-                } else {
-                    applySurvey(*content_, state_, concrete, report_);
-                }
-            } else if constexpr (std::is_same_v<T, BuildMine>) {
-                if (const auto reason = validateBuildMine(*content_, state_, concrete)) {
-                    reject(concrete.company, concrete.plot, Money::zero(), *reason);
-                } else {
-                    applyBuildMine(*content_, state_, concrete, report_);
-                }
-            } else if constexpr (std::is_same_v<T, SetMineState>) {
-                if (const auto reason = validateSetMineState(state_, concrete)) {
-                    Notice notice = makeNotice(NoticeKind::CommandRejected, concrete.company,
-                                               PlotId(), Money::zero(), *reason);
-                    notice.mine = concrete.mine;
-                    report_.notices.push_back(notice);
-                } else {
-                    applySetMineState(state_, concrete, report_);
-                }
-            }
-        },
-        command);
+    std::visit([this](const auto& concrete) { handle(concrete); }, command);
 }
 
 const TickReport& Simulation::tick() {
@@ -118,6 +148,8 @@ const TickReport& Simulation::tick() {
     runPlotMarket(*content_, state_, report_);  // 2
     runSurveys(*content_, state_, report_);     // 3
     runMines(*content_, state_, report_);       // 4
+    runMarkets(*content_, state_);              // 5
+    runFinance(*content_, state_, report_);     // 6
     ++state_.day;                               // 9
     return report_;
 }
