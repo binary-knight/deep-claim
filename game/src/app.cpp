@@ -29,6 +29,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -59,7 +60,7 @@ App::App(Rml::Context& context, platform::Services& services, const sim::Content
             return series;
         }
         const sim::ResourceId id(static_cast<std::uint32_t>(resource));
-        const std::vector<sim::Money>& history = session_->simulation().priceHistory(id);
+        const std::vector<sim::Money>& history = session_->priceHistory(id);
         const std::size_t count = std::min<std::size_t>(history.size(), sim::kRecentPriceDays);
         for (std::size_t i = history.size() - count; i < history.size(); ++i) {
             series.values.push_back(history[i].cents());
@@ -91,6 +92,7 @@ void App::newGame(std::uint64_t seed) {
 void App::bindModel() {
     Rml::DataModelConstructor ctor = context_->CreateDataModel("game");
     if (!ctor) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg) RmlUi logging is printf-style
         Rml::Log::Message(Rml::Log::LT_ERROR, "Could not create the game data model");
         return;
     }
@@ -157,7 +159,15 @@ void App::bindModel() {
     ctor.Bind("company", &model_.company);
     ctor.Bind("day", &model_.day);
     ctor.Bind("cash", &model_.cash);
+    ctor.Bind("spendable", &model_.spendable);
     ctor.Bind("debt", &model_.debt);
+    ctor.Bind("insolvency", &model_.insolvency);
+    ctor.Bind("show_intro", &model_.show_intro);
+    ctor.Bind("survey_cost", &model_.survey_cost);
+    ctor.Bind("survey_days", &model_.survey_days);
+    ctor.Bind("mine_build_days", &model_.mine_build_days);
+    ctor.Bind("grace_months", &model_.grace_months);
+    ctor.Bind("loan_terms", &model_.loan_terms);
     ctor.Bind("speed_label", &model_.speed_label);
     ctor.Bind("speed", &model_.speed);
     ctor.Bind("tab", &model_.tab);
@@ -243,6 +253,11 @@ void App::bindModel() {
         "save", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { onSave(); });
     ctor.BindEventCallback(
         "load", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { onLoad(); });
+    ctor.BindEventCallback("hide_intro",
+                           [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+                               model_.show_intro = false;
+                               handle_.DirtyVariable("show_intro");
+                           });
     ctor.BindEventCallback("new_game", [this](Rml::DataModelHandle, Rml::Event&,
                                               const Rml::VariantList&) { onNewGame(); });
     handle_ = ctor.GetModelHandle();
@@ -250,9 +265,11 @@ void App::bindModel() {
 }
 
 bool App::loadDocument() {
-    const std::string path = (assetsDir_ / "ui" / "main.rml").string();
+    const std::u8string u8 = (assetsDir_ / "ui" / "main.rml").u8string();
+    const std::string path(u8.begin(), u8.end());  // RmlUi takes UTF-8
     document_ = context_->LoadDocument(path);
     if (document_ == nullptr) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg) RmlUi logging is printf-style
         Rml::Log::Message(Rml::Log::LT_ERROR, "Could not load %s", path.c_str());
         return false;
     }
@@ -314,36 +331,6 @@ bool App::onKey(Rml::Input::KeyIdentifier key) {
     }
 }
 
-bool App::parseMoney(const std::string& text, sim::Money& out) const {
-    // Accepts "1200000", "1,200,000", "1.2M", "450k", "$3.5m".
-    std::string digits;
-    double multiplier = 1.0;
-    for (const char c : text) {
-        if (std::isdigit(static_cast<unsigned char>(c)) != 0 || c == '.') {
-            digits += c;
-        } else if (c == 'k' || c == 'K') {
-            multiplier = 1'000.0;
-        } else if (c == 'm' || c == 'M') {
-            multiplier = 1'000'000.0;
-        } else if (c == 'b' || c == 'B') {
-            multiplier = 1'000'000'000.0;
-        }
-    }
-    if (digits.empty()) {
-        return false;
-    }
-    try {
-        const double units = std::stod(digits) * multiplier;
-        if (units < 0.0 || units > 1.0e15) {
-            return false;
-        }
-        out = sim::Money::fromCents(static_cast<std::int64_t>(units * 100.0 + 0.5));
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
 void App::onSetTab(int tab) {
     model_.tab = tab;
     handle_.DirtyVariable("tab");
@@ -362,8 +349,9 @@ void App::onStep() {
 void App::onSelectPlot(int index) {
     model_.selected_plot = index;
     if (index >= 0 && index < static_cast<int>(session_->view().plots.size())) {
+        // Exact text so the default bid is the ask to the cent, not a rounded label.
         model_.bid_input =
-            formatMoney(session_->view().plots[static_cast<std::size_t>(index)].askPrice);
+            exactMoney(session_->view().plots[static_cast<std::size_t>(index)].askPrice);
     }
     refresh();
 }
@@ -376,24 +364,26 @@ void App::onSelectResource(int index) {
 void App::onSurvey(int plotIndex) {
     session_->submit(sim::CommissionSurvey{Session::kPlayer,
                                            sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
-    setStatus("Survey ordered; it will start tomorrow.");
+    setStatus("Survey queued; it starts tomorrow and results arrive in the log.");
 }
 
 void App::onBid(int plotIndex) {
     sim::Money amount;
-    if (!parseMoney(model_.bid_input, amount)) {
-        setStatus("Enter a bid amount such as 1.2M or 850k.");
+    if (!game::parseMoney(model_.bid_input, amount)) {
+        setStatus("Enter a bid amount such as 1.2M, 850k or 1,200,000.");
         return;
     }
     session_->submit(sim::BidOnPlot{Session::kPlayer,
                                     sim::PlotId(static_cast<std::uint32_t>(plotIndex)), amount});
-    setStatus("Bid of " + formatMoney(amount) + " placed; it is sealed until the auction closes.");
+    setStatus(
+        "Bid of " + formatMoney(amount) +
+        " queued for tomorrow; sealed until the auction closes. Rejections appear in the log.");
 }
 
 void App::onBuild(int plotIndex) {
     session_->submit(
         sim::BuildMine{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
-    setStatus("Mine ordered; construction starts tomorrow.");
+    setStatus("Mine queued; construction starts tomorrow if the order is accepted.");
 }
 
 void App::onToggleMine(int mineIndex) {
@@ -414,29 +404,20 @@ void App::onSell(int resourceIndex, bool all) {
         resourceIndex >= static_cast<int>(session_->view().inventoryTonnes.size())) {
         return;
     }
-    const std::int64_t stock =
-        session_->view().inventoryTonnes[static_cast<std::size_t>(resourceIndex)];
-    std::int64_t tonnes = stock;
-    if (!all) {
-        try {
-            tonnes = std::stoll(model_.sell_input);
-        } catch (...) {
-            setStatus("Enter a quantity in tonnes.");
-            return;
-        }
-    }
-    if (tonnes <= 0 || tonnes > stock) {
-        setStatus("You hold " + formatTonnes(stock) + " of that resource.");
+    std::int64_t tonnes = session_->view().inventoryTonnes[static_cast<std::size_t>(resourceIndex)];
+    if (!all && !game::parseTonnes(model_.sell_input, tonnes)) {
+        setStatus("Enter a quantity in tonnes, such as 1,500.");
         return;
     }
+    // The sim decides whether the quantity is valid; its reason shows in the log.
     session_->submit(sim::SellOre{
         Session::kPlayer, sim::ResourceId(static_cast<std::uint32_t>(resourceIndex)), tonnes});
-    setStatus("Sale of " + formatTonnes(tonnes) + " ordered at today's price.");
+    setStatus("Sale of " + formatTonnes(tonnes) + " queued at today's price.");
 }
 
 void App::onTakeLoan() {
     sim::Money amount;
-    if (!parseMoney(model_.loan_input, amount)) {
+    if (!game::parseMoney(model_.loan_input, amount)) {
         setStatus("Enter a loan amount such as 2M.");
         return;
     }
@@ -446,7 +427,7 @@ void App::onTakeLoan() {
 
 void App::onRepay(int loanIndex) {
     sim::Money amount;
-    if (!parseMoney(model_.repay_input, amount)) {
+    if (!game::parseMoney(model_.repay_input, amount)) {
         setStatus("Enter an amount to repay.");
         return;
     }
@@ -458,17 +439,32 @@ void App::onRepay(int loanIndex) {
 void App::onResearch(int techIndex) {
     session_->submit(
         sim::StartResearch{Session::kPlayer, sim::TechId(static_cast<std::uint32_t>(techIndex))});
-    setStatus("Research ordered.");
+    setStatus("Research queued; it starts tomorrow if the order is accepted.");
 }
 
 void App::onSave() {
     const std::filesystem::path path = services_->saveDirectory() / kSaveFile;
+    const std::filesystem::path temp = path.string() + ".tmp";
     const std::vector<std::uint8_t> bytes = session_->save();
-    std::ofstream file(path, std::ios::binary);
-    file.write(reinterpret_cast<const char*>(
-                   bytes.data()),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-               static_cast<std::streamsize>(bytes.size()));
-    setStatus(file ? "Saved to " + path.string() : "Could not write " + path.string());
+    {
+        std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) byte buffer to stream
+        const auto* chars = reinterpret_cast<const char*>(bytes.data());
+        file.write(chars, static_cast<std::streamsize>(bytes.size()));
+        file.close();
+        if (!file) {
+            setStatus("Could not write " + temp.string());
+            return;
+        }
+    }
+    // Replace the previous save only once the new one is fully on disk.
+    std::error_code error;
+    std::filesystem::rename(temp, path, error);
+    if (error) {
+        setStatus("Could not replace " + path.string() + ": " + error.message());
+        return;
+    }
+    setStatus("Saved to " + path.string());
 }
 
 void App::onLoad() {

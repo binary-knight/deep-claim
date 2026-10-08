@@ -474,3 +474,22 @@ and clang-tidy are enforced in CI. Warnings are errors by default
 - This sandbox has no X11 or OpenGL headers, so the client is compile-checked
   locally with SDL3's dummy video driver and run on the developer's machine;
   CI builds it on Ubuntu (with the X11/Wayland dev packages) and Windows.
+
+### After the Codex review of the client
+
+- Default bids are prefilled as exact text (`exactMoney`), never a rounded
+  label. Typed amounts go through strict parsers in the session layer
+  (`parseMoney`, `parseTonnes`): the whole text must be consumed, money is
+  parsed into integer cents, signs are preserved so the sim rejects negative
+  orders with its own reason. Both are unit tested.
+- The session reads only the view (day, company count) and exposes
+  `priceHistory` and `stateHash`; the app no longer touches the Simulation.
+- The sell handler forwards whatever quantity parses; the sim decides.
+- Saves are written to a temporary file and renamed into place after a
+  successful close. SDL's UTF-8 paths are converted explicitly on the way
+  into std::filesystem and back out to RmlUi.
+- Assets are copied by an always-run target so .rml/.rcss/.json edits reach
+  the build tree without a C++ change.
+- The dashboard opens with a dismissible how-to-play card, the header shows
+  spendable cash next to cash, finance shows loan terms and insolvency
+  progress, status lines say "queued" and point to the log for rejections.

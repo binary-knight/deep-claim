@@ -9,6 +9,7 @@
 #include "sim/commands.h"
 #include "sim/content.h"
 #include "sim/ids.h"
+#include "sim/money.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
 #include "sim/view.h"
@@ -52,19 +53,24 @@ public:
     [[nodiscard]] const sim::CompanyView& view() const { return view_; }
     [[nodiscard]] const std::vector<LogEntry>& log() const { return log_; }
     [[nodiscard]] bool gameOver() const { return view_.bankrupt; }
-    [[nodiscard]] sim::Day day() const { return simulation_.state().day; }
+    [[nodiscard]] sim::Day day() const { return view_.day; }
+    // Daily prices since the start of the game, for charts.
+    [[nodiscard]] const std::vector<sim::Money>& priceHistory(sim::ResourceId resource) const {
+        return simulation_.priceHistory(resource);
+    }
 
     // ---- persistence ----
     [[nodiscard]] std::vector<std::uint8_t> save() const { return simulation_.save(); }
     [[nodiscard]] bool load(std::span<const std::uint8_t> bytes);
 
     [[nodiscard]] const sim::Content& content() const { return *content_; }
-    [[nodiscard]] const sim::Simulation& simulation() const { return simulation_; }
+    // Tests compare hashes through this; the interface never needs it.
+    [[nodiscard]] std::uint64_t stateHash() const { return simulation_.stateHash(); }
 
 private:
     void tickOnce();
     void refreshView();
-    void appendLog(const sim::Notice& notice);
+    void appendLog(sim::Day day, const sim::Notice& notice);
 
     const sim::Content* content_;
     sim::Simulation simulation_;

@@ -81,12 +81,21 @@ struct UiModel {
     std::string company;
     std::string day;
     std::string cash;
+    std::string spendable;
     std::string debt;
+    std::string insolvency;  // empty while solvent
     std::string speed_label;
     int speed = 0;  // 0 paused, 1, 2, 3
     int tab = 0;    // 0 dashboard, 1 plots, 2 market, 3 research, 4 finance, 5 log
     bool game_over = false;
     std::string status_line;  // transient feedback (saved, rejected, ...)
+    bool show_intro = true;
+    // Terms from content, for explanatory text
+    std::string survey_cost;
+    std::string survey_days;
+    std::string mine_build_days;
+    std::string grace_months;
+    std::string loan_terms;
 
     // Dashboard
     std::string loan_capacity;

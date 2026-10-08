@@ -95,13 +95,18 @@ TEST_CASE("Rivals act on their own and the session can be saved and loaded", "[s
     CHECK(other.log()[0].text == "Game loaded");
     other.stepOneDay();
     session.stepOneDay();
-    CHECK(other.simulation().stateHash() == session.simulation().stateHash());
+    CHECK(other.stateHash() == session.stateHash());
 }
 
 TEST_CASE("The session stops once the player is bankrupt", "[session]") {
     const sim::Content content = test::makeContent();
     game::Session session(content, 1, test::setup());
-    sim::WorldState broke = session.simulation().state();
+    sim::WorldState broke;
+    {
+        // Build a bankrupt starting state through a parallel simulation.
+        sim::Simulation twin(content, 1, test::setup());
+        broke = twin.state();
+    }
     broke.companies[0].cash = sim::Money::fromUnits(-50'000'000);
     REQUIRE(session.load(sim::saveGame(broke, {}, sim::hashContent(content))));
     session.setSpeed(game::Speed::Fastest);
@@ -112,4 +117,43 @@ TEST_CASE("The session stops once the player is bankrupt", "[session]") {
     const sim::Day stopped = session.day();
     CHECK(session.advance(5.0) == 0);
     CHECK(session.day() == stopped);
+}
+
+TEST_CASE("Money and tonnage parsers are strict and exact", "[session][format]") {
+    sim::Money money;
+    CHECK(game::parseMoney("1234567", money));
+    CHECK(money == sim::Money::fromUnits(1'234'567));
+    CHECK(game::parseMoney("1,234,567.89", money));
+    CHECK(money == sim::Money::fromCents(123'456'789));
+    CHECK(game::parseMoney("$1.2M", money));
+    CHECK(money == sim::Money::fromUnits(1'200'000));
+    CHECK(game::parseMoney("450k", money));
+    CHECK(money == sim::Money::fromUnits(450'000));
+    CHECK(game::parseMoney("2.5B", money));
+    CHECK(money == sim::Money::fromUnits(2'500'000'000LL));
+    CHECK(game::parseMoney("1.234567M", money));
+    CHECK(money == sim::Money::fromUnits(1'234'567));
+    CHECK(game::parseMoney("-2M", money));
+    CHECK(money == sim::Money::fromUnits(-2'000'000));  // sign kept for the sim to reject
+    CHECK_FALSE(game::parseMoney("1e6", money));
+    CHECK_FALSE(game::parseMoney("1.2.3M", money));
+    CHECK_FALSE(game::parseMoney("abc", money));
+    CHECK_FALSE(game::parseMoney("", money));
+    CHECK_FALSE(game::parseMoney("1.001", money));  // finer than a cent
+    CHECK_FALSE(game::parseMoney("99999999999999999999", money));
+
+    std::int64_t tonnes = 0;
+    CHECK(game::parseTonnes("1,000", tonnes));
+    CHECK(tonnes == 1000);
+    CHECK(game::parseTonnes(" 42 ", tonnes));
+    CHECK(tonnes == 42);
+    CHECK(game::parseTonnes("-5", tonnes));
+    CHECK(tonnes == -5);
+    CHECK_FALSE(game::parseTonnes("10.9", tonnes));
+    CHECK_FALSE(game::parseTonnes("", tonnes));
+    CHECK_FALSE(game::parseTonnes("10t", tonnes));
+
+    CHECK(game::exactMoney(sim::Money::fromCents(123'456'789)) == "1234567.89");
+    CHECK(game::parseMoney(game::exactMoney(sim::Money::fromCents(123'456'789)), money));
+    CHECK(money == sim::Money::fromCents(123'456'789));
 }

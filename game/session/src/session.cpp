@@ -35,7 +35,7 @@ Session::Session(const sim::Content& content, sim::Seed seed, const sim::GameSet
     : content_(&content), simulation_(content, seed, setup), ai_(content) {
     refreshView();
     for (const sim::Notice& notice : simulation_.reportFor(kPlayer)) {
-        appendLog(notice);
+        appendLog(0, notice);
     }
 }
 
@@ -95,14 +95,15 @@ bool Session::load(std::span<const std::uint8_t> bytes) {
 void Session::tickOnce() {
     // Rivals decide from their own views; the player's orders are already
     // queued. The sim applies everything in company order.
-    const std::size_t companies = simulation_.state().companies.size();
+    const std::size_t companies = view_.companies.size();
     for (std::uint32_t c = 1; c < companies; ++c) {
         simulation_.collectCommands(sim::CompanyId(c), ai_);
     }
+    const sim::Day processed = view_.day;
     simulation_.tick();
     refreshView();
     for (const sim::Notice& notice : simulation_.reportFor(kPlayer)) {
-        appendLog(notice);
+        appendLog(processed, notice);
     }
 }
 
@@ -110,9 +111,9 @@ void Session::refreshView() {
     view_ = simulation_.view(kPlayer);
 }
 
-void Session::appendLog(const sim::Notice& notice) {
+void Session::appendLog(sim::Day day, const sim::Notice& notice) {
     LogEntry entry;
-    entry.day = simulation_.lastReport().day;
+    entry.day = day;
     entry.notice = notice;
     entry.text = describeNotice(*content_, view_, notice);
     log_.push_back(std::move(entry));

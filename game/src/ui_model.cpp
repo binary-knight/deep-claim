@@ -88,97 +88,128 @@ std::string effectsText(const sim::Content& content, const sim::TechDef& tech) {
     return out;
 }
 
+std::string plotStatus(const sim::CompanyView& view, const sim::PlotView& plot) {
+    if (plot.listing == sim::PlotListing::Listed) {
+        return "For sale";
+    }
+    if (plot.listing == sim::PlotListing::Sold) {
+        return companyLabel(view, plot.owner);
+    }
+    return "Not listed";
+}
+
+std::string auctionText(const sim::PlotView& plot) {
+    if (!plot.auction) {
+        return "";
+    }
+    std::string text = std::format("closes {}, {} bid{}", formatDay(plot.auction->closesOnDay),
+                                   plot.auction->bidCount, plot.auction->bidCount == 1 ? "" : "s");
+    if (plot.auction->myBid > sim::Money::zero()) {
+        text += ", yours " + formatMoney(plot.auction->myBid);
+    }
+    return text;
+}
+
+// The player's latest completed survey of a plot plus any pending one.
+std::string surveyText(const sim::Content& content, const sim::CompanyView& view,
+                       const sim::PlotView& plot) {
+    const sim::SurveyView* latest = nullptr;
+    bool pending = false;
+    for (const sim::SurveyView& survey : view.surveys) {
+        if (survey.plot != plot.id) {
+            continue;
+        }
+        if (survey.complete) {
+            latest = &survey;
+        } else {
+            pending = true;
+        }
+    }
+    std::string text;
+    if (latest != nullptr) {
+        for (const sim::SurveyEstimateView& e : latest->estimates) {
+            if (!text.empty()) {
+                text += ", ";
+            }
+            text += std::format("{} ~{}", content.resources[e.resource.index()].name,
+                                formatTonnes(e.tonnesEstimate));
+        }
+        if (text.empty()) {
+            text = "nothing found";
+        }
+        const sim::Fixed error =
+            latest->estimates.empty() ? view.surveyNoiseQuote : latest->estimates[0].relativeError;
+        text += std::format(" (error {})", formatRatio(error));
+    }
+    if (pending) {
+        text += text.empty() ? "survey in progress" : "; new survey in progress";
+    }
+    return text;
+}
+
+// Mine state, and for the player's own mines today's output and opex.
+std::string mineText(const sim::Content& content, const sim::CompanyView& view,
+                     const sim::PlotView& plot, bool owned) {
+    if (!plot.mine) {
+        return "";
+    }
+    std::string text = mineStateLabel(plot.mine->state);
+    if (!owned) {
+        return text;
+    }
+    for (const sim::MineView& mine : view.mines) {
+        if (mine.id != plot.mine->id) {
+            continue;
+        }
+        std::string output;
+        for (std::uint32_t r = 0; r < mine.lastDayTonnes.size(); ++r) {
+            if (mine.lastDayTonnes[r] > 0) {
+                output += std::format(" {} {}", formatTonnes(mine.lastDayTonnes[r]),
+                                      content.resources[r].name);
+            }
+        }
+        if (!output.empty()) {
+            text += ", today:" + output;
+        }
+        text += ", opex " + formatMoney(mine.dailyOpex) + "/day";
+    }
+    return text;
+}
+
+PlotRow makePlotRow(const sim::Content& content, const sim::CompanyView& view,
+                    const sim::PlotView& plot) {
+    PlotRow row;
+    row.index = static_cast<int>(plot.id.value());
+    row.name = std::format("Plot #{}", plot.id.value() + 1);
+    row.region = content.regions[plot.region.index()].name;
+    row.area = std::format("{} ha", plot.areaHectares);
+    row.capex = formatMoney(plot.mineCapexQuote);
+    row.listed = plot.listing == sim::PlotListing::Listed;
+    row.owned = plot.owner == Session::kPlayer;
+    row.status = plotStatus(view, plot);
+    row.ask = row.listed ? formatMoney(plot.askPrice) : "";
+    row.auction = row.listed ? auctionText(plot) : "";
+    row.survey = surveyText(content, view, plot);
+    row.mine = mineText(content, view, plot, row.owned);
+    row.mine_here = plot.mine.has_value();
+    row.mine_operating = plot.mine && plot.mine->state == sim::MineState::Operating;
+    row.mine_index = plot.mine ? static_cast<int>(plot.mine->id.value()) : -1;
+    const bool pending = std::ranges::any_of(
+        view.surveys, [&](const sim::SurveyView& s) { return s.plot == plot.id && !s.complete; });
+    const bool switchable = plot.mine && (plot.mine->state == sim::MineState::Operating ||
+                                          plot.mine->state == sim::MineState::Mothballed);
+    row.can_survey = !pending && (!plot.owner.valid() || row.owned) && !view.bankrupt;
+    row.can_build = row.owned && !plot.mine && !view.bankrupt;
+    row.can_toggle_mine = row.owned && switchable && !view.bankrupt;
+    return row;
+}
+
 void fillPlots(const Session& session, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     model.plots.clear();
     for (const sim::PlotView& plot : view.plots) {
-        PlotRow row;
-        row.index = static_cast<int>(plot.id.value());
-        row.name = std::format("Plot #{}", plot.id.value() + 1);
-        row.region = content.regions[plot.region.index()].name;
-        row.area = std::format("{} ha", plot.areaHectares);
-        row.capex = formatMoney(plot.mineCapexQuote);
-        row.listed = plot.listing == sim::PlotListing::Listed;
-        row.owned = plot.owner == Session::kPlayer;
-        if (row.listed) {
-            row.status = "For sale";
-            row.ask = formatMoney(plot.askPrice);
-            if (plot.auction) {
-                row.auction =
-                    std::format("closes {}, {} bid{}", formatDay(plot.auction->closesOnDay),
-                                plot.auction->bidCount, plot.auction->bidCount == 1 ? "" : "s");
-                if (plot.auction->myBid > sim::Money::zero()) {
-                    row.auction += ", yours " + formatMoney(plot.auction->myBid);
-                }
-            }
-        } else if (plot.listing == sim::PlotListing::Sold) {
-            row.status = companyLabel(view, plot.owner);
-        } else {
-            row.status = "Not listed";
-        }
-        // Latest own survey.
-        const sim::SurveyView* latest = nullptr;
-        bool pending = false;
-        for (const sim::SurveyView& survey : view.surveys) {
-            if (survey.plot != plot.id) {
-                continue;
-            }
-            if (survey.complete) {
-                latest = &survey;
-            } else {
-                pending = true;
-            }
-        }
-        if (latest != nullptr) {
-            if (latest->estimates.empty()) {
-                row.survey = "nothing found";
-            }
-            for (const sim::SurveyEstimateView& e : latest->estimates) {
-                if (!row.survey.empty()) {
-                    row.survey += ", ";
-                }
-                row.survey += std::format("{} ~{}", content.resources[e.resource.index()].name,
-                                          formatTonnes(e.tonnesEstimate));
-            }
-            row.survey +=
-                std::format(" (error {})", formatRatio(latest->estimates.empty()
-                                                           ? view.surveyNoiseQuote
-                                                           : latest->estimates[0].relativeError));
-        } else if (pending) {
-            row.survey = "survey in progress";
-        }
-        if (plot.mine) {
-            row.mine_here = true;
-            row.mine = mineStateLabel(plot.mine->state);
-            row.mine_operating = plot.mine->state == sim::MineState::Operating;
-            row.mine_index = static_cast<int>(plot.mine->id.value());
-            if (row.owned) {
-                for (const sim::MineView& mine : view.mines) {
-                    if (mine.id == plot.mine->id) {
-                        std::string output;
-                        for (std::uint32_t r = 0; r < mine.lastDayTonnes.size(); ++r) {
-                            if (mine.lastDayTonnes[r] > 0) {
-                                output += std::format(" {} {}", formatTonnes(mine.lastDayTonnes[r]),
-                                                      content.resources[r].name);
-                            }
-                        }
-                        if (!output.empty()) {
-                            row.mine += ", today:" + output;
-                        }
-                        row.mine += ", opex " + formatMoney(mine.dailyOpex) + "/day";
-                    }
-                }
-            }
-        }
-        const bool unowned = !plot.owner.valid();
-        row.can_survey = !pending && (unowned || row.owned) && !view.bankrupt;
-        row.can_build = row.owned && !plot.mine && !view.bankrupt;
-        row.can_toggle_mine = row.owned && plot.mine &&
-                              (plot.mine->state == sim::MineState::Operating ||
-                               plot.mine->state == sim::MineState::Mothballed) &&
-                              !view.bankrupt;
-        model.plots.push_back(row);
+        model.plots.push_back(makePlotRow(content, view, plot));
     }
     if (model.selected_plot >= 0 && model.selected_plot < static_cast<int>(model.plots.size())) {
         const PlotRow& row = model.plots[static_cast<std::size_t>(model.selected_plot)];
@@ -311,7 +342,22 @@ void refreshModel(const Session& session, UiModel& model) {
     model.company = view.companies[Session::kPlayer.index()].name;
     model.day = formatDay(session.day());
     model.cash = formatMoney(view.cash);
+    model.spendable = formatMoney(view.cash - view.reservedCash);
     model.debt = formatMoney(view.outstandingPrincipal);
+    model.insolvency = view.monthsInsolvent == 0
+                           ? ""
+                           : std::format("Insolvent for {} month-end{}; bankruptcy after {}",
+                                         view.monthsInsolvent, view.monthsInsolvent == 1 ? "" : "s",
+                                         content.balance.bankruptcyGraceMonths + 1);
+    model.survey_cost = formatMoney(content.balance.surveyCost);
+    model.survey_days = std::to_string(content.balance.surveyDurationDays);
+    model.mine_build_days = std::to_string(content.balance.mineBuildDays);
+    model.grace_months = std::to_string(content.balance.bankruptcyGraceMonths);
+    model.loan_terms = std::format(
+        "Loans run {} months at {} a year on the balance, repaid in equal principal instalments "
+        "plus interest; minimum {}, at most {} at once.",
+        content.balance.loanTermMonths, formatRatio(content.balance.loanAnnualRate),
+        formatMoney(content.balance.loanMinPrincipal), content.balance.maxActiveLoans);
     model.speed_label = speedLabel(session.speed());
     model.speed = static_cast<int>(session.speed());
     model.game_over = session.gameOver();

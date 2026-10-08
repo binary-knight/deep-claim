@@ -37,9 +37,13 @@ target_compile_definitions(deep_claim PRIVATE DC_DATA_DIR="${CMAKE_SOURCE_DIR}/d
                                               DC_ASSETS_DIR="${CMAKE_SOURCE_DIR}/game/assets")
 
 # Copy data and assets next to the binary so a zipped build directory runs.
-add_custom_command(TARGET deep_claim POST_BUILD
+# A separate target that always runs, so editing an .rml or .json and
+# rebuilding refreshes the copy even when no C++ changed.
+add_custom_target(deep_claim_assets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data"
             "$<TARGET_FILE_DIR:deep_claim>/data"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/game/assets"
             "$<TARGET_FILE_DIR:deep_claim>/assets"
-    COMMENT "Copying data and assets next to deep_claim")
+    COMMENT "Copying data and assets next to deep_claim"
+    VERBATIM)
+add_dependencies(deep_claim_assets deep_claim)

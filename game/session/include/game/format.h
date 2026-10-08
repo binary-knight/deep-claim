@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace game {
 
@@ -22,6 +23,16 @@ std::string formatDay(sim::Day day);
 std::string formatTonnes(std::int64_t tonnes);
 // "x0.85"
 std::string formatRatio(sim::Fixed ratio);
+
+// Strict parsers for what the player types. Money accepts "1200000",
+// "1,200,000", "1200000.50", "1.2M", "450k", "2.5B", with an optional leading
+// "$" and sign; the whole text must be consumed. Tonnes accept digits with
+// optional thousands separators and an optional sign. Negative values are
+// returned so the sim can reject them with its own reason.
+[[nodiscard]] bool parseMoney(std::string_view text, sim::Money& out);
+[[nodiscard]] bool parseTonnes(std::string_view text, std::int64_t& out);
+// Exact text for an amount the player can submit unchanged: "1234567.89".
+[[nodiscard]] std::string exactMoney(sim::Money amount);
 
 // One-line human description of a notice for the player's log.
 std::string describeNotice(const sim::Content& content, const sim::CompanyView& view,

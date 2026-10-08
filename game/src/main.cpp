@@ -15,12 +15,18 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <format>
+#include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace {
 
-game::App* g_app = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+// The backend's key callback is a plain function pointer, so the app is
+// reached through this pointer.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+game::App* gApp = nullptr;
 
 bool keyDown(Rml::Context* context, Rml::Input::KeyIdentifier key, int keyModifier,
              float nativeDpRatio, bool priority) {
@@ -36,15 +42,28 @@ bool keyDown(Rml::Context* context, Rml::Input::KeyIdentifier key, int keyModifi
     }
     (void)context;
     (void)keyModifier;
-    return g_app == nullptr || !g_app->onKey(key);
+    return gApp == nullptr || !gApp->onKey(key);
 }
 
 // Shipped builds keep data and assets next to the executable; development
 // builds fall back to the repository.
+// SDL returns UTF-8; build filesystem paths from it explicitly so non-ASCII
+// install and user directories work on Windows too.
+std::filesystem::path utf8Path(const char* text) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) char to char8_t view
+    const std::u8string_view view(reinterpret_cast<const char8_t*>(text));
+    return {view};
+}
+
+std::string utf8String(const std::filesystem::path& path) {
+    const std::u8string text = path.u8string();
+    return {text.begin(), text.end()};
+}
+
 std::filesystem::path locate(const char* subdir, const char* devFallback) {
     const char* base = SDL_GetBasePath();
     if (base != nullptr) {
-        const std::filesystem::path candidate = std::filesystem::path(base) / subdir;
+        const std::filesystem::path candidate = utf8Path(base) / subdir;
         if (std::filesystem::exists(candidate)) {
             return candidate;
         }
@@ -65,8 +84,8 @@ int main(int /*argc*/, char** /*argv*/) {
         std::fputs(content::formatErrors(loaded.errors).c_str(), stderr);
         return 1;
     }
-    std::printf("Deep Claim: data from %s, assets from %s\n", dataDir.string().c_str(),
-                assetsDir.string().c_str());
+    std::cout << std::format("Deep Claim: data from {}, assets from {}\n", utf8String(dataDir),
+                             utf8String(assetsDir));
 
     if (!Backend::Initialize("Deep Claim", 1366, 820, true)) {
         std::fputs("Could not create the window or OpenGL context.\n", stderr);
@@ -76,8 +95,8 @@ int main(int /*argc*/, char** /*argv*/) {
     Rml::SetRenderInterface(Backend::GetRenderInterface());
     Rml::Initialise();
 
-    Rml::LoadFontFace((assetsDir / "fonts" / "DejaVuSans.ttf").string());
-    Rml::LoadFontFace((assetsDir / "fonts" / "DejaVuSans-Bold.ttf").string());
+    Rml::LoadFontFace(utf8String(assetsDir / "fonts" / "DejaVuSans.ttf"));
+    Rml::LoadFontFace(utf8String(assetsDir / "fonts" / "DejaVuSans-Bold.ttf"));
     game::registerChartElement();
 
     Rml::Context* context = Rml::CreateContext("main", Rml::Vector2i(1366, 820));
@@ -89,7 +108,7 @@ int main(int /*argc*/, char** /*argv*/) {
     Rml::Debugger::Initialise(context);
 
     char* prefPath = SDL_GetPrefPath("DeepClaim", "DeepClaim");
-    const std::filesystem::path saveBase = prefPath != nullptr ? prefPath : ".";
+    const std::filesystem::path saveBase = prefPath != nullptr ? utf8Path(prefPath) : ".";
     SDL_free(prefPath);
     std::unique_ptr<platform::Services> services =
         platform::makeNullServices(saveBase, "Deep Claim Mining");
@@ -97,7 +116,7 @@ int main(int /*argc*/, char** /*argv*/) {
     int exitCode = 0;
     {
         game::App app(*context, *services, *loaded.content, assetsDir);
-        g_app = &app;
+        gApp = &app;
         if (!app.loadDocument()) {
             exitCode = 1;
         }
@@ -114,7 +133,7 @@ int main(int /*argc*/, char** /*argv*/) {
             context->Render();
             Backend::PresentFrame();
         }
-        g_app = nullptr;
+        gApp = nullptr;
     }
 
     Rml::Shutdown();

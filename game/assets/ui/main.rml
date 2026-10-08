@@ -8,7 +8,9 @@
         <div class="stat"><span class="label">Company</span><span class="value">{{company}}</span></div>
         <div class="stat"><span class="label">Date</span><span class="value">{{day}}</span></div>
         <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
+        <div class="stat"><span class="label">Spendable</span><span class="value">{{spendable}}</span></div>
         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span></div>
+        <div class="stat"><span class="label">Speed</span><span class="value">{{speed_label}}</span></div>
         <div class="grow"></div>
         <div class="row">
             <button data-class-active="speed == 0" data-event-click="set_speed(0)">Pause</button>
@@ -17,7 +19,7 @@
             <button data-class-active="speed == 3" data-event-click="set_speed(3)">20x</button>
             <button data-event-click="step">Step day</button>
             <span class="gap"></span>
-            <button class="small" data-event-click="save">Save</button>
+            <button class="small" data-event-click="save">Save (one slot)</button>
             <button class="small" data-event-click="load">Load</button>
             <button class="small" data-event-click="new_game">New game</button>
         </div>
@@ -38,6 +40,13 @@
             <!-- Dashboard -->
             <div data-if="tab == 0">
                 <h1>Dashboard</h1>
+                <div class="card" data-if="show_intro">
+                    <h2>How to play</h2>
+                    <p>The game starts paused. Orders you place are applied when the next day runs, and the log tells you whether they were accepted.</p>
+                    <p>1. Plots: survey a listed plot ({{survey_cost}}, {{survey_days}} days) to estimate its deposits, then place a sealed bid before the auction closes. 2. Build a mine on a plot you own; it takes {{mine_build_days}} days and then produces every day. 3. Sell ore from the Market tab when the price suits you; storage costs money each month. 4. Research improves surveys and mines. 5. Stay solvent: more than {{grace_months}} month-ends in the red is bankruptcy.</p>
+                    <p class="muted">Cash is what you hold; spendable is cash minus your standing bids. Only one save slot exists; New game and Load replace the current game without asking.</p>
+                    <button class="small" data-event-click="hide_intro">Hide</button>
+                </div>
                 <div class="cards">
                     <div class="card">
                         <h2>Company</h2>
@@ -48,9 +57,10 @@
                     </div>
                     <div class="card">
                         <h2>Finance</h2>
-                        <p>Cash {{cash}}</p>
+                        <p>Cash {{cash}}, spendable {{spendable}}</p>
                         <p>Debt {{debt}}, can still borrow {{loan_capacity}}</p>
                         <p>Storage {{storage_cost}}</p>
+                        <p class="danger" data-if="insolvency != ''">{{insolvency}}</p>
                     </div>
                     <div class="card">
                         <h2>Competitors</h2>
@@ -90,7 +100,7 @@
                 <div class="card" style="margin-top: 12dp;">
                     <h2>{{selected_plot_title}}</h2>
                     <div data-for="p : plots" data-if="p.index == selected_plot">
-                        <p>Mine here would cost {{p.capex}} to build.</p>
+                        <p>A mine here costs {{p.capex}} and takes {{mine_build_days}} days to build; a survey costs {{survey_cost}} and reports in {{survey_days}} days.</p>
                         <div class="row">
                             <button data-if="p.can_survey" data-event-click="survey(p.index)">Survey</button>
                             <button class="disabled" data-if="!p.can_survey">Survey</button>
@@ -147,7 +157,7 @@
                 <div class="cards">
                     <div class="card">
                         <h2>Borrow</h2>
-                        <p>Capacity {{loan_capacity}}. Repaid in equal monthly instalments plus interest.</p>
+                        <p>Capacity {{loan_capacity}}. {{loan_terms}}</p>
                         <div class="row">
                             <input class="text" type="text" data-value="loan_input"/>
                             <button class="primary" data-event-click="take_loan">Take loan</button>
@@ -164,9 +174,11 @@
                     <tr><th>Remaining</th><th>Instalment</th><th>Term</th><th>Repay early</th></tr>
                     <tr data-for="l : loans" data-if="l.active">
                         <td>{{l.remaining}}</td><td>{{l.instalment}}</td><td>{{l.months}}</td>
-                        <td class="row">
-                            <input class="text" type="text" data-value="repay_input"/>
-                            <button class="small" data-event-click="repay(l.index)">Repay</button>
+                        <td>
+                            <div class="row">
+                                <input class="text" type="text" data-value="repay_input"/>
+                                <button class="small" data-event-click="repay(l.index)">Repay</button>
+                            </div>
                         </td>
                     </tr>
                 </table>
@@ -188,6 +200,7 @@
         <div class="panel">
             <h1>Bankrupt</h1>
             <p>{{company}} could not cover its debts for too long. The courts have closed the mines.</p>
+            <p class="warning">{{status_line}}</p>
             <button class="primary" data-event-click="new_game">Start a new company</button>
             <button data-event-click="load">Load last save</button>
         </div>

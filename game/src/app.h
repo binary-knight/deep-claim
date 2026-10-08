@@ -41,7 +41,6 @@ private:
     void bindModel();
     void refresh();
     void setStatus(std::string text);
-    bool parseMoney(const std::string& text, sim::Money& out) const;
 
     // Event handlers wired to data-event-click in the RML.
     void onSetTab(int tab);
