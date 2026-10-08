@@ -82,6 +82,7 @@ struct CompanyView {
     Money cash;
     Money reservedCash;  // committed to standing bids
     std::vector<std::int64_t> inventoryTonnes;
+    std::vector<TechId> completedTechs;  // own research only
     std::vector<PlotView> plots;
     std::vector<SurveyView> surveys;
     std::vector<MineView> mines;

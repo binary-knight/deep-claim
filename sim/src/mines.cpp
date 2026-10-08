@@ -55,7 +55,8 @@ std::int64_t mineDailyOutput(const Content& content, const Company& company, Res
     // depletion factor = 0.5 + 0.5 * remaining / total
     const Fixed share = Fixed::fromRaw(mulDiv(tonnesRemaining, Fixed::kScale, tonnesTotal));
     const Fixed depletion = Fixed::fromRatio(1, 2) + share / 2;
-    std::int64_t output = mulDiv(base, (techMult * depletion).raw(), Fixed::kScale);
+    std::int64_t output =
+        checkedMulDiv(base, (techMult * depletion).raw(), Fixed::kScale).value_or(tonnesRemaining);
     if (output < 1) {
         output = 1;
     }
@@ -104,7 +105,8 @@ void applyBuildMine(const Content& content, WorldState& state, const BuildMine& 
     state.mines.push_back(mine);
     const MineId id(static_cast<std::uint32_t>(state.mines.size() - 1));
     plot.mine = id;
-    report.notices.push_back(mineNotice(NoticeKind::MineStarted, mine, id, capex));
+    // Public notice: that a mine is being built, not what it cost.
+    report.notices.push_back(mineNotice(NoticeKind::MineStarted, mine, id));
 }
 
 std::optional<RejectReason> validateSetMineState(const WorldState& state,
@@ -156,24 +158,25 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
         if (mine.state == MineState::Operating) {
             bool anythingLeft = false;
             for (DepositTruth& truth : state.hidden.plotDeposits[mine.plot.index()].deposits) {
-                if (truth.tonnesRemaining <= 0) {
-                    continue;
+                if (truth.tonnesRemaining > 0 && resourceUnlocked(content, owner, truth.resource)) {
+                    const std::int64_t output = mineDailyOutput(
+                        content, owner, truth.resource, truth.tonnesTotal, truth.tonnesRemaining);
+                    truth.tonnesRemaining -= output;
+                    std::int64_t& stock = owner.inventoryTonnes[truth.resource.index()];
+                    stock = checkedAdd(stock, output);
+                    std::int64_t& lifetime = mine.extractedTonnes[truth.resource.index()];
+                    lifetime = checkedAdd(lifetime, output);
                 }
-                anythingLeft = true;
-                if (!resourceUnlocked(content, owner, truth.resource)) {
-                    continue;  // stays in the ground until the tech is known
-                }
-                const std::int64_t output = mineDailyOutput(
-                    content, owner, truth.resource, truth.tonnesTotal, truth.tonnesRemaining);
-                truth.tonnesRemaining -= output;
-                owner.inventoryTonnes[truth.resource.index()] += output;
-                mine.extractedTonnes[truth.resource.index()] += output;
+                // Locked ore counts as remaining: the mine is not depleted.
+                anythingLeft = anythingLeft || truth.tonnesRemaining > 0;
             }
+            // Today's production day is paid for even if it emptied the mine.
+            owner.cash -= mineDailyOpex(content, owner, MineState::Operating);
             if (!anythingLeft) {
                 mine.state = MineState::Depleted;
                 report.notices.push_back(mineNotice(NoticeKind::MineDepleted, mine, id));
-                continue;
             }
+            continue;
         }
 
         owner.cash -= mineDailyOpex(content, owner, mine.state);

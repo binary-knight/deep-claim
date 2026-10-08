@@ -206,7 +206,9 @@ TEST_CASE("Locked resources stay in the ground", "[mines]") {
 
     // Granting the tech through a save edit starts extraction.
     sim::WorldState edited = simulation.state();
-    edited.companies[0].completedTechs.push_back(sim::TechId(1));
+    edited.companies[0].completedTechs.push_back(sim::TechId(1));  // prerequisite missing
+    CHECK_FALSE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+    edited.companies[0].completedTechs.push_back(sim::TechId(0));
     REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
     simulation.tick();
     CHECK(simulation.state().mines[0].extractedTonnes[lithium.index()] == 5);  // base output 5
@@ -254,5 +256,43 @@ TEST_CASE("Saves with inconsistent mines are rejected", "[mines][save]") {
     broken.mines[0].extractedTonnes.pop_back();  // wrong inventory shape
     CHECK_FALSE(simulation.load(saveOf(broken)));
 
+    broken = simulation.state();
+    broken.mines[0].extractedTonnes[0] = 5;  // Building mine with extraction
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.mines[0].state = sim::MineState::Operating;  // operational too early
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    for (sim::Plot& p : broken.plots) {
+        if (!p.mine.valid() && p.owner != kPlayer) {
+            p.mine = sim::MineId(0);  // ghost mine reference from another plot
+            break;
+        }
+    }
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
     CHECK(simulation.load(saveOf(simulation.state())));
+}
+
+TEST_CASE("Mine accounting is conserved across the lifetime of a deposit", "[mines][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(50'000'000));
+    setDeposit(simulation, content, plot, sim::ResourceId(0), 3'000);
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    simulation.tick(content.balance.mineBuildDays + 5);
+    // Every intermediate state must be a valid save (conservation holds daily).
+    for (int day = 0; day < 10; ++day) {
+        CHECK(sim::validateWorld(content, simulation.state()));
+        simulation.tick();
+    }
+    CHECK(simulation.state().mines[0].state == sim::MineState::Depleted);
+    CHECK(sim::validateWorld(content, simulation.state()));
+
+    sim::WorldState broken = simulation.state();
+    broken.mines[0].state = sim::MineState::Mothballed;  // nothing left to mothball
+    CHECK_FALSE(sim::validateWorld(content, broken));
 }

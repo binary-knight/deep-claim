@@ -9,6 +9,7 @@
 #include "sim/plot_market.h"
 #include "sim/random.h"
 #include "sim/tech.h"
+#include "sim/types.h"
 #include "sim/world_state.h"
 
 #include <cstdint>
@@ -18,8 +19,10 @@ namespace sim {
 
 namespace {
 
-// Noise draws are clamped so one reading cannot be absurd.
+// Noise draws are clamped so one reading cannot be absurd, and the log-space
+// shift is clamped inside fixedExp's domain.
 const Fixed kMaxNoiseSigma = Fixed::fromInt(3);
+const Fixed kMaxShift = Fixed::fromInt(20);
 
 }  // namespace
 
@@ -62,7 +65,7 @@ void applySurvey(const Content& content, WorldState& state, const CommissionSurv
     survey.company = command.company;
     survey.plot = command.plot;
     survey.commissionedDay = state.day;
-    survey.completesDay = state.day + content.balance.surveyDurationDays;
+    survey.completesDay = state.day + content.balance.surveyDurationDays;  // <= kMaxDeadline
     state.surveys.push_back(survey);
     report.notices.push_back(makeNotice(NoticeKind::SurveyStarted, command.company, command.plot,
                                         content.balance.surveyCost));
@@ -78,12 +81,17 @@ void runSurveys(const Content& content, WorldState& state, TickReport& report) {
             // Reading = remaining tonnes * exp(sigma * z): unbiased in log space.
             const Fixed z =
                 clampFixed(approxNormal(state.rng.survey), -kMaxNoiseSigma, kMaxNoiseSigma);
-            const Fixed shift = sigma * z;
+            const Fixed shift = clampFixed(sigma * z, -kMaxShift, kMaxShift);
             std::int64_t estimate = 0;
             if (shift >= Fixed::zero()) {
-                estimate = mulDiv(truth.tonnesRemaining, fixedExp(shift).raw(), Fixed::kScale);
+                estimate =
+                    checkedMulDiv(truth.tonnesRemaining, fixedExp(shift).raw(), Fixed::kScale)
+                        .value_or(kMaxDepositTonnes);
             } else {
                 estimate = mulDiv(truth.tonnesRemaining, Fixed::kScale, fixedExp(-shift).raw());
+            }
+            if (estimate > kMaxDepositTonnes) {
+                estimate = kMaxDepositTonnes;
             }
             SurveyEstimate reading;
             reading.resource = truth.resource;

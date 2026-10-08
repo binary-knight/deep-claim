@@ -114,6 +114,7 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     view.cash = self.cash;
     view.reservedCash = reservedCash(state, company);
     view.inventoryTonnes = self.inventoryTonnes;
+    view.completedTechs = self.completedTechs;
 
     view.plots.reserve(state.plots.size());
     for (std::uint32_t i = 0; i < state.plots.size(); ++i) {

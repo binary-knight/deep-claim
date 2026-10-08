@@ -159,6 +159,37 @@ TEST_CASE("Survey estimates are noisy but unbiased in log space", "[surveys]") {
     CHECK(sd < 0.6);
 }
 
+TEST_CASE("Saves with inconsistent surveys are rejected", "[surveys][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 2, test::setup());
+    simulation.submit(sim::CommissionSurvey{kRival, sim::PlotId(3)});
+    simulation.tick(5);
+    const auto saveOf = [&](const sim::WorldState& s) {
+        return sim::saveGame(s, {}, sim::hashContent(content));
+    };
+
+    sim::WorldState broken = simulation.state();
+    broken.surveys.push_back(broken.surveys[0]);  // two pending for one company/plot
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.surveys[0].complete = 1;  // complete before its day
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.surveys[0].completesDay += 1;  // inconsistent with the duration
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    simulation.tick(content.balance.surveyDurationDays);
+    REQUIRE(simulation.state().surveys[0].complete == 1);
+    broken = simulation.state();
+    if (!broken.surveys[0].estimates.empty()) {
+        broken.surveys[0].estimates.push_back(broken.surveys[0].estimates[0]);  // duplicate
+        CHECK_FALSE(simulation.load(saveOf(broken)));
+    }
+    CHECK(simulation.load(saveOf(simulation.state())));
+}
+
 TEST_CASE("Survey results survive save and load and never leak to others", "[surveys][save]") {
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 2, test::setup());

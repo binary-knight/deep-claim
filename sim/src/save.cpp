@@ -18,79 +18,63 @@ namespace {
 
 constexpr std::array<std::uint8_t, 4> kMagic = {'D', 'C', 'S', 'V'};
 
+bool validateDeposits(const Content& content, const WorldState& state) {
+    for (const PlotDeposits& deposits : state.hidden.plotDeposits) {
+        std::vector<std::uint8_t> seen(content.resources.size(), 0);
+        for (const DepositTruth& truth : deposits.deposits) {
+            if (!truth.resource.valid() || truth.resource.index() >= content.resources.size() ||
+                seen[truth.resource.index()]++ != 0) {
+                return false;
+            }
+            if (truth.tonnesTotal < 0 || truth.tonnesTotal > kMaxDepositTonnes ||
+                truth.tonnesRemaining < 0 || truth.tonnesRemaining > truth.tonnesTotal) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// Completed techs: valid, unique, and closed under prerequisites.
+bool validateCompletedTechs(const Content& content, const Company& company) {
+    std::vector<std::uint8_t> seen(content.techs.size(), 0);
+    for (const TechId tech : company.completedTechs) {
+        if (!tech.valid() || tech.index() >= content.techs.size() || seen[tech.index()]++ != 0) {
+            return false;
+        }
+    }
+    for (const TechId tech : company.completedTechs) {
+        for (const TechId prerequisite : content.techs[tech.index()].prerequisites) {
+            if (seen[prerequisite.index()] == 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool validateCompany(const Content& content, const Company& company) {
+    if (company.kind != CompanyKind::Player && company.kind != CompanyKind::Ai) {
+        return false;
+    }
+    if (company.inventoryTonnes.size() != content.resources.size() || company.bankrupt > 1) {
+        return false;
+    }
+    if (company.cash.cents() > kMaxCashCents || company.cash.cents() < -kMaxCashCents) {
+        return false;
+    }
+    const bool stocksOk = std::ranges::all_of(company.inventoryTonnes, [](std::int64_t tonnes) {
+        return tonnes >= 0 && tonnes <= kMaxStockTonnes;
+    });
+    return stocksOk && validateCompletedTechs(content, company);
+}
+
 bool validateCompanies(const Content& content, const WorldState& state) {
     if (state.companies.empty() || state.companies[0].kind != CompanyKind::Player) {
         return false;
     }
-    for (const Company& company : state.companies) {
-        if (company.kind != CompanyKind::Player && company.kind != CompanyKind::Ai) {
-            return false;
-        }
-        if (company.inventoryTonnes.size() != content.resources.size() || company.bankrupt > 1) {
-            return false;
-        }
-        for (const std::int64_t tonnes : company.inventoryTonnes) {
-            if (tonnes < 0) {
-                return false;
-            }
-        }
-        std::vector<std::uint8_t> seen(content.techs.size(), 0);
-        for (const TechId tech : company.completedTechs) {
-            if (!tech.valid() || tech.index() >= content.techs.size() ||
-                seen[tech.index()]++ != 0) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-bool validateSurveys(const Content& content, const WorldState& state) {
-    for (const Survey& survey : state.surveys) {
-        if (!survey.company.valid() || survey.company.index() >= state.companies.size() ||
-            !survey.plot.valid() || survey.plot.index() >= state.plots.size() ||
-            survey.completesDay < survey.commissionedDay || survey.complete > 1) {
-            return false;
-        }
-        if (survey.complete == 0 && !survey.estimates.empty()) {
-            return false;
-        }
-        for (const SurveyEstimate& estimate : survey.estimates) {
-            if (!estimate.resource.valid() ||
-                estimate.resource.index() >= content.resources.size() ||
-                estimate.tonnesEstimate < 0) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-bool validateMines(const Content& content, const WorldState& state) {
-    for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
-        const Mine& mine = state.mines[i];
-        if (!mine.plot.valid() || mine.plot.index() >= state.plots.size() || !mine.owner.valid() ||
-            mine.owner.index() >= state.companies.size() || mine.operationalDay < mine.builtDay ||
-            mine.extractedTonnes.size() != content.resources.size()) {
-            return false;
-        }
-        if (mine.state != MineState::Building && mine.state != MineState::Operating &&
-            mine.state != MineState::Mothballed && mine.state != MineState::Depleted) {
-            return false;
-        }
-        const Plot& plot = state.plots[mine.plot.index()];
-        if (plot.owner != mine.owner || plot.mine != MineId(i)) {
-            return false;  // exactly one mine per plot, owned by the plot's owner
-        }
-        for (const std::int64_t tonnes : mine.extractedTonnes) {
-            if (tonnes < 0) {
-                return false;
-            }
-        }
-    }
-    return std::ranges::all_of(state.plots, [&](const Plot& plot) {
-        return !plot.mine.valid() || plot.mine.index() < state.mines.size();
-    });
+    return std::ranges::all_of(
+        state.companies, [&](const Company& company) { return validateCompany(content, company); });
 }
 
 bool validatePlots(const Content& content, const WorldState& state) {
@@ -135,7 +119,7 @@ bool validatePlots(const Content& content, const WorldState& state) {
 
 // Checks one auction's bids: valid bidders, dates inside the window, one bid
 // per company, unique order stamps below the counter, and (for open
-// auctions) representable reservation totals per company.
+// auctions) bounded reservation totals per company.
 bool validateBids(const WorldState& state, const Auction& auction,
                   std::vector<std::uint8_t>& seenStamps, std::vector<std::int64_t>& reserved) {
     std::vector<std::uint8_t> bidders(state.companies.size(), 0);
@@ -150,7 +134,7 @@ bool validateBids(const WorldState& state, const Auction& auction,
         }
         if (auction.open != 0) {
             std::int64_t& total = reserved[bid.company.index()];
-            if (bid.amount.cents() > std::numeric_limits<std::int64_t>::max() - total) {
+            if (bid.amount.cents() > kMaxCashCents - total) {
                 return false;
             }
             total += bid.amount.cents();
@@ -166,7 +150,7 @@ bool validateAuctions(const WorldState& state) {
         const Auction& auction = state.auctions[a];
         if (!auction.plot.valid() || auction.plot.index() >= state.plots.size() ||
             auction.open > 1 || auction.closesOnDay < auction.opensOnDay ||
-            auction.closesOnDay > kMaxDay) {
+            auction.closesOnDay > kMaxDeadline) {
             return false;
         }
         const Plot& plot = state.plots[auction.plot.index()];
@@ -207,27 +191,137 @@ bool validateListingQueue(const WorldState& state) {
     return true;
 }
 
+// Resources present on a plot, as a membership bitmap indexed by ResourceId.
+std::vector<std::uint8_t> presentResources(const Content& content, const WorldState& state,
+                                           PlotId plot) {
+    std::vector<std::uint8_t> present(content.resources.size(), 0);
+    for (const DepositTruth& truth : state.hidden.plotDeposits[plot.index()].deposits) {
+        present[truth.resource.index()] = 1;
+    }
+    return present;
+}
+
+bool validateEstimates(const Content& content, const WorldState& state, const Survey& survey) {
+    const std::vector<std::uint8_t> present = presentResources(content, state, survey.plot);
+    std::vector<std::uint8_t> reported(content.resources.size(), 0);
+    for (const SurveyEstimate& estimate : survey.estimates) {
+        if (!estimate.resource.valid() || estimate.resource.index() >= content.resources.size() ||
+            present[estimate.resource.index()] == 0 || reported[estimate.resource.index()]++ != 0 ||
+            estimate.tonnesEstimate < 0 || estimate.tonnesEstimate > kMaxDepositTonnes ||
+            estimate.relativeError < Fixed::zero()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool validateSurveys(const Content& content, const WorldState& state) {
+    // (company, plot) pairs with a pending survey, for the one-pending rule.
+    std::vector<std::uint8_t> pending(state.companies.size() * state.plots.size(), 0);
+    for (const Survey& survey : state.surveys) {
+        if (!survey.company.valid() || survey.company.index() >= state.companies.size() ||
+            !survey.plot.valid() || survey.plot.index() >= state.plots.size() ||
+            survey.complete > 1 || survey.completesDay > kMaxDeadline ||
+            survey.completesDay != survey.commissionedDay + content.balance.surveyDurationDays) {
+            return false;
+        }
+        // Surveys complete while processing completesDay; afterwards day > completesDay.
+        const bool shouldBeComplete = survey.completesDay < state.day;
+        if ((survey.complete != 0) != shouldBeComplete) {
+            return false;
+        }
+        if (survey.complete == 0) {
+            std::uint8_t& slot =
+                pending[survey.company.index() * state.plots.size() + survey.plot.index()];
+            if (slot++ != 0 || !survey.estimates.empty()) {
+                return false;
+            }
+        } else if (!validateEstimates(content, state, survey)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool validateMineAccounting(const Content& content, const WorldState& state, const Mine& mine) {
+    // One mine per plot and only mines extract, so lifetime extraction equals
+    // total minus remaining for every deposit, and is zero for absent ones.
+    std::vector<std::int64_t> expected(content.resources.size(), 0);
+    bool anythingLeft = false;
+    for (const DepositTruth& truth : state.hidden.plotDeposits[mine.plot.index()].deposits) {
+        expected[truth.resource.index()] = truth.tonnesTotal - truth.tonnesRemaining;
+        anythingLeft = anythingLeft || truth.tonnesRemaining > 0;
+    }
+    for (std::size_t r = 0; r < expected.size(); ++r) {
+        if (mine.extractedTonnes[r] != expected[r]) {
+            return false;
+        }
+    }
+    switch (mine.state) {
+        case MineState::Building:
+            return std::ranges::all_of(mine.extractedTonnes,
+                                       [](std::int64_t tonnes) { return tonnes == 0; });
+        case MineState::Depleted:
+            return !anythingLeft;
+        case MineState::Operating:
+        case MineState::Mothballed:
+            return anythingLeft;
+    }
+    return false;
+}
+
+bool validateMines(const Content& content, const WorldState& state) {
+    for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
+        const Mine& mine = state.mines[i];
+        if (!mine.plot.valid() || mine.plot.index() >= state.plots.size() || !mine.owner.valid() ||
+            mine.owner.index() >= state.companies.size() ||
+            mine.operationalDay != mine.builtDay + content.balance.mineBuildDays ||
+            mine.operationalDay > kMaxDeadline ||
+            mine.extractedTonnes.size() != content.resources.size()) {
+            return false;
+        }
+        if (mine.state != MineState::Building && mine.state != MineState::Operating &&
+            mine.state != MineState::Mothballed && mine.state != MineState::Depleted) {
+            return false;
+        }
+        // Mines become operational while processing operationalDay.
+        const bool shouldBeBuilding = mine.operationalDay >= state.day;
+        if ((mine.state == MineState::Building) != shouldBeBuilding) {
+            return false;
+        }
+        const Plot& plot = state.plots[mine.plot.index()];
+        if (plot.owner != mine.owner || plot.mine != MineId(i)) {
+            return false;  // exactly one mine per plot, owned by the plot's owner
+        }
+        for (const std::int64_t tonnes : mine.extractedTonnes) {
+            if (tonnes < 0 || tonnes > kMaxStockTonnes) {
+                return false;
+            }
+        }
+        if (!validateMineAccounting(content, state, mine)) {
+            return false;
+        }
+    }
+    // Every plot that claims a mine must be that mine's plot.
+    for (std::uint32_t i = 0; i < state.plots.size(); ++i) {
+        const MineId mine = state.plots[i].mine;
+        if (mine.valid() &&
+            (mine.index() >= state.mines.size() || state.mines[mine.index()].plot != PlotId(i))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool validateWorldImpl(const Content& content, const WorldState& state) {
     if (state.day > kMaxDay || state.plots.size() != state.hidden.plotDeposits.size()) {
         return false;
     }
-    if (!validateCompanies(content, state) || !validatePlots(content, state) ||
-        !validateAuctions(state) || !validateListingQueue(state) ||
-        !validateSurveys(content, state) || !validateMines(content, state)) {
-        return false;
-    }
-    for (const PlotDeposits& deposits : state.hidden.plotDeposits) {
-        for (const DepositTruth& truth : deposits.deposits) {
-            if (!truth.resource.valid() || truth.resource.index() >= content.resources.size()) {
-                return false;
-            }
-            if (truth.tonnesTotal < 0 || truth.tonnesRemaining < 0 ||
-                truth.tonnesRemaining > truth.tonnesTotal) {
-                return false;
-            }
-        }
-    }
-    return true;
+    // Deposits first: later checks index by resource and assume valid ids.
+    return validateDeposits(content, state) && validateCompanies(content, state) &&
+           validatePlots(content, state) && validateAuctions(state) &&
+           validateListingQueue(state) && validateSurveys(content, state) &&
+           validateMines(content, state);
 }
 
 }  // namespace

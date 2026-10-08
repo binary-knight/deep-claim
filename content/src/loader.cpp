@@ -413,8 +413,10 @@ const typename Table::value_type* findByName(const Table& table, std::string_vie
     return nullptr;
 }
 
-const sim::Fixed kMultiplierMin = sim::Fixed::fromRaw(1);
-const sim::Fixed kMultiplierMax = sim::Fixed::fromInt(1000);
+// Effect multipliers: a hundredth to a hundredfold keeps every derived
+// quantity (capex, opex, output, noise) inside int64 at the loader's bounds.
+const sim::Fixed kMultiplierMin = sim::Fixed::fromRatio(1, 100);
+const sim::Fixed kMultiplierMax = sim::Fixed::fromInt(100);
 
 // Resources are parsed before techs exist, so unlocked_by names are returned
 // for resolution later.
@@ -772,6 +774,10 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
         valueOr(node.fixed("survey_base_noise", true, sim::Fixed::zero(), sim::Fixed::fromInt(10)),
                 sim::Fixed::zero());
     balance.mineCapexPerHectare = valueOr(node.money("mine_capex_per_hectare", true, zero), zero);
+    if (balance.mineCapexPerHectare > sim::Money::fromUnits(100'000'000)) {
+        node.report("mine_capex_per_hectare",
+                    "must not exceed 100000000 (times plot area and tech)");
+    }
     balance.mineBuildDays =
         static_cast<sim::Day>(valueOr(node.integer("mine_build_days", true, 1, kMaxDays), 1LL));
     balance.mineOpexPerDay = valueOr(node.money("mine_opex_per_day", true, zero), zero);

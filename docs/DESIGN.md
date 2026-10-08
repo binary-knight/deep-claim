@@ -256,5 +256,16 @@ and clang-tidy are enforced in CI. Warnings are errors by default
 - Extraction updates hidden truth directly; the owner sees only lifetime
   extracted tonnes per resource and the mine state, so remaining tonnage is
   inferred from the output decline, as the brief asks.
-- Mines are public (existence, owner, state); surveys and extraction totals
-  are private. MineStarted is a public notice.
+- Mines are public (existence, owner, state, including Depleted); surveys,
+  extraction totals and capex paid are private. MineStarted is a public
+  notice without an amount.
+- Tech multipliers accumulate in content order so the result depends only on
+  the set of completed techs, not the order they were finished.
+- Quantity bounds (types.h): deposits <= 1e15 t, stocks and lifetime totals
+  <= 1e18 t, |cash| <= 1e17 cents, deadlines <= kMaxDeadline. Validated on
+  load so one more day of checked accounting can never overflow.
+- validateWorld enforces mine conservation (lifetime extraction equals total
+  minus remaining per deposit, zero for absent resources), state/day
+  consistency for surveys and mines, one pending survey per company and
+  plot, estimates only for present resources, prerequisite closure of
+  completed techs, and reverse plot-to-mine links.

@@ -430,3 +430,9 @@ TEST_CASE("collectCommands binds commands to the controller's company", "[market
     CHECK(simulation.view(kRival).reservedCash > sim::Money::zero());
     CHECK(simulation.view(kPlayer).reservedCash == sim::Money::zero());
 }
+
+TEST_CASE("Views carry the viewer's own research list", "[view]") {
+    const sim::Content content = test::makeContent();
+    const sim::Simulation simulation(content, 1, test::setup());
+    CHECK(simulation.view(kPlayer).completedTechs.empty());
+}
