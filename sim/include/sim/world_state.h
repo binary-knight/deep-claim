@@ -134,6 +134,24 @@ struct Mine {
     std::vector<std::int64_t> extractedTonnes;  // indexed by ResourceId, lifetime total
 };
 
+// One research project. A company runs at most one at a time; the cost is
+// paid when it starts and the tech joins completedTechs when it finishes.
+struct Research {
+    CompanyId company;
+    TechId tech;
+    Day startedDay = 0;
+    Day completesDay = 0;
+    std::uint8_t complete = 0;
+};
+
+// A world event in progress or finished. Public.
+struct ActiveEvent {
+    EventId event;
+    Day startedDay = 0;
+    Day endsDay = 0;
+    std::uint8_t active = 1;
+};
+
 // The complete dynamic state of a game. Everything that affects the future
 // of the simulation lives here so that save, load, hashing and replay all
 // operate on one struct. Entities are stored in vectors indexed by StrongId
@@ -148,6 +166,8 @@ struct WorldState {
     std::vector<Mine> mines;
     std::vector<Market> markets;  // indexed by ResourceId
     std::vector<Loan> loans;
+    std::vector<Research> research;
+    std::vector<ActiveEvent> events;
     std::vector<PlotId> listingQueue;  // shuffled at generation; listed in order
     std::uint32_t nextListing = 0;     // index into listingQueue
     std::uint32_t bidCounter = 0;      // monotonic order stamp for tie-breaks

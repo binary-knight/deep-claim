@@ -70,6 +70,7 @@ private:
     void handle(const SellOre& c);
     void handle(const TakeLoan& c);
     void handle(const RepayLoan& c);
+    void handle(const StartResearch& c);
     void reject(CompanyId company, PlotId plot, Money amount, RejectReason reason);
 
     const Content* content_;

@@ -72,6 +72,20 @@ struct MarketView {
 
 constexpr std::size_t kRecentPriceDays = 90;
 
+struct ResearchView {
+    ResearchId id;
+    TechId tech;
+    Day startedDay = 0;
+    Day completesDay = 0;
+};
+
+struct ActiveEventView {
+    ActiveEventId id;
+    EventId event;
+    Day startedDay = 0;
+    Day endsDay = 0;
+};
+
 struct LoanView {
     LoanId id;
     Money principal;
@@ -111,11 +125,13 @@ struct CompanyView {
     bool bankrupt = false;
     std::vector<std::int64_t> inventoryTonnes;
     std::vector<TechId> completedTechs;  // own research only
+    std::optional<ResearchView> activeResearch;
     std::vector<PlotView> plots;
     std::vector<SurveyView> surveys;
     std::vector<MineView> mines;
-    std::vector<MarketView> markets;  // indexed by ResourceId
-    std::vector<LoanView> loans;      // own loans only
+    std::vector<MarketView> markets;      // indexed by ResourceId
+    std::vector<LoanView> loans;          // own loans only
+    std::vector<ActiveEventView> events;  // public, active only
     std::vector<CompanyPublicView> companies;
 };
 

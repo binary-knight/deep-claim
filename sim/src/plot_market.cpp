@@ -2,6 +2,7 @@
 
 #include "sim/commands.h"
 #include "sim/content.h"
+#include "sim/events.h"
 #include "sim/fatal.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
@@ -117,6 +118,10 @@ void closeAuction(const Content& content, WorldState& state, AuctionId auctionId
 void listPlots(const Content& content, WorldState& state, std::uint32_t count, TickReport& report) {
     for (std::uint32_t i = 0; i < count && state.nextListing < state.listingQueue.size(); ++i) {
         const PlotId plotId = state.listingQueue[state.nextListing++];
+        // Land price events scale the ask of plots listed while they run.
+        Plot& listed = state.plots[plotId.index()];
+        listed.askPrice = listed.basePrice.scaled(
+            eventMultiplier(content, state, EventEffectType::LandPriceMult));
         const AuctionId auction = openAuction(content, state, plotId);
         report.notices.push_back(auctionNotice(NoticeKind::PlotListed, CompanyId(), plotId, auction,
                                                state.plots[plotId.index()].askPrice));

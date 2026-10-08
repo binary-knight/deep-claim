@@ -40,7 +40,7 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // CI. It uses the in-code content fixture, so tuning data/*.json does not
     // move it. If a deliberate simulation change alters it, update the
     // constant in the same commit and say so in the commit message.
-    constexpr std::uint64_t kGolden = 0x5db2e930190f07afULL;
+    constexpr std::uint64_t kGolden = 0xf3adff8063966874ULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
     simulation.tick(sim::kDaysPerYear);

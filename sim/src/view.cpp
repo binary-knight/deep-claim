@@ -84,7 +84,7 @@ void addOwnMines(const Content& content, const WorldState& state, CompanyId view
         mineView.state = mine.state;
         mineView.operationalDay = mine.operationalDay;
         mineView.extractedTonnes = mine.extractedTonnes;
-        mineView.dailyOpex = mineDailyOpex(content, self, mine.state);
+        mineView.dailyOpex = mineDailyOpex(content, state, self, mine.state);
         view.mines.push_back(mineView);
     }
 }
@@ -120,6 +120,32 @@ void addOwnLoans(const WorldState& state, CompanyId viewer, CompanyView& view) {
         loanView.monthsRemaining = loan.monthsRemaining;
         loanView.active = loan.active != 0;
         view.loans.push_back(loanView);
+    }
+}
+
+void addResearchAndEvents(const WorldState& state, CompanyId viewer, CompanyView& view) {
+    for (std::uint32_t i = 0; i < state.research.size(); ++i) {
+        const Research& research = state.research[i];
+        if (research.company == viewer && research.complete == 0) {
+            ResearchView researchView;
+            researchView.id = ResearchId(i);
+            researchView.tech = research.tech;
+            researchView.startedDay = research.startedDay;
+            researchView.completesDay = research.completesDay;
+            view.activeResearch = researchView;
+        }
+    }
+    for (std::uint32_t i = 0; i < state.events.size(); ++i) {
+        const ActiveEvent& active = state.events[i];
+        if (active.active == 0) {
+            continue;
+        }
+        ActiveEventView eventView;
+        eventView.id = ActiveEventId(i);
+        eventView.event = active.event;
+        eventView.startedDay = active.startedDay;
+        eventView.endsDay = active.endsDay;
+        view.events.push_back(eventView);
     }
 }
 
@@ -166,6 +192,7 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     addOwnMines(content, state, company, view);
     addMarkets(content, state, view);
     addOwnLoans(state, company, view);
+    addResearchAndEvents(state, company, view);
     addCompanies(state, view);
     return view;
 }

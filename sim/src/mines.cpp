@@ -2,6 +2,7 @@
 
 #include "sim/commands.h"
 #include "sim/content.h"
+#include "sim/events.h"
 #include "sim/finance.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
@@ -30,15 +31,16 @@ Money mineCapex(const Content& content, const Company& company, const Plot& plot
     return base.scaled(techMultiplier(content, company, TechEffectType::ExtractionCapexMult));
 }
 
-Money mineDailyOpex(const Content& content, const Company& company, MineState state) {
+Money mineDailyOpex(const Content& content, const WorldState& world, const Company& company,
+                    MineState state) {
+    const Fixed mult = techMultiplier(content, company, TechEffectType::OpexMult) *
+                       eventMultiplier(content, world, EventEffectType::OpexMult);
     switch (state) {
         case MineState::Operating:
-            return content.balance.mineOpexPerDay.scaled(
-                techMultiplier(content, company, TechEffectType::OpexMult));
+            return content.balance.mineOpexPerDay.scaled(mult);
         case MineState::Mothballed:
-            return content.balance.mineOpexPerDay
-                .scaled(techMultiplier(content, company, TechEffectType::OpexMult))
-                .scaled(content.balance.mineMothballOpexMult);
+            return content.balance.mineOpexPerDay.scaled(mult).scaled(
+                content.balance.mineMothballOpexMult);
         case MineState::Building:
         case MineState::Depleted:
         case MineState::Closed:
@@ -176,7 +178,8 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
                 anythingLeft = anythingLeft || truth.tonnesRemaining > 0;
             }
             // Today's production day is paid for even if it emptied the mine.
-            owner.cash = debitCash(owner.cash, mineDailyOpex(content, owner, MineState::Operating));
+            owner.cash =
+                debitCash(owner.cash, mineDailyOpex(content, state, owner, MineState::Operating));
             if (!anythingLeft) {
                 mine.state = MineState::Depleted;
                 report.notices.push_back(mineNotice(NoticeKind::MineDepleted, mine, id));
@@ -184,7 +187,7 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
             continue;
         }
 
-        owner.cash = debitCash(owner.cash, mineDailyOpex(content, owner, mine.state));
+        owner.cash = debitCash(owner.cash, mineDailyOpex(content, state, owner, mine.state));
     }
 }
 

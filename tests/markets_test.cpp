@@ -43,6 +43,7 @@ sim::Content calmContent() {
     for (sim::ResourceDef& r : c.resources) {
         r.volatility = sim::Fixed::zero();
     }
+    c.events.clear();  // the fixture's lithium demand boom would move prices
     return c;
 }
 

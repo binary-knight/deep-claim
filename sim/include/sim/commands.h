@@ -62,8 +62,15 @@ struct RepayLoan {
     Money amount;
 };
 
+// Begin researching a tech whose prerequisites are complete. One project at
+// a time per company; the cost is paid up front.
+struct StartResearch {
+    CompanyId company;
+    TechId tech;
+};
+
 using Command = std::variant<BidOnPlot, CommissionSurvey, BuildMine, SetMineState, SellOre,
-                             TakeLoan, RepayLoan>;
+                             TakeLoan, RepayLoan, StartResearch>;
 
 [[nodiscard]] CompanyId commandCompany(const Command& command);
 void setCommandCompany(Command& command, CompanyId company);
@@ -95,6 +102,10 @@ enum class RejectReason : std::uint8_t {
     UnknownLoan,
     NotLoanHolder,
     LoanNotActive,
+    UnknownTech,
+    TechAlreadyKnown,
+    ResearchBusy,
+    PrerequisitesMissing,
 };
 
 // Private notices are visible only to `company`; public ones to everyone.
@@ -118,6 +129,10 @@ enum class NoticeKind : std::uint8_t {
     LoanRepaid,         // private: company, loan (fully paid off)
     InsolvencyWarning,  // private: company, amount = cash (negative), tonnes = months left
     Bankrupt,           // public: company
+    ResearchStarted,    // private: company, tech, amount = cost
+    ResearchComplete,   // private: company, tech
+    EventStarted,       // public: event
+    EventEnded,         // public: event
 };
 
 struct Notice {
@@ -128,6 +143,8 @@ struct Notice {
     MineId mine;
     ResourceId resource;
     LoanId loan;
+    TechId tech;
+    EventId event;
     std::int64_t tonnes = 0;
     Money amount;
     RejectReason reason = RejectReason::None;

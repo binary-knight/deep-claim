@@ -19,6 +19,8 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::PlotSold:
         case NoticeKind::MineStarted:
         case NoticeKind::Bankrupt:
+        case NoticeKind::EventStarted:
+        case NoticeKind::EventEnded:
             return true;
         case NoticeKind::CommandRejected:
         case NoticeKind::AuctionLost:
@@ -34,6 +36,8 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::LoanPayment:
         case NoticeKind::LoanRepaid:
         case NoticeKind::InsolvencyWarning:
+        case NoticeKind::ResearchStarted:
+        case NoticeKind::ResearchComplete:
             return false;
     }
     return false;

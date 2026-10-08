@@ -14,7 +14,8 @@
 namespace sim {
 
 [[nodiscard]] Money mineCapex(const Content& content, const Company& company, const Plot& plot);
-[[nodiscard]] Money mineDailyOpex(const Content& content, const Company& company, MineState state);
+[[nodiscard]] Money mineDailyOpex(const Content& content, const WorldState& world,
+                                  const Company& company, MineState state);
 
 // Tonnes an operating mine would extract today from a deposit of the given
 // size: base output scaled by tech and by remaining share (output falls to

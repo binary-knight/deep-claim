@@ -330,3 +330,37 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   the player this is the lose condition the UI shows.
 - `monthsInsolvent` and `bankrupt` are private to the company; only the
   final Bankrupt notice is public.
+
+## Research, events and the AI (steps 11 to 13)
+
+- Research: one project at a time per company, cost paid at start, the tech
+  joins `completedTechs` after `duration_days` (pipeline step 7). Starting
+  requires every prerequisite complete. A company's active project is
+  private; completed techs are private too (only effects show, e.g. a
+  lithium mine producing).
+- Events roll every day for every definition from the event RNG stream, so
+  the stream advances identically whatever is active; an event eligible by
+  `min_year` and not already running starts when the roll is below
+  `daily_weight`, lasts `duration_days`, then ends. Events are public
+  (started/ended notices, active list in every view).
+- Event effects multiply in event order and are clamped to [0.01, 100]:
+  DemandMult scales one resource's demand in the price model, OpexMult
+  scales every mine's daily opex (`mineDailyOpex` now takes the state), and
+  LandPriceMult scales the ask of plots listed while the event runs
+  (relistings keep their decayed ask). Events roll at step 8, after markets
+  and finance, so a new event first bites the following day.
+- The built-in competitor (`HeuristicController`) is stateless: a pure
+  function of CompanyView and Content, which keeps replays exact without
+  persisting controller memory. Its rules, in order each day: sell stock
+  when price >= 85% of base or storage exceeds 2% of stock value; mothball
+  mines whose products all trade below half base and reopen above 70%;
+  survey owned plots and build when the surveyed value (half the estimate at
+  today's prices) covers twice the capex with six months of opex in hand;
+  survey one listed plot a day when the auction leaves time for results, bid
+  the ask when the surveyed value covers twice the ask plus capex and 10%
+  over when it covers four times; research the cheapest available tech when
+  cash exceeds 2.5M; borrow 2M chunks only while producing and below 750k.
+  Its knobs live in code because they shape one opponent, not the economy.
+- Hosts drive controllers with `collectCommands` before each tick; the sim
+  never calls controllers itself, so the player's UI and the AI use the same
+  path.

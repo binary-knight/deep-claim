@@ -1,11 +1,13 @@
 #include "sim/simulation.h"
 
 #include "sim/commands.h"
+#include "sim/events.h"
 #include "sim/fatal.h"
 #include "sim/finance.h"
 #include "sim/markets.h"
 #include "sim/mines.h"
 #include "sim/plot_market.h"
+#include "sim/research.h"
 #include "sim/save.h"
 #include "sim/surveys.h"
 #include "sim/view.h"
@@ -139,6 +141,17 @@ void Simulation::handle(const RepayLoan& c) {
     }
 }
 
+void Simulation::handle(const StartResearch& c) {
+    if (const auto reason = validateStartResearch(*content_, state_, c)) {
+        Notice notice =
+            makeNotice(NoticeKind::CommandRejected, c.company, PlotId(), Money::zero(), *reason);
+        notice.tech = c.tech;
+        report_.notices.push_back(notice);
+    } else {
+        applyStartResearch(*content_, state_, c, report_);
+    }
+}
+
 void Simulation::dispatch(const Command& command) {
     std::visit([this](const auto& concrete) { handle(concrete); }, command);
 }
@@ -157,6 +170,8 @@ const TickReport& Simulation::tick() {
     runMines(*content_, state_, report_);       // 4
     runMarkets(*content_, state_);              // 5
     runFinance(*content_, state_, report_);     // 6
+    runResearch(state_, report_);               // 7
+    runEvents(*content_, state_, report_);      // 8
     ++state_.day;                               // 9
     return report_;
 }

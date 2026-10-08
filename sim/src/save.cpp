@@ -408,6 +408,54 @@ bool validateLoans(const Content& content, const WorldState& state) {
     });
 }
 
+bool validateResearch(const Content& content, const WorldState& state) {
+    std::vector<std::uint8_t> active(state.companies.size(), 0);
+    for (const Research& research : state.research) {
+        if (!research.company.valid() || research.company.index() >= state.companies.size() ||
+            !research.tech.valid() || research.tech.index() >= content.techs.size() ||
+            research.complete > 1 || research.completesDay > kMaxDeadline ||
+            research.completesDay !=
+                research.startedDay + content.techs[research.tech.index()].durationDays) {
+            return false;
+        }
+        // Completes while processing completesDay; afterwards day > completesDay.
+        const bool shouldBeComplete = research.completesDay < state.day;
+        if ((research.complete != 0) != shouldBeComplete) {
+            return false;
+        }
+        const Company& company = state.companies[research.company.index()];
+        if (research.complete == 0) {
+            if (active[research.company.index()]++ != 0) {
+                return false;  // one project at a time
+            }
+        } else if (std::find(company.completedTechs.begin(), company.completedTechs.end(),
+                             research.tech) == company.completedTechs.end()) {
+            return false;  // finished research must have granted its tech
+        }
+    }
+    return true;
+}
+
+bool validateEvents(const Content& content, const WorldState& state) {
+    std::vector<std::uint8_t> active(content.events.size(), 0);
+    for (const ActiveEvent& event : state.events) {
+        if (!event.event.valid() || event.event.index() >= content.events.size() ||
+            event.active > 1 || event.endsDay > kMaxDeadline ||
+            event.endsDay != event.startedDay + content.events[event.event.index()].durationDays) {
+            return false;
+        }
+        // Expires while processing endsDay; afterwards day > endsDay.
+        const bool shouldBeActive = event.endsDay >= state.day;
+        if ((event.active != 0) != shouldBeActive) {
+            return false;
+        }
+        if (event.active != 0 && active[event.event.index()]++ != 0) {
+            return false;  // one running instance per definition
+        }
+    }
+    return true;
+}
+
 bool validateWorldImpl(const Content& content, const WorldState& state) {
     if (state.day > kMaxDay || state.plots.size() != state.hidden.plotDeposits.size()) {
         return false;
@@ -417,7 +465,8 @@ bool validateWorldImpl(const Content& content, const WorldState& state) {
            validatePlots(content, state) && validateAuctions(state) &&
            validateListingQueue(state) && validateSurveys(content, state) &&
            validateMines(content, state) && validateMarkets(content, state) &&
-           validateLoans(content, state);
+           validateLoans(content, state) && validateResearch(content, state) &&
+           validateEvents(content, state);
 }
 
 }  // namespace

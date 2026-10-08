@@ -38,6 +38,8 @@ struct LoanTag {};
 struct SurveyTag {};
 struct EventTag {};
 struct AuctionTag {};
+struct ResearchTag {};
+struct ActiveEventTag {};
 
 using CompanyId = StrongId<CompanyTag>;
 using RegionId = StrongId<RegionTag>;
@@ -49,5 +51,7 @@ using LoanId = StrongId<LoanTag>;
 using SurveyId = StrongId<SurveyTag>;
 using EventId = StrongId<EventTag>;
 using AuctionId = StrongId<AuctionTag>;
+using ResearchId = StrongId<ResearchTag>;
+using ActiveEventId = StrongId<ActiveEventTag>;
 
 }  // namespace sim

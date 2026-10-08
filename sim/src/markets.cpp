@@ -2,6 +2,7 @@
 
 #include "sim/commands.h"
 #include "sim/content.h"
+#include "sim/events.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/math.h"
@@ -108,7 +109,9 @@ void runMarkets(const Content& content, WorldState& state) {
         // The world outside the game supplies exactly the base demand, so with
         // no company sales and no demand shift the price sits at base.
         const Fixed baseDemand = Fixed::fromInt(resource.baseDemandTonnesPerDay);
-        const Fixed demand = baseDemand * market.demandMult;
+        const Fixed demand =
+            baseDemand * market.demandMult *
+            eventMultiplier(content, state, EventEffectType::DemandMult, ResourceId(i));
         const Fixed supply = baseDemand + market.supplySmoothed;
         const Fixed ratio = clampFixed(demand / supply, kRatioMin, kRatioMax);
         const Money target = resource.basePrice.scaled(fixedPow(ratio, resource.elasticity));

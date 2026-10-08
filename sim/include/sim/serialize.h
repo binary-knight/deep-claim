@@ -88,6 +88,17 @@ void serialize(Archive& ar, Market& market) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, Research& research) {
+    ar(research.company, research.tech, research.startedDay, research.completesDay,
+       research.complete);
+}
+
+template <class Archive>
+void serialize(Archive& ar, ActiveEvent& event) {
+    ar(event.event, event.startedDay, event.endsDay, event.active);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Loan& loan) {
     ar(loan.company, loan.principal, loan.remaining, loan.principalPerMonth, loan.takenDay,
        loan.monthsRemaining, loan.active);
@@ -138,8 +149,8 @@ void serialize(Archive& ar, HiddenState& hidden) {
 template <class Archive>
 void serialize(Archive& ar, WorldState& state) {
     ar(state.day, state.rng, state.companies, state.plots, state.auctions, state.surveys,
-       state.mines, state.markets, state.loans, state.listingQueue, state.nextListing,
-       state.bidCounter, state.hidden);
+       state.mines, state.markets, state.loans, state.research, state.events, state.listingQueue,
+       state.nextListing, state.bidCounter, state.hidden);
 }
 
 // ---- commands (queued commands travel with saves) ----
@@ -180,6 +191,11 @@ void serialize(Archive& ar, RepayLoan& command) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, StartResearch& command) {
+    ar(command.company, command.tech);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Command& command) {
     auto index = static_cast<std::uint8_t>(command.index());
     ar(index);
@@ -205,6 +221,9 @@ void serialize(Archive& ar, Command& command) {
                 break;
             case 6:
                 command = RepayLoan{};
+                break;
+            case 7:
+                command = StartResearch{};
                 break;
             default:
                 ar.fail();
