@@ -8,10 +8,12 @@
 #include "sim/view.h"
 
 #include "game/format.h"
+#include "game/trace.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -39,8 +41,15 @@ Session::Session(const sim::Content& content, sim::Seed seed, const sim::GameSet
     }
 }
 
+void Session::setSpeed(Speed speed) {
+    if (speed != speed_ && trace_ != nullptr) {
+        trace_->ui(day(), "speed", std::to_string(daysPerSecond(speed)) + " days/s");
+    }
+    speed_ = speed;
+}
+
 void Session::togglePause() {
-    speed_ = speed_ == Speed::Paused ? Speed::Normal : Speed::Paused;
+    setSpeed(speed_ == Speed::Paused ? Speed::Normal : Speed::Paused);
 }
 
 int Session::advance(double seconds) {
@@ -71,6 +80,9 @@ void Session::stepOneDay() {
 
 void Session::submit(sim::Command command) {
     sim::setCommandCompany(command, kPlayer);
+    if (trace_ != nullptr) {
+        trace_->command(day(), command);
+    }
     simulation_.submit(command);
 }
 
@@ -102,8 +114,14 @@ void Session::tickOnce() {
     const sim::Day processed = view_.day;
     simulation_.tick();
     refreshView();
+    if (trace_ != nullptr) {
+        trace_->dayTicked(view_.day, simulation_.stateHash());
+    }
     for (const sim::Notice& notice : simulation_.reportFor(kPlayer)) {
         appendLog(processed, notice);
+    }
+    if (trace_ != nullptr && view_.day % sim::kDaysPerMonth == 0) {
+        trace_->state(*content_, view_);
     }
 }
 
@@ -116,6 +134,9 @@ void Session::appendLog(sim::Day day, const sim::Notice& notice) {
     entry.day = day;
     entry.notice = notice;
     entry.text = describeNotice(*content_, view_, notice);
+    if (trace_ != nullptr) {
+        trace_->notice(day, notice, entry.text);
+    }
     log_.push_back(std::move(entry));
     if (log_.size() > kMaxLogEntries) {
         log_.erase(log_.begin(),

@@ -22,6 +22,8 @@
 
 namespace game {
 
+class TraceWriter;
+
 enum class Speed : std::uint8_t { Paused, Normal, Fast, Fastest };
 [[nodiscard]] int daysPerSecond(Speed speed);  // 0, 1, 5, 20
 
@@ -39,7 +41,7 @@ public:
     Session(const sim::Content& content, sim::Seed seed, const sim::GameSetup& setup);
 
     // ---- time ----
-    void setSpeed(Speed speed) { speed_ = speed; }
+    void setSpeed(Speed speed);
     [[nodiscard]] Speed speed() const { return speed_; }
     void togglePause();
     // Advances real time; ticks whole in-game days as they accrue. Returns
@@ -64,6 +66,13 @@ public:
     [[nodiscard]] bool load(std::span<const std::uint8_t> bytes);
 
     [[nodiscard]] const sim::Content& content() const { return *content_; }
+
+    // Optional playtest trace (see trace.h): orders, ticks, notices and a
+    // monthly state summary are recorded as they happen. Not owned; null
+    // turns tracing off. The host records new games, loads and interface
+    // events itself.
+    void setTrace(TraceWriter* trace) { trace_ = trace; }
+    [[nodiscard]] TraceWriter* trace() const { return trace_; }
     // Tests compare hashes through this; the interface never needs it.
     [[nodiscard]] std::uint64_t stateHash() const { return simulation_.stateHash(); }
 
@@ -79,6 +88,7 @@ private:
     std::vector<LogEntry> log_;
     Speed speed_ = Speed::Paused;
     double accumulator_ = 0.0;  // real seconds not yet turned into days
+    TraceWriter* trace_ = nullptr;
 };
 
 }  // namespace game
