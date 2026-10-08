@@ -8,9 +8,13 @@
 #include "platform/services.h"
 
 #include <RmlUi/Core.h>
+#include <cstddef>
 #include <cstdio>
 #include <filesystem>
+#include <format>
+#include <iostream>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -41,14 +45,13 @@ public:
 
 void print(Rml::Element* e, const char* label) {
     if (e == nullptr) {
-        std::printf("%-12s missing\n", label);
+        std::cout << std::format("{:<12} missing\n", label);
         return;
     }
     const Rml::Vector2f size = e->GetBox().GetSize(Rml::BoxArea::Border);
     const Rml::Vector2f pos = e->GetAbsoluteOffset(Rml::BoxArea::Border);
-    std::printf("%-12s at %7.1f,%7.1f size %7.1f x %7.1f display=%s\n", label,
-                static_cast<double>(pos.x), static_cast<double>(pos.y), static_cast<double>(size.x),
-                static_cast<double>(size.y), e->GetProperty<Rml::String>("display").c_str());
+    std::cout << std::format("{:<12} at {:7.1f},{:7.1f} size {:7.1f} x {:7.1f} display={}\n", label,
+                             pos.x, pos.y, size.x, size.y, e->GetProperty<Rml::String>("display"));
 }
 
 void dump(Rml::Element* e, int depth, int maxDepth) {
@@ -57,14 +60,14 @@ void dump(Rml::Element* e, int depth, int maxDepth) {
     }
     const Rml::Vector2f size = e->GetBox().GetSize(Rml::BoxArea::Border);
     const Rml::Vector2f pos = e->GetAbsoluteOffset(Rml::BoxArea::Border);
-    const Rml::String display = e->GetProperty<Rml::String>("display");
+    const auto display = e->GetProperty<Rml::String>("display");
     if (display == "0") {
         return;  // display: none
     }
-    std::printf("%*s<%s id=%s class=%s> at %.0f,%.0f size %.0f x %.0f display=%s\n", depth * 2, "",
-                e->GetTagName().c_str(), e->GetId().c_str(), e->GetClassNames().c_str(),
-                static_cast<double>(pos.x), static_cast<double>(pos.y), static_cast<double>(size.x),
-                static_cast<double>(size.y), display.c_str());
+    std::cout << std::format(
+        "{:{}}<{} id={} class={}> at {:.0f},{:.0f} size {:.0f} x {:.0f} display={}\n", "",
+        depth * 2, e->GetTagName(), e->GetId(), e->GetClassNames(), pos.x, pos.y, size.x, size.y,
+        display);
     for (int i = 0; i < e->GetNumChildren(); ++i) {
         dump(e->GetChild(i), depth + 1, maxDepth);
     }
@@ -73,7 +76,8 @@ void dump(Rml::Element* e, int depth, int maxDepth) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    const std::filesystem::path assets = argc > 1 ? argv[1] : DC_ASSETS_DIR;
+    const std::span<char*> args(argv, static_cast<std::size_t>(argc));
+    const std::filesystem::path assets = args.size() > 1 ? args[1] : DC_ASSETS_DIR;
     const content::LoadResult loaded = content::loadFromDirectory(DC_DATA_DIR);
     if (!loaded.content) {
         return 1;
@@ -102,12 +106,12 @@ int main(int argc, char** argv) {
         int exitCode = 0;
         if (content == nullptr || content->GetNumChildren() == 0 ||
             content->GetChild(0)->GetBox().GetSize(Rml::BoxArea::Border).x < 100.0F) {
-            std::printf("LAYOUT FAILURE: content panel children have no width\n");
+            std::cout << "LAYOUT FAILURE: content panel children have no width\n";
             exitCode = 3;
         }
         Rml::ElementList tables;
         doc->GetElementsByTagName(tables, "table");
-        std::printf("tables: %zu\n", tables.size());
+        std::cout << std::format("tables: {}\n", tables.size());
         if (!tables.empty()) {
             print(tables[0], "table[0]");
         }
