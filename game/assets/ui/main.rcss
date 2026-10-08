@@ -139,3 +139,16 @@ price-chart {
 
 .log-row { display: flex; flex-direction: row; padding: 3dp 0; border-bottom: 1dp #222934; }
 .log-day { width: 110dp; color: #8a94a3; }
+
+/* Scrollbars must be styled: an unstyled scrollbar element is as wide as its
+   parent, which leaves no room for the content it scrolls (every block in
+   the panel then lays out at zero width). */
+scrollbarvertical { width: 12dp; }
+scrollbarvertical slidertrack { background-color: #1b212b; }
+scrollbarvertical sliderbar { background-color: #3d4c63; border-radius: 6dp; min-height: 24dp; }
+scrollbarvertical sliderbar:hover { background-color: #4d5e78; }
+scrollbarvertical sliderarrowdec, scrollbarvertical sliderarrowinc { width: 0; height: 0; }
+scrollbarhorizontal { height: 12dp; }
+scrollbarhorizontal slidertrack { background-color: #1b212b; }
+scrollbarhorizontal sliderbar { background-color: #3d4c63; border-radius: 6dp; min-width: 24dp; }
+scrollbarhorizontal sliderarrowdec, scrollbarhorizontal sliderarrowinc { width: 0; height: 0; }

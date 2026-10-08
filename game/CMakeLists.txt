@@ -47,3 +47,13 @@ add_custom_target(deep_claim_assets ALL
     COMMENT "Copying data and assets next to deep_claim"
     VERBATIM)
 add_dependencies(deep_claim_assets deep_claim)
+
+# Headless layout probe for diagnosing interface layout without a display.
+add_executable(deep_claim_layout_probe src/layout_probe.cpp src/app.cpp src/chart_element.cpp
+                                        src/ui_model.cpp)
+target_include_directories(deep_claim_layout_probe PRIVATE src)
+target_link_libraries(deep_claim_layout_probe PRIVATE dc::game_session dc::content dc::platform
+                                                      RmlUi::RmlUi RmlUi::Debugger dc_warnings)
+target_compile_definitions(deep_claim_layout_probe PRIVATE DC_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
+                                                           DC_ASSETS_DIR="${CMAKE_SOURCE_DIR}/game/assets")
+add_test(NAME layout_probe COMMAND deep_claim_layout_probe)

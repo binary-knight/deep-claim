@@ -493,3 +493,10 @@ and clang-tidy are enforced in CI. Warnings are errors by default
 - The dashboard opens with a dismissible how-to-play card, the header shows
   spendable cash next to cash, finance shows loan terms and insolvency
   progress, status lines say "queued" and point to the log for rejections.
+- First test-play finding: every block in the content panel laid out at
+  zero width. Cause (RmlUi): a scroll container subtracts its vertical
+  scrollbar's width from the children's containing block, and an unstyled
+  scrollbar element is as wide as its parent. Scrollbars are now styled.
+  `deep_claim_layout_probe` loads the real interface with a stub renderer
+  and prints computed boxes, and runs as a test in the game presets so a
+  collapsed layout fails CI.
