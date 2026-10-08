@@ -147,3 +147,35 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   starts to depress the price; a third does so visibly.
 - Event daily weights sum to 0.0021 once all are eligible, so about one event
   starts every 480 days.
+
+## World generation (step 4)
+
+- `Simulation` takes a `const Content&` that must outlive it; the world is
+  generated in the constructor from the `world` RNG stream. Nothing in
+  WorldState points at content by anything but ids.
+- Plots are generated region by region in content order. Area is uniform in
+  the region's range. Ask price interpolates linearly between the region's
+  min and max by area and then takes +/- 20% noise, so price hints at size
+  but never at deposits.
+- Each deposit prior is rolled independently: present with
+  `presence_prob`, size `median * spread^z` with z ~ approx-normal clamped to
+  +/- 3 sigma, scaled by plot area relative to the region's mean area, and
+  bounded to [1, 1e15] tonnes. `spread^z` uses integer-only `fixedExp` and
+  `fixedLn` (sim/math.h), so generation is bit-identical across platforms.
+- Negative z is applied by dividing by the positive power, because a factor
+  below one in six decimals loses relative precision at the lower tail.
+- Hidden truth lives in `WorldState::hidden`, a separate struct, so the view
+  code added in step 5 can be audited for never reading it.
+- Loading a save runs `validateWorld`: vector sizes agree, ids are in range
+  for the content, tonnages are consistent, enums are known. A save that
+  passes the fingerprint check but fails validation is rejected, so later
+  systems can index by id without bounds checks.
+- Archive reads bound each container by its real minimum serialized size
+  (measured once from a default value) and turn allocation failure into the
+  error flag.
+- Saves carry `hashOf(content)` in the header and refuse to load against
+  different content. Reordering resources in data files would otherwise
+  silently retarget every ResourceId in a save.
+- The golden determinism hash uses an in-code content fixture
+  (tests/test_content.h), so tuning data files does not move it. A separate
+  test checks that the shipped data generates a sane world.

@@ -8,6 +8,7 @@
 #include "sim/serialize.h"
 #include "sim/simulation.h"
 
+#include "test_content.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
@@ -120,6 +121,16 @@ TEST_CASE("Truncated and oversized streams fail cleanly", "[archive]") {
     CHECK_FALSE(sim::fromBytes(std::vector<std::uint8_t>{}, out));
 }
 
+TEST_CASE("Aggregate vectors are bounded by their real serialized size", "[archive]") {
+    // 25 bytes per default Plot; a prefix of 2 with only 25 bytes left must fail
+    // before any decoding, not after allocating two elements.
+    std::vector<std::uint8_t> bytes{2, 0, 0, 0};
+    bytes.resize(4 + 25, 0);
+    std::vector<sim::Plot> plots;
+    CHECK_FALSE(sim::fromBytes(bytes, plots));
+    CHECK(plots.empty());
+}
+
 TEST_CASE("Huge length prefixes are rejected before allocating", "[archive]") {
     // The byte comes through a volatile so GCC cannot constant-fold the whole
     // parse; with literal bytes GCC 13 -O2 emits a spurious -Warray-bounds on
@@ -137,11 +148,12 @@ TEST_CASE("Huge length prefixes are rejected before allocating", "[archive]") {
 }
 
 TEST_CASE("Simulation save and load reproduce the state exactly", "[archive][save]") {
-    sim::Simulation original(9);
+    const sim::Content content = test::makeContent();
+    sim::Simulation original(content, 9);
     original.tick(500);
     const std::vector<std::uint8_t> bytes = original.save();
 
-    sim::Simulation restored(1);
+    sim::Simulation restored(content, 1);
     REQUIRE(restored.load(bytes));
     CHECK(restored.state().day == 500);
     CHECK(restored.stateHash() == original.stateHash());
@@ -165,11 +177,12 @@ TEST_CASE("Invalid bool bytes and even RNG increments are rejected", "[archive][
 }
 
 TEST_CASE("Saves with a bad header are rejected and leave the state alone", "[save]") {
-    sim::Simulation original(9);
+    const sim::Content content = test::makeContent();
+    sim::Simulation original(content, 9);
     original.tick(10);
     const std::vector<std::uint8_t> good = original.save();
 
-    sim::Simulation target(3);
+    sim::Simulation target(content, 3);
     const std::uint64_t before = target.stateHash();
 
     std::vector<std::uint8_t> badMagic = good;
@@ -184,4 +197,51 @@ TEST_CASE("Saves with a bad header are rejected and leave the state alone", "[sa
     CHECK_FALSE(target.load(truncated));
 
     CHECK(target.stateHash() == before);
+}
+
+TEST_CASE("Saves holding an inconsistent world are rejected", "[save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation target(content, 1);
+    const std::uint64_t before = target.stateHash();
+
+    sim::WorldState broken = target.state();
+    broken.hidden.plotDeposits.pop_back();  // sizes disagree
+    CHECK_FALSE(target.load(sim::saveWorld(broken, sim::hashContent(content))));
+
+    broken = target.state();
+    broken.plots[0].region = sim::RegionId(99);
+    CHECK_FALSE(target.load(sim::saveWorld(broken, sim::hashContent(content))));
+
+    broken = target.state();
+    broken.plots[0].owner = sim::CompanyId(0);  // owner without being sold
+    CHECK_FALSE(target.load(sim::saveWorld(broken, sim::hashContent(content))));
+
+    broken = target.state();
+    bool tampered = false;
+    for (sim::PlotDeposits& deposits : broken.hidden.plotDeposits) {
+        if (!deposits.deposits.empty()) {
+            deposits.deposits[0].tonnesRemaining = deposits.deposits[0].tonnesTotal + 1;
+            tampered = true;
+            break;
+        }
+    }
+    REQUIRE(tampered);
+    CHECK_FALSE(target.load(sim::saveWorld(broken, sim::hashContent(content))));
+
+    CHECK(target.stateHash() == before);
+    CHECK(target.load(sim::saveWorld(target.state(), sim::hashContent(content))));
+}
+
+TEST_CASE("Saves are bound to the content they were made with", "[save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation original(content, 9);
+    const std::vector<std::uint8_t> bytes = original.save();
+
+    sim::Content edited = test::makeContent();
+    edited.resources[0].basePrice = sim::Money::fromUnits(61);
+    sim::Simulation other(edited, 9);
+    CHECK_FALSE(other.load(bytes));
+
+    sim::Simulation same(content, 1);
+    CHECK(same.load(bytes));
 }

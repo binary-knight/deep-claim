@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -91,15 +92,21 @@ private:
         }
     }
 
-    // Smallest serialized size of one T, used to bound allocations when reading.
+    // Smallest serialized size of one T, used to bound allocations when
+    // reading. For aggregates it is measured once by serializing a default
+    // constructed value, whose nested containers are empty.
     template <class T>
-    static constexpr std::size_t minSerializedSize() {
+    static std::size_t minSerializedSize() {
         if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
             return sizeof(T);
         } else {
-            return 1;
+            static const std::size_t kSize = serializedSizeOfDefault<T>();
+            return kSize;
         }
     }
+
+    template <class T>
+    static std::size_t serializedSizeOfDefault();
 
     template <class T>
     void vector(std::vector<T>& values) {
@@ -110,7 +117,9 @@ private:
                 return;
             }
             const std::size_t bounded = std::min<std::size_t>(count, Derived::kMaxLength);
-            values = std::vector<T>(bounded);
+            if (!self().allocate(values, bounded)) {
+                return;
+            }
         }
         for (T& element : values) {
             field(element);
@@ -125,7 +134,9 @@ private:
                 return;
             }
             const std::size_t bounded = std::min<std::size_t>(count, Derived::kMaxLength);
-            value = std::string(bounded, '\0');
+            if (!self().allocate(value, bounded)) {
+                return;
+            }
         }
         for (char& character : value) {
             integral(character);
@@ -221,6 +232,19 @@ public:
     // reading, such as an impossible RNG state.
     void fail() { failed_ = true; }
 
+    // Sized construction that converts allocation failure into the error flag
+    // so reading never throws.
+    template <class Container>
+    [[nodiscard]] bool allocate(Container& container, std::size_t count) {
+        try {
+            container = Container(count, typename Container::value_type{});
+        } catch (const std::bad_alloc&) {
+            failed_ = true;
+            return false;
+        }
+        return true;
+    }
+
     [[nodiscard]] bool failed() const { return failed_; }
     [[nodiscard]] std::size_t remaining() const { return bytes_.size() - position_; }
     [[nodiscard]] bool atEnd() const { return position_ == bytes_.size(); }
@@ -246,6 +270,13 @@ template <class T>
     WriteArchive archive;
     archive(const_cast<T&>(value));  // NOLINT(cppcoreguidelines-pro-type-const-cast)
     return archive.release();
+}
+
+template <class Derived>
+template <class T>
+std::size_t ArchiveBase<Derived>::serializedSizeOfDefault() {
+    T value{};
+    return toBytes(value).size();
 }
 
 // Returns false if the stream is truncated, corrupt, or has trailing bytes.

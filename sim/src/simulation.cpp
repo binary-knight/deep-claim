@@ -1,17 +1,19 @@
 #include "sim/simulation.h"
 
 #include "sim/save.h"
+#include "sim/worldgen.h"
 
 namespace sim {
 
-Simulation::Simulation(Seed seed) {
+Simulation::Simulation(const Content& content, Seed seed)
+    : content_(&content), contentHash_(hashContent(content)) {
     state_.rng = RngStreams(seed);
+    generateWorld(content, state_);
 }
 
 void Simulation::tick() {
     // The full tick pipeline is documented in DESIGN.md. Only the final
     // step exists so far; the others are added one system at a time.
-    state_.noise = state_.noise * 31U + state_.rng.world.next();
     ++state_.day;
 }
 
@@ -26,12 +28,12 @@ std::uint64_t Simulation::stateHash() const {
 }
 
 std::vector<std::uint8_t> Simulation::save() const {
-    return saveWorld(state_);
+    return saveWorld(state_, contentHash_);
 }
 
 bool Simulation::load(std::span<const std::uint8_t> bytes) {
     WorldState loaded;
-    if (!loadWorld(bytes, loaded)) {
+    if (!loadWorld(bytes, *content_, loaded)) {
         return false;
     }
     state_ = loaded;

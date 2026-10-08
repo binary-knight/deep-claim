@@ -79,11 +79,11 @@ int main(int argc, char** argv) {
     }
     const sim::Content& gameContent = *loaded.content;
 
-    sim::Simulation simulation(options.seed);
+    sim::Simulation simulation(gameContent, options.seed);
     simulation.tick(options.days);
 
     std::cout << std::format(
-        "{{\"seed\":{},\"days\":{},\"resources\":{},\"state_hash\":\"{:016x}\"}}\n", options.seed,
-        simulation.state().day, gameContent.resources.size(), simulation.stateHash());
+        "{{\"seed\":{},\"days\":{},\"plots\":{},\"state_hash\":\"{:016x}\"}}\n", options.seed,
+        simulation.state().day, simulation.state().plots.size(), simulation.stateHash());
     return 0;
 }
