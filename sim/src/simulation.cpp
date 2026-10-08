@@ -1,6 +1,7 @@
 #include "sim/simulation.h"
 
 #include "sim/commands.h"
+#include "sim/fatal.h"
 #include "sim/plot_market.h"
 #include "sim/save.h"
 #include "sim/view.h"
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <utility>
 #include <variant>
 
 namespace sim {
@@ -41,6 +43,15 @@ void Simulation::submit(const Command& command) {
     pending_.push_back(command);
 }
 
+void Simulation::collectCommands(CompanyId company, Controller& controller) {
+    std::vector<Command> commands;
+    controller.decide(view(company), commands);
+    for (Command& command : commands) {
+        setCommandCompany(command, company);
+        pending_.push_back(command);
+    }
+}
+
 void Simulation::applyCommands() {
     // Deterministic order: by company id, then submission order.
     std::stable_sort(pending_.begin(), pending_.end(), [](const Command& a, const Command& b) {
@@ -52,9 +63,9 @@ void Simulation::applyCommands() {
                 using T = std::decay_t<decltype(concrete)>;
                 if constexpr (std::is_same_v<T, BidOnPlot>) {
                     if (const std::optional<RejectReason> reason = validateBid(state_, concrete)) {
-                        report_.notices.push_back(makeNotice(NoticeKind::CommandRejected,
-                                                             concrete.company, concrete.plot,
-                                                             concrete.amount, *reason));
+                        report_.notices.push_back(
+                            makeNotice(NoticeKind::CommandRejected, concrete.company, concrete.plot,
+                                       AuctionId(), concrete.amount, *reason));
                     } else {
                         applyBid(state_, concrete);
                     }
@@ -66,6 +77,9 @@ void Simulation::applyCommands() {
 }
 
 const TickReport& Simulation::tick() {
+    if (state_.day >= kMaxDay) {
+        fatal("Simulation::tick: day limit reached");
+    }
     report_ = TickReport{};
     report_.day = state_.day;
     // Pipeline order is fixed (see DESIGN.md). Steps for systems that do not
@@ -82,7 +96,20 @@ void Simulation::tick(Day days) {
     }
 }
 
+std::vector<Notice> Simulation::reportFor(CompanyId viewer) const {
+    std::vector<Notice> visible;
+    for (const Notice& notice : report_.notices) {
+        if (noticeVisibleTo(notice, viewer)) {
+            visible.push_back(notice);
+        }
+    }
+    return visible;
+}
+
 CompanyView Simulation::view(CompanyId company) const {
+    if (!company.valid() || company.index() >= state_.companies.size()) {
+        fatal("Simulation::view: invalid company id");
+    }
     return makeCompanyView(*content_, state_, company);
 }
 
@@ -91,16 +118,17 @@ std::uint64_t Simulation::stateHash() const {
 }
 
 std::vector<std::uint8_t> Simulation::save() const {
-    return saveWorld(state_, contentHash_);
+    return saveGame(state_, pending_, contentHash_);
 }
 
 bool Simulation::load(std::span<const std::uint8_t> bytes) {
-    WorldState loaded;
-    if (!loadWorld(bytes, *content_, loaded)) {
+    WorldState loadedState;
+    std::vector<Command> loadedPending;
+    if (!loadGame(bytes, *content_, loadedState, loadedPending)) {
         return false;
     }
-    state_ = loaded;
-    pending_.clear();
+    state_ = std::move(loadedState);
+    pending_ = std::move(loadedPending);
     report_ = TickReport{};
     report_.day = state_.day;
     return true;

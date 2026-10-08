@@ -23,6 +23,11 @@ void runPlotMarket(const Content& content, WorldState& state, TickReport& report
 // Cash a company has committed to standing bids on open auctions.
 [[nodiscard]] Money reservedCash(const WorldState& state, CompanyId company);
 
+// Cash a company may still commit: cash minus reservations. Every spending
+// command (bids now; surveys, mines and research later) validates against
+// this so the same money is never promised twice.
+[[nodiscard]] Money availableCash(const WorldState& state, CompanyId company);
+
 [[nodiscard]] std::optional<RejectReason> validateBid(const WorldState& state,
                                                       const BidOnPlot& bid);
 void applyBid(WorldState& state, const BidOnPlot& bid);

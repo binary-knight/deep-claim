@@ -207,5 +207,21 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   auction (amounts stay sealed), own cash and reservations, and public facts
   about competitors. `view.cpp` must never mention hidden state; a test
   greps the source for it.
-- `validateWorld` now also checks company, auction and listing-queue
-  invariants so systems can index by id without bounds checks.
+- Notices are public (listings, relistings, sales with the price paid, as a
+  land registry would publish) or private (rejections, losses, forfeits).
+  `Simulation::reportFor(company)` filters; the unfiltered report exists for
+  tests and tooling. Notices carry the auction id so a UI can refer to the
+  right auction after an immediate relisting.
+- `availableCash` (cash minus reservations) is the single affordability
+  check every future spending command validates against.
+- Hosts that run controllers call `collectCommands`, which binds each
+  command to the controller's company; a controller cannot act for anyone
+  else.
+- Saves include the commands queued for the next tick, so saving between
+  submitting and ticking loses nothing.
+- `validateWorld` also checks company, auction and listing-queue invariants:
+  exactly one open auction per listed plot, consumed queue entries are
+  listed or sold and the rest unlisted, one bid per company per auction,
+  unique order stamps below the counter, representable reservation totals,
+  and days within `kMaxDay` (10,000 years). Systems can then index by id
+  without bounds checks.

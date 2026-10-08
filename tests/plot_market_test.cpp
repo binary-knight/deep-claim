@@ -3,6 +3,7 @@
 #include "sim/commands.h"
 #include "sim/ids.h"
 #include "sim/money.h"
+#include "sim/save.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
 #include "sim/view.h"
@@ -182,7 +183,7 @@ TEST_CASE("Highest bid wins, ties go to the earlier bid, winner pays", "[market]
     simulation.tick(28);  // state.day is now 30; the auction is still open
     CHECK(simulation.state().plots[plot.index()].listing == sim::PlotListing::Listed);
     const sim::TickReport& closing = simulation.tick();  // processes day 30
-    CHECK(hasNotice(closing, sim::NoticeKind::AuctionWon, kRival));
+    CHECK(hasNotice(closing, sim::NoticeKind::PlotSold, kRival));
     CHECK(hasNotice(closing, sim::NoticeKind::AuctionLost, kPlayer));
     const sim::Plot& sold = simulation.state().plots[plot.index()];
     CHECK(sold.listing == sim::PlotListing::Sold);
@@ -269,4 +270,157 @@ TEST_CASE("Views expose no hidden deposits and only the viewer's own bids", "[ma
     for (const sim::PlotView& p : player.plots) {
         CHECK(p.auction.has_value() == (p.listing == sim::PlotListing::Listed));
     }
+}
+
+TEST_CASE("Reports are filtered per viewer; sale prices are public", "[market][view]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = firstListed(simulation.state());
+    const sim::Money ask = simulation.state().plots[plot.index()].askPrice;
+
+    // Rival's rejected bid must not reach the player.
+    simulation.submit(sim::BidOnPlot{kRival, plot, sim::Money::fromUnits(100'000'000)});
+    simulation.submit(sim::BidOnPlot{kRival, plot, ask + sim::Money::fromUnits(7)});
+    simulation.submit(sim::BidOnPlot{kPlayer, plot, ask});
+    simulation.tick();
+    const std::vector<sim::Notice> playerDay0 = simulation.reportFor(kPlayer);
+    CHECK(std::none_of(playerDay0.begin(), playerDay0.end(), [](const sim::Notice& n) {
+        return n.kind == sim::NoticeKind::CommandRejected;
+    }));
+    const std::vector<sim::Notice> rivalDay0 = simulation.reportFor(kRival);
+    CHECK(std::count_if(rivalDay0.begin(), rivalDay0.end(), [](const sim::Notice& n) {
+              return n.kind == sim::NoticeKind::CommandRejected;
+          }) == 1);
+
+    while (simulation.state().day < 30) {
+        simulation.tick();
+    }
+    simulation.tick();  // closes on day 30
+    const std::vector<sim::Notice> playerClose = simulation.reportFor(kPlayer);
+    const std::vector<sim::Notice> rivalClose = simulation.reportFor(kRival);
+    // Loser sees its loss; winner does not see the loss notice.
+    CHECK(std::any_of(playerClose.begin(), playerClose.end(), [&](const sim::Notice& n) {
+        return n.kind == sim::NoticeKind::AuctionLost && n.company == kPlayer;
+    }));
+    CHECK(std::none_of(rivalClose.begin(), rivalClose.end(), [](const sim::Notice& n) {
+        return n.kind == sim::NoticeKind::AuctionLost;
+    }));
+    // Sale is public with the price paid and the auction id.
+    for (const auto* notices : {&playerClose, &rivalClose}) {
+        const auto sold = std::find_if(notices->begin(), notices->end(), [](const sim::Notice& n) {
+            return n.kind == sim::NoticeKind::PlotSold;
+        });
+        REQUIRE(sold != notices->end());
+        CHECK(sold->company == kRival);
+        CHECK(sold->amount == ask + sim::Money::fromUnits(7));
+        CHECK(sold->auction.valid());
+    }
+}
+
+TEST_CASE("A bidder that can no longer pay forfeits and the plot relists", "[market][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = firstListed(simulation.state());
+    const sim::Money ask = simulation.state().plots[plot.index()].askPrice;
+    simulation.submit(sim::BidOnPlot{kRival, plot, ask});
+    simulation.tick();
+
+    // Drain the rival's cash through a save edit (later steps add real costs).
+    sim::WorldState drained = simulation.state();
+    drained.companies[1].cash = sim::Money::fromUnits(1);
+    REQUIRE(simulation.load(sim::saveGame(drained, {}, sim::hashContent(content))));
+
+    while (simulation.state().day < 30) {
+        simulation.tick();
+    }
+    const sim::TickReport& closing = simulation.tick();
+    CHECK(hasNotice(closing, sim::NoticeKind::BidForfeited, kRival));
+    CHECK(std::any_of(closing.notices.begin(), closing.notices.end(), [&](const sim::Notice& n) {
+        return n.kind == sim::NoticeKind::PlotRelisted && n.plot == plot;
+    }));
+    CHECK(simulation.state().plots[plot.index()].listing == sim::PlotListing::Listed);
+    CHECK(simulation.state().companies[1].cash == sim::Money::fromUnits(1));
+}
+
+TEST_CASE("Queued commands survive save and load", "[market][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation original(content, 8, test::setup());
+    sim::Simulation restored(content, 9, test::setup());
+    const sim::PlotId plot = firstListed(original.state());
+    const sim::Money ask = original.state().plots[plot.index()].askPrice;
+
+    original.submit(sim::BidOnPlot{kPlayer, plot, ask});
+    REQUIRE(restored.load(original.save()));
+    CHECK(restored.pendingCommands().size() == 1);
+    original.tick(31);
+    restored.tick(31);
+    CHECK(restored.stateHash() == original.stateHash());
+    CHECK(restored.state().plots[plot.index()].owner == kPlayer);
+}
+
+TEST_CASE("Saves with inconsistent market state are rejected", "[market][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = firstListed(simulation.state());
+    const sim::Money ask = simulation.state().plots[plot.index()].askPrice;
+    simulation.submit(sim::BidOnPlot{kRival, plot, ask});
+    simulation.tick();
+    const auto saveOf = [&](const sim::WorldState& s) {
+        return sim::saveGame(s, {}, sim::hashContent(content));
+    };
+    const std::size_t a = simulation.state().plots[plot.index()].auction.index();
+    REQUIRE(simulation.state().auctions[a].bids.size() == 1);
+
+    sim::WorldState broken = simulation.state();
+    broken.auctions.push_back(broken.auctions[a]);  // second open auction for the plot
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.nextListing = 0;  // listed plots in the unconsumed part of the queue
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.auctions[a].bids.push_back(broken.auctions[a].bids[0]);  // duplicate bidder
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.auctions[a].bids[0].order = broken.bidCounter;  // stamp beyond the counter
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.day = sim::kMaxDay + 1;
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    CHECK(simulation.load(saveOf(simulation.state())));
+}
+
+namespace {
+
+class BidEverything final : public sim::Controller {
+public:
+    void decide(const sim::CompanyView& view, std::vector<sim::Command>& out) override {
+        for (const sim::PlotView& plot : view.plots) {
+            if (plot.auction.has_value() && plot.auction->myBid == sim::Money::zero() &&
+                plot.askPrice <= view.cash - view.reservedCash) {
+                // Deliberately wrong company id: collectCommands must rebind it.
+                out.push_back(sim::BidOnPlot{sim::CompanyId(0), plot.id, plot.askPrice});
+            }
+        }
+    }
+};
+
+}  // namespace
+
+TEST_CASE("collectCommands binds commands to the controller's company", "[market]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    BidEverything rivalBrain;
+    simulation.collectCommands(kRival, rivalBrain);
+    REQUIRE_FALSE(simulation.pendingCommands().empty());
+    for (const sim::Command& command : simulation.pendingCommands()) {
+        CHECK(sim::commandCompany(command) == kRival);
+    }
+    simulation.tick();
+    CHECK(simulation.view(kRival).reservedCash > sim::Money::zero());
+    CHECK(simulation.view(kPlayer).reservedCash == sim::Money::zero());
 }

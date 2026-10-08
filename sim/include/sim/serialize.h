@@ -4,6 +4,7 @@
 // hashed, saved or loaded. See archive.h for the visitor protocol.
 
 #include "sim/archive.h"
+#include "sim/commands.h"
 #include "sim/content.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
@@ -13,6 +14,7 @@
 #include "sim/world_state.h"
 
 #include <cstdint>
+#include <variant>
 
 namespace sim {
 
@@ -108,6 +110,30 @@ template <class Archive>
 void serialize(Archive& ar, WorldState& state) {
     ar(state.day, state.rng, state.companies, state.plots, state.auctions, state.listingQueue,
        state.nextListing, state.bidCounter, state.hidden);
+}
+
+// ---- commands (queued commands travel with saves) ----
+
+template <class Archive>
+void serialize(Archive& ar, BidOnPlot& bid) {
+    ar(bid.company, bid.plot, bid.amount);
+}
+
+template <class Archive>
+void serialize(Archive& ar, Command& command) {
+    auto index = static_cast<std::uint8_t>(command.index());
+    ar(index);
+    if constexpr (Archive::kReading) {
+        switch (index) {
+            case 0:
+                command = BidOnPlot{};
+                break;
+            default:
+                ar.fail();
+                return;
+        }
+    }
+    std::visit([&](auto& concrete) { serialize(ar, concrete); }, command);
 }
 
 // ---- content (hashed into saves so a save cannot be opened against

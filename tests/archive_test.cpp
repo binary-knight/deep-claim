@@ -206,15 +206,15 @@ TEST_CASE("Saves holding an inconsistent world are rejected", "[save]") {
 
     sim::WorldState broken = target.state();
     broken.hidden.plotDeposits.pop_back();  // sizes disagree
-    CHECK_FALSE(target.load(sim::saveWorld(broken, sim::hashContent(content))));
+    CHECK_FALSE(target.load(sim::saveGame(broken, {}, sim::hashContent(content))));
 
     broken = target.state();
     broken.plots[0].region = sim::RegionId(99);
-    CHECK_FALSE(target.load(sim::saveWorld(broken, sim::hashContent(content))));
+    CHECK_FALSE(target.load(sim::saveGame(broken, {}, sim::hashContent(content))));
 
     broken = target.state();
     broken.plots[0].owner = sim::CompanyId(0);  // owner without being sold
-    CHECK_FALSE(target.load(sim::saveWorld(broken, sim::hashContent(content))));
+    CHECK_FALSE(target.load(sim::saveGame(broken, {}, sim::hashContent(content))));
 
     broken = target.state();
     bool tampered = false;
@@ -226,10 +226,10 @@ TEST_CASE("Saves holding an inconsistent world are rejected", "[save]") {
         }
     }
     REQUIRE(tampered);
-    CHECK_FALSE(target.load(sim::saveWorld(broken, sim::hashContent(content))));
+    CHECK_FALSE(target.load(sim::saveGame(broken, {}, sim::hashContent(content))));
 
     CHECK(target.stateHash() == before);
-    CHECK(target.load(sim::saveWorld(target.state(), sim::hashContent(content))));
+    CHECK(target.load(sim::saveGame(target.state(), {}, sim::hashContent(content))));
 }
 
 TEST_CASE("Saves are bound to the content they were made with", "[save]") {
