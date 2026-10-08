@@ -41,6 +41,10 @@ bool keyDown(Rml::Context* context, Rml::Input::KeyIdentifier key, int keyModifi
             Rml::Debugger::SetVisible(!Rml::Debugger::IsVisible());
             return false;
         }
+        // Screenshot keys must work even while a text field has focus.
+        if ((key == Rml::Input::KI_F9 || key == Rml::Input::KI_F12) && gApp != nullptr) {
+            return !gApp->onKey(key);
+        }
         return true;
     }
     (void)context;

@@ -96,10 +96,11 @@ int main(int argc, char** argv) {
     const std::filesystem::path playtest =
         std::filesystem::temp_directory_path() / "deep_claim_probe_playtest";
     std::filesystem::remove_all(playtest);
+    int exitCode = 0;
     {
         game::App app(*context, *services, *loaded.content, assets, playtest, "probe");
         if (!app.loadDocument()) {
-            return 2;
+            exitCode = 2;
         }
         std::ifstream trace(app.tracePath());
         std::string firstLine;
@@ -108,8 +109,7 @@ int main(int argc, char** argv) {
         if (firstLine.find(R"("t":"new_game")") == std::string::npos ||
             firstLine.find(R"("build":"probe")") == std::string::npos) {
             std::cout << "TRACE FAILURE: no new_game record\n";
-            Rml::Shutdown();
-            return 4;
+            exitCode = 4;
         }
         context->Update();
         Rml::ElementDocument* doc = context->GetDocument(0);
@@ -119,7 +119,6 @@ int main(int argc, char** argv) {
         }
         dump(doc->GetElementById("content"), 0, 4);
         Rml::Element* content = doc->GetElementById("content");
-        int exitCode = 0;
         if (content == nullptr || content->GetNumChildren() == 0 ||
             content->GetChild(0)->GetBox().GetSize(Rml::BoxArea::Border).x < 100.0F) {
             std::cout << "LAYOUT FAILURE: content panel children have no width\n";
@@ -137,11 +136,8 @@ int main(int argc, char** argv) {
             print(h1s[0], "h1[0]");
             print(h1s[0]->GetParentNode(), "h1 parent");
         }
-        if (exitCode != 0) {
-            Rml::Shutdown();
-            return exitCode;
-        }
     }
+    // The app, its document and data model are gone before RmlUi shuts down.
     Rml::Shutdown();
-    return 0;
+    return exitCode;
 }

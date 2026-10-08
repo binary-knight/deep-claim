@@ -76,6 +76,19 @@ TEST_CASE("Every command survives a trip through trace JSON", "[trace]") {
     }
     sim::Command decoded;
     CHECK_FALSE(game::decodeCommand("{\"cmd\":\"Teleport\"}", decoded));
+    // Unsigned values past INT64_MAX must not wrap into negative money or tonnes.
+    CHECK_FALSE(game::decodeCommand(R"({"cmd":"TakeLoan","cents":9223372036854775808})", decoded));
+    CHECK_FALSE(game::decodeCommand(
+        R"({"cmd":"SellOre","resource":0,"tonnes":18446744073709551615})", decoded));
+    CHECK(game::decodeCommand(R"({"cmd":"TakeLoan","cents":9223372036854775807})", decoded));
+    CHECK(game::decodeCommand(R"({"cmd":"SellOre","resource":0,"tonnes":-5})", decoded));
+    // A null id is the invalid id; a bad type or an out-of-range id is an error.
+    CHECK(game::decodeCommand(R"({"cmd":"BuildMine","plot":null})", decoded));
+    CHECK_FALSE(std::get<sim::BuildMine>(decoded).plot.valid());
+    CHECK_FALSE(game::decodeCommand(R"({"cmd":"BuildMine","plot":"3"})", decoded));
+    CHECK_FALSE(game::decodeCommand(R"({"cmd":"BuildMine","plot":4294967296})", decoded));
+    CHECK_FALSE(game::decodeCommand(R"({"cmd":"BuildMine","plot":-1})", decoded));
+    CHECK_FALSE(game::decodeCommand(R"({"cmd":"SetMineState","mine":1,"operate":1})", decoded));
     CHECK_FALSE(game::decodeCommand("{\"cmd\":\"BidOnPlot\",\"plot\":1}", decoded));
     CHECK_FALSE(game::decodeCommand("not json", decoded));
 }
@@ -96,6 +109,15 @@ TEST_CASE("Trace lines parse and reject malformed records", "[trace]") {
     CHECK(record.day == 12);
     CHECK(record.hash == 0xDEADBEEFU);
     CHECK_FALSE(game::parseTraceLine(R"({"t":"day","day":12})", record, error));
+    CHECK_FALSE(game::parseTraceLine(R"({"t":"day","hash":"00"})", record, error));
+    CHECK_FALSE(game::parseTraceLine(R"({"t":"load","day":3,"hash":"00"})", record, error));
+    CHECK_FALSE(game::parseTraceLine(R"({"t":"new_game","seed":"1","content":"00","ais":"x"})",
+                                     record, error));
+    CHECK_FALSE(game::parseTraceLine(R"({"t":"new_game","seed":"1","content":"00","player":1})",
+                                     record, error));
+    CHECK_FALSE(game::parseTraceLine(R"({"t":"new_game","seed":"1","content":"00","version":99})",
+                                     record, error));
+    CHECK(game::parseTraceLine(R"({"t":"new_game","seed":"1","content":"00"})", record, error));
     CHECK_FALSE(game::parseTraceLine(R"({"t":"day","day":-1,"hash":"00"})", record, error));
     CHECK_FALSE(game::parseTraceLine(R"({"day":1})", record, error));
     CHECK_FALSE(game::parseTraceLine("[1,2]", record, error));
@@ -149,6 +171,28 @@ TEST_CASE("Replay stops at the requested day and reports divergence", "[trace][r
         REQUIRE(result.ok());
         CHECK(result.session->day() == 40);
         CHECK(result.daysTicked == 40);
+    }
+    SECTION("nothing after the stop day is applied, not even a new game") {
+        std::string text = out.str();
+        const std::size_t pos = text.find(R"({"day":40,"hash":")");
+        REQUIRE(pos != std::string::npos);
+        const std::size_t lineEnd = text.find('\n', pos);
+        // Right after day 40: an order, then a whole new game.
+        std::ostringstream extra;
+        game::TraceWriter more(extra);
+        more.command(40, sim::TakeLoan{{}, sim::Money::fromUnits(2'000'000)});
+        more.newGame(99, test::setup(), sim::hashContent(content), "test");
+        text.insert(lineEnd + 1, extra.str());
+        std::istringstream in(text);
+        game::ReplayOptions options;
+        options.stopDay = 40;
+        const game::ReplayResult result = game::replayTrace(content, in, options);
+        REQUIRE(result.ok());
+        CHECK(result.session->day() == 40);
+        CHECK(result.commands == 3);  // the two day-0 orders and the day-1 bid only
+        CHECK(result.session->view().loans.size() == 1);  // the day-0 loan, not the day-40 one
+        game::Session fresh(content, 99, test::setup());
+        CHECK(result.session->stateHash() != fresh.stateHash());
     }
     SECTION("a tampered hash is reported as a divergence") {
         std::string text = out.str();
@@ -220,54 +264,125 @@ TEST_CASE("Replay follows a load record through its save file", "[trace][replay]
     CHECK_FALSE(noReader.ok());
 }
 
-TEST_CASE("PNG encoder writes a valid stored-deflate image", "[png]") {
-    const std::uint32_t width = 3;
-    const std::uint32_t height = 2;
-    const std::vector<std::uint8_t> rgb = {255, 0,  0,  0,  255, 0,  0,  0,  255,
-                                           10,  20, 30, 40, 50,  60, 70, 80, 90};
+namespace {
+
+std::uint32_t be32(const std::vector<std::uint8_t>& b, std::size_t at) {
+    return (static_cast<std::uint32_t>(b[at]) << 24U) |
+           (static_cast<std::uint32_t>(b[at + 1]) << 16U) |
+           (static_cast<std::uint32_t>(b[at + 2]) << 8U) | static_cast<std::uint32_t>(b[at + 3]);
+}
+
+std::uint32_t le16(const std::vector<std::uint8_t>& b, std::size_t at) {
+    return static_cast<std::uint32_t>(b[at]) | (static_cast<std::uint32_t>(b[at + 1]) << 8U);
+}
+
+// Reference CRC-32 (bitwise, no table) and Adler-32, independent of the encoder.
+std::uint32_t refCrc32(const std::uint8_t* data, std::size_t len) {
+    std::uint32_t c = 0xFFFFFFFFU;
+    for (std::size_t i = 0; i < len; ++i) {
+        c ^= data[i];
+        for (int k = 0; k < 8; ++k) {
+            c = (c & 1U) != 0 ? (c >> 1U) ^ 0xEDB88320U : c >> 1U;
+        }
+    }
+    return ~c;
+}
+
+std::uint32_t refAdler32(const std::vector<std::uint8_t>& data) {
+    std::uint32_t a = 1;
+    std::uint32_t b = 0;
+    for (const std::uint8_t byte : data) {
+        a = (a + byte) % 65521U;
+        b = (b + a) % 65521U;
+    }
+    return (b << 16U) | a;
+}
+
+// Inflates a zlib stream made only of stored blocks, as a real decoder would
+// see it; returns false on any structural problem.
+bool inflateStored(const std::vector<std::uint8_t>& z, std::vector<std::uint8_t>& out) {
+    if (z.size() < 6 || (z[0] & 0x0FU) != 8 || ((z[0] << 8U) | z[1]) % 31 != 0) {
+        return false;
+    }
+    std::size_t pos = 2;
+    bool final = false;
+    while (!final) {
+        if (pos + 5 > z.size() || (z[pos] & 0x06U) != 0) {
+            return false;  // not a stored block
+        }
+        final = (z[pos] & 1U) != 0;
+        const std::uint32_t len = le16(z, pos + 1);
+        const std::uint32_t nlen = le16(z, pos + 3);
+        if ((len ^ nlen) != 0xFFFFU || pos + 5 + len > z.size()) {
+            return false;
+        }
+        out.insert(out.end(), z.begin() + static_cast<std::ptrdiff_t>(pos + 5),
+                   z.begin() + static_cast<std::ptrdiff_t>(pos + 5 + len));
+        pos += 5 + len;
+    }
+    return pos + 4 == z.size() && be32(z, pos) == refAdler32(out);
+}
+
+}  // namespace
+
+TEST_CASE("PNG encoder output decodes with an independent stored-deflate reader", "[png]") {
+    // 300x100 RGB: the filtered rows are 90,100 bytes, past the 65,535-byte
+    // stored block limit, so the stream must hold two blocks.
+    const std::uint32_t width = 300;
+    const std::uint32_t height = 100;
+    std::vector<std::uint8_t> rgb(static_cast<std::size_t>(width) * height * 3);
+    for (std::size_t i = 0; i < rgb.size(); ++i) {
+        rgb[i] = static_cast<std::uint8_t>((i * 7 + i / 301) & 0xFFU);
+    }
     const std::vector<std::uint8_t> png = game::encodePngRgb(width, height, rgb);
-    REQUIRE(png.size() > 8 + 25 + 12);
+    REQUIRE(png.size() > 8);
     const std::vector<std::uint8_t> signature = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
     CHECK(std::vector<std::uint8_t>(png.begin(), png.begin() + 8) == signature);
-    auto u32 = [&png](std::size_t at) {
-        return (static_cast<std::uint32_t>(png[at]) << 24U) |
-               (static_cast<std::uint32_t>(png[at + 1]) << 16U) |
-               (static_cast<std::uint32_t>(png[at + 2]) << 8U) | png[at + 3];
-    };
-    // IHDR
-    CHECK(u32(8) == 13);
-    CHECK(std::string(png.begin() + 12, png.begin() + 16) == "IHDR");
-    CHECK(u32(16) == width);
-    CHECK(u32(20) == height);
-    CHECK(png[24] == 8);
-    CHECK(png[25] == 2);
-    // IDAT: zlib header, one stored block holding the filtered rows.
-    const std::size_t idat = 8 + 25;
-    const std::uint32_t idatLen = u32(idat);
-    CHECK(std::string(png.begin() + static_cast<std::ptrdiff_t>(idat) + 4,
-                      png.begin() + static_cast<std::ptrdiff_t>(idat) + 8) == "IDAT");
-    const std::size_t z = idat + 8;
-    CHECK(png[z] == 0x78);
-    CHECK(((png[z] << 8U) | png[z + 1]) % 31 == 0);
-    CHECK(png[z + 2] == 1);  // final stored block
-    const std::size_t rawLen = (static_cast<std::size_t>(width) * 3 + 1) * height;
-    CHECK((png[z + 3] | (png[z + 4] << 8U)) == rawLen);
-    CHECK(((png[z + 5] | (png[z + 6] << 8U)) & 0xFFFFU) == (~rawLen & 0xFFFFU));
-    std::vector<std::uint8_t> expected;
-    for (std::uint32_t y = 0; y < height; ++y) {
-        expected.push_back(0);
-        const auto rowStart = static_cast<std::ptrdiff_t>(y) * width * 3;
-        expected.insert(expected.end(), rgb.begin() + rowStart, rgb.begin() + rowStart + width * 3);
+
+    // Walk the chunks, checking each CRC over type + data.
+    std::size_t pos = 8;
+    std::vector<std::string> types;
+    std::vector<std::uint8_t> idat;
+    while (pos + 12 <= png.size()) {
+        const std::uint32_t len = be32(png, pos);
+        REQUIRE(pos + 12 + len <= png.size());
+        const std::string type(png.begin() + static_cast<std::ptrdiff_t>(pos + 4),
+                               png.begin() + static_cast<std::ptrdiff_t>(pos + 8));
+        CHECK(refCrc32(&png[pos + 4], len + 4) == be32(png, pos + 8 + len));
+        if (type == "IHDR") {
+            CHECK(len == 13);
+            CHECK(be32(png, pos + 8) == width);
+            CHECK(be32(png, pos + 12) == height);
+            CHECK(png[pos + 16] == 8);  // bit depth
+            CHECK(png[pos + 17] == 2);  // RGB
+            CHECK(png[pos + 18] == 0);
+            CHECK(png[pos + 19] == 0);
+            CHECK(png[pos + 20] == 0);
+        } else if (type == "IDAT") {
+            idat.insert(idat.end(), png.begin() + static_cast<std::ptrdiff_t>(pos + 8),
+                        png.begin() + static_cast<std::ptrdiff_t>(pos + 8 + len));
+        }
+        types.push_back(type);
+        pos += 12 + len;
     }
-    const std::vector<std::uint8_t> stored(
-        png.begin() + static_cast<std::ptrdiff_t>(z + 7),
-        png.begin() + static_cast<std::ptrdiff_t>(z + 7 + rawLen));
-    CHECK(stored == expected);
-    CHECK(idatLen == 2 + 5 + rawLen + 4);
-    // IEND last.
-    CHECK(std::string(png.end() - 8, png.end() - 4) == "IEND");
+    CHECK(pos == png.size());
+    CHECK(types == std::vector<std::string>{"IHDR", "IDAT", "IEND"});
+
+    std::vector<std::uint8_t> raw;
+    REQUIRE(inflateStored(idat, raw));
+    const std::size_t stride = static_cast<std::size_t>(width) * 3;
+    REQUIRE(raw.size() == (stride + 1) * height);
+    for (std::uint32_t y = 0; y < height; ++y) {
+        const std::size_t row = y * (stride + 1);
+        REQUIRE(raw[row] == 0);  // filter: none
+        REQUIRE(std::equal(raw.begin() + static_cast<std::ptrdiff_t>(row + 1),
+                           raw.begin() + static_cast<std::ptrdiff_t>(row + 1 + stride),
+                           rgb.begin() + static_cast<std::ptrdiff_t>(y * stride)));
+    }
+    CHECK(idat[2] == 0);  // first block is not final
+    CHECK(le16(idat, 3) == 65535);
 
     CHECK(game::encodePngRgb(0, 1, rgb).empty());
-    CHECK(game::encodePngRgb(4, 2, rgb).empty());
+    CHECK(game::encodePngRgb(400, 100, rgb).empty());
     CHECK(game::encodePngRgb(40'000, 1, std::span<const std::uint8_t>{}).empty());
 }

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <ostream>
@@ -82,6 +83,13 @@ bool idFrom(const Json& object, const char* key, Id& out) {
 bool int64From(const Json& object, const char* key, std::int64_t& out) {
     const auto it = object.find(key);
     if (it == object.end() || !it->is_number_integer()) {
+        return false;
+    }
+    // nlohmann counts unsigned values as integers and get<int64_t> does not
+    // range-check them, so a huge unsigned value would wrap negative.
+    if (it->is_number_unsigned() &&
+        it->get<std::uint64_t>() >
+            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
         return false;
     }
     out = it->get<std::int64_t>();
@@ -453,10 +461,24 @@ bool parseNewGame(const Json& j, TraceRecord& out, std::string& error) {
         error = "bad new_game record";
         return false;
     }
-    if (const auto it = j.find("player"); it != j.end() && it->is_string()) {
+    if (const auto it = j.find("version"); it != j.end()) {
+        if (!it->is_number_unsigned() || it->get<std::uint64_t>() > kTraceVersion) {
+            error = "unsupported trace version";
+            return false;
+        }
+    }
+    if (const auto it = j.find("player"); it != j.end()) {
+        if (!it->is_string()) {
+            error = "bad player name";
+            return false;
+        }
         out.player = it->get<std::string>();
     }
-    if (const auto it = j.find("ais"); it != j.end() && it->is_array()) {
+    if (const auto it = j.find("ais"); it != j.end()) {
+        if (!it->is_array()) {
+            error = "bad ai list";
+            return false;
+        }
         for (const Json& name : *it) {
             if (!name.is_string()) {
                 error = "bad ai name";
@@ -468,10 +490,15 @@ bool parseNewGame(const Json& j, TraceRecord& out, std::string& error) {
     return true;
 }
 
+// Every record but new_game carries the day.
 bool parseDay(const Json& j, TraceRecord& out, std::string& error) {
     const auto dayIt = j.find("day");
     if (dayIt == j.end()) {
-        return true;
+        if (out.type == "new_game") {
+            return true;
+        }
+        error = "missing day";
+        return false;
     }
     if (!dayIt->is_number_unsigned() || dayIt->get<std::uint64_t>() > sim::kMaxDeadline) {
         error = "bad day";
@@ -534,6 +561,10 @@ bool parseTraceLine(std::string_view line, TraceRecord& out, std::string& error)
         }
     }
     parseStrings(j, out);
+    if (out.type == "load" && out.file.empty()) {
+        error = "load record without a file";
+        return false;
+    }
     return true;
 }
 

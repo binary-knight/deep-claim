@@ -3,7 +3,8 @@
 // Rebuilds the player's game from the trace, reports the first day whose
 // state hash differs from what the client recorded, and prints the player's
 // view at the stop day (the end of the trace by default). Save files the
-// trace refers to are read from the trace's directory.
+// trace refers to are read from the trace's directory. Plot numbers are
+// printed as the interface shows them (1-based).
 #include "sim/content.h"
 #include "sim/ids.h"
 #include "sim/money.h"
@@ -81,11 +82,11 @@ void printPlots(const sim::Content& content, const sim::CompanyView& v) {
     for (const sim::PlotView& p : v.plots) {
         std::string mine;
         if (p.mine.has_value()) {
-            mine = std::format("  mine #{} {} ({})", p.mine->id.value(),
-                               mineStateName(p.mine->state), companyName(v, p.mine->owner));
+            mine = std::format("  mine {} ({})", mineStateName(p.mine->state),
+                               companyName(v, p.mine->owner));
         }
         std::cout << std::format("  #{:<3} {:<18} {:>7} ha  ask {:>9}  capex {:>9}  {}{}\n",
-                                 p.id.value(), content.regions[p.region.index()].name,
+                                 p.id.value() + 1, content.regions[p.region.index()].name,
                                  p.areaHectares, game::formatMoney(p.askPrice),
                                  game::formatMoney(p.mineCapexQuote), plotStatus(v, p), mine);
     }
@@ -98,7 +99,7 @@ void printSurveys(const sim::Content& content, const sim::CompanyView& v) {
     std::cout << "\nsurveys:\n";
     for (const sim::SurveyView& s : v.surveys) {
         std::cout << std::format("  plot #{} commissioned day {} completes day {}{}\n",
-                                 s.plot.value(), s.commissionedDay, s.completesDay,
+                                 s.plot.value() + 1, s.commissionedDay, s.completesDay,
                                  s.complete ? "" : " (pending)");
         for (const sim::SurveyEstimateView& e : s.estimates) {
             std::cout << std::format(
@@ -114,8 +115,8 @@ void printMines(const sim::Content& content, const sim::CompanyView& v) {
     }
     std::cout << "\nmines:\n";
     for (const sim::MineView& m : v.mines) {
-        std::cout << std::format("  #{} on plot #{} {} since day {}, opex {}/day\n", m.id.value(),
-                                 m.plot.value(), mineStateName(m.state), m.operationalDay,
+        std::cout << std::format("  plot #{} {} since day {}, opex {}/day\n", m.plot.value() + 1,
+                                 mineStateName(m.state), m.operationalDay,
                                  game::formatMoney(m.dailyOpex));
         for (std::size_t r = 0; r < m.extractedTonnes.size(); ++r) {
             if (m.extractedTonnes[r] == 0 && m.lastOutputTonnes[r] == 0) {

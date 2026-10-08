@@ -1,9 +1,11 @@
 #include "game/replay.h"
 
+#include "sim/commands.h"
 #include "sim/content.h"
 #include "sim/save.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
+#include "sim/world_state.h"
 
 #include "game/session.h"
 #include "game/trace.h"
@@ -85,11 +87,18 @@ private:
         if (bytes.empty()) {
             return fail("could not read save " + record.file);
         }
-        if (!result_.session->load(bytes)) {
+        // Check the save before touching the session so an error leaves the
+        // last good state in place.
+        sim::WorldState state;
+        std::vector<sim::Command> pending;
+        if (!sim::loadGame(bytes, *content_, state, pending)) {
             return fail("save " + record.file + " does not load");
         }
-        if (result_.session->stateHash() != record.hash) {
+        if (sim::hashWorld(state) != record.hash) {
             return fail("save " + record.file + " does not match the recorded state");
+        }
+        if (!result_.session->load(bytes)) {
+            return fail("save " + record.file + " does not load");
         }
         return !reachedStop();
     }
@@ -111,16 +120,16 @@ private:
         if (reachedStop()) {
             return false;
         }
-        result_.session->stepOneDay();
-        ++result_.daysTicked;
-        if (result_.session->day() != record.day) {
+        if (result_.session->day() + 1 != record.day) {
             return fail(std::format("trace is on day {} but the replay is on day {}", record.day,
                                     result_.session->day()));
         }
+        result_.session->stepOneDay();
+        ++result_.daysTicked;
         if (!result_.firstDivergence.has_value() && result_.session->stateHash() != record.hash) {
             result_.firstDivergence = record.day;
         }
-        return true;
+        return !reachedStop();
     }
 
     bool fail(const std::string& message) {

@@ -138,7 +138,12 @@ void App::openTrace() {
     }
     std::error_code error;
     std::filesystem::create_directories(playtestDir_, error);
-    traceStem_ = "trace-" + timeStamp();
+    // Two launches in the same second must not overwrite each other.
+    const std::string stamp = "trace-" + timeStamp();
+    traceStem_ = stamp;
+    for (int n = 2; std::filesystem::exists(playtestDir_ / (traceStem_ + ".jsonl"), error); ++n) {
+        traceStem_ = std::format("{}-{}", stamp, n);
+    }
     tracePath_ = playtestDir_ / (traceStem_ + ".jsonl");
     traceFile_.open(tracePath_, std::ios::trunc);
     if (!traceFile_) {
@@ -393,6 +398,7 @@ void App::refresh() {
     }
     for (std::size_t i = seenLogEntries_; i < log.size(); ++i) {
         if (log[i].notice.kind == sim::NoticeKind::CommandRejected) {
+            traceUi("status", log[i].text);
             model_.status_line = log[i].text;
             statusAge_ = 0.0;
         }

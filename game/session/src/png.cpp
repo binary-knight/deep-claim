@@ -11,7 +11,8 @@ namespace game {
 
 namespace {
 
-constexpr std::uint32_t kMaxDimension = 1U << 15U;
+// Keeps the single IDAT chunk under the PNG chunk limit of 2^31 - 1 bytes.
+constexpr std::uint32_t kMaxDimension = 1U << 14U;
 constexpr std::size_t kMaxStoredBlock = 65535;
 
 std::array<std::uint32_t, 256> makeCrcTable() {
