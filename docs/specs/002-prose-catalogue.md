@@ -1,6 +1,6 @@
 # 002: Prose catalogue
 
-Status: draft, awaiting approval.
+Status: approved 2026-10-09; builds after spec 001 lands (both touch format.cpp).
 
 ## Goal
 Every sentence a player reads lives in one data file, is drafted plainly,
