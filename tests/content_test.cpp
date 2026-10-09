@@ -47,6 +47,7 @@ content::Sources goodSources() {
       "survey_base_noise": 0.5, "mine_capex_per_hectare": 4000, "mine_build_days": 180,
       "mine_opex_per_day": 12000, "mine_mothball_opex_mult": 0.2,
       "auction_window_days": 30, "plots_listed_at_start": 3, "plots_listed_per_month": 1,
+      "opening_min_mineable": 2, "opening_max_locked_region": 1,
       "max_unsold_rounds": 3, "relist_cooldown_days": 360,
       "bankruptcy_grace_months": 3, "market_supply_smoothing_days": 30,
       "market_price_adjust_days": 10, "demand_reversion_rate": 0.01, "demand_mult_min": 0.3,
@@ -244,6 +245,46 @@ TEST_CASE("Default sell policy keys load and are validated", "[content]") {
     CHECK_FALSE(bad.ok());
     CHECK(hasError(bad, "balance.json", "default_cover_costs", "expected true or false"));
     CHECK(hasError(bad, "balance.json", "default_sell_policy.reserve_tonnes", "must be between"));
+}
+
+TEST_CASE("Opening-hand keys load and are validated", "[content]") {
+    content::Sources s = goodSources();
+    const auto good = content::loadFromStrings(s);
+    REQUIRE(good.ok());
+    CHECK(good.content->balance.openingMinMineable == 2);
+    CHECK(good.content->balance.openingMaxLockedRegion == 1);
+
+    // More mineable plots than the hand holds is a contradiction.
+    content::Sources tooMany = goodSources();
+    tooMany.balance = replaceOnce(tooMany.balance, R"("opening_min_mineable": 2)",
+                                  R"("opening_min_mineable": 4)");
+    const auto contradictory = content::loadFromStrings(tooMany);
+    CHECK_FALSE(contradictory.ok());
+    CHECK(hasError(contradictory, "balance.json", "opening_min_mineable",
+                   "must not exceed plots_listed_at_start"));
+
+    s.balance =
+        replaceOnce(s.balance, R"("opening_min_mineable": 2)", R"("opening_min_mineable": -1)");
+    s.balance = replaceOnce(s.balance, R"("opening_max_locked_region": 1)",
+                            R"("opening_max_locked_region": 0.5)");
+    const auto bad = content::loadFromStrings(s);
+    CHECK_FALSE(bad.ok());
+    CHECK(hasError(bad, "balance.json", "opening_min_mineable", "must be between"));
+    CHECK(hasError(bad, "balance.json", "opening_max_locked_region", ""));
+
+    content::Sources missing = goodSources();
+    missing.balance = replaceOnce(missing.balance, R"("opening_min_mineable": 2, )", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "balance.json", "opening_min_mineable", ""));
+
+    // Zero for both is valid: no promise about the hand, no locked regions.
+    content::Sources none = goodSources();
+    none.balance =
+        replaceOnce(none.balance, R"("opening_min_mineable": 2)", R"("opening_min_mineable": 0)");
+    none.balance = replaceOnce(none.balance, R"("opening_max_locked_region": 1)",
+                               R"("opening_max_locked_region": 0)");
+    CHECK(content::loadFromStrings(none).ok());
 }
 
 TEST_CASE("Unsold-land keys load and are validated", "[content]") {

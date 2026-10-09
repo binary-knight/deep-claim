@@ -122,6 +122,10 @@ inline sim::Content makeContent() {
     c.balance.auctionWindowDays = 45;
     c.balance.plotsListedAtStart = 3;
     c.balance.plotsListedPerMonth = 1;
+    // Spec 005: two of the three opening plots from North (iron at 0.8), at
+    // most one from Flats (lithium only, locked).
+    c.balance.openingMinMineable = 2;
+    c.balance.openingMaxLockedRegion = 1;
     c.balance.bankruptcyGraceMonths = 3;
     c.balance.marketSupplySmoothingDays = 30;
     c.balance.marketPriceAdjustDays = 10;
