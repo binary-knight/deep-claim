@@ -609,3 +609,60 @@ architectural summary.
 - Rejected: a built-in English fallback in C++ (it would hide a missing
   key and keep prose in code), and loading strings before the other files
   (the per-id keys need the ids first).
+
+## Client restyle (spec 003)
+
+- The client is laid out from `docs/design/handoff.md` (plate C "Control
+  Room", dashboard H4): header with a 90-day cash sparkline, a status strip
+  on the dashboard, a 56dp icon rail that expands to 160dp on hover, title
+  blocks with mono indices on every section, and the five tabs in the
+  hand-off's block order. Colours and sizes are the literal token values;
+  `tools/design/tokens_to_rcss.py` regenerates `game/assets/ui/tokens.rcss`
+  from `docs/design/tokens.css` as a lookup table and a test keeps them in
+  step. Fonts are Barlow, Barlow Condensed and JetBrains Mono (OFL, in
+  `game/assets/fonts/` with licences); every figure is set in the mono face
+  because RCSS has no tabular-figures property.
+- RmlUi 6 translation rules, applied throughout `main.rcss`: no custom
+  properties (literals), no `gap` (margins on children), no `min-width: 0`
+  on flex children (explicit `width` with `flex: 1 1 0`), chips are
+  `inline-block` with a fixed height and line-height, selected rows use a
+  fill, `:hover` on the rail drives the label rule, icons come from a
+  `@spritesheet` over `icons.tga`, every length is in dp. Every flex child
+  that carries text is `display: block`: an inline span ignores its width
+  and overflows. Utility class names must not collide with table rows: a
+  `.row { display: flex }` once turned `tr.row` into an invalid table child
+  (RmlUi drops it with a warning), so the inline flex helper is `.hrow`.
+- `body.deck` is set by the app below 1300dp of window width or with
+  `--deck`: 40dp controls and inputs, 14dp minimum text (one rule lists
+  every 12dp and 13dp class), short button labels through `.long`/`.short`
+  spans, the strip's research item on a second line, a 320dp side column.
+- The view model (`game/src/ui_model.*`) is presentation only: needs-you
+  rows are built from view data and sorted warnings first then by day;
+  "days remaining" is best survey estimate less extracted over the last
+  output; an idle mine is an operating mine past its opening day with zero
+  output everywhere; the storage warning is storage above a tenth of cash;
+  with one rival, every bid that is not the player's is that rival's. All
+  sentences come from the catalogue; chip words, column heads and button
+  labels stay literal.
+- Auto-pause is a session rule set (`game::AutoPause`, eight `PauseOn`
+  reasons, defaults all on except survey complete and mine operational).
+  `Session::advance` stops at the first pausing notice and records it;
+  the app shows it on the status line through `status.paused_by` and keeps
+  the toggles in `autopause.txt` next to the save.
+- Sim additions are notices only: `IdleMineWarning` and `MineRunningLow` at
+  month end, `MineFoundNothing` on an opening day with nothing extractable.
+  The mine state machine and the content fingerprint are unchanged;
+  `MineView::bestEstimateTonnes` exposes the owner's latest survey so the
+  client needs no rules of its own.
+- The layout probe (`deep_claim_layout_probe`) is the regression test for
+  the stylesheet: every tab at 1366x820 and 1280x800, failing on a
+  collapsed content pane, horizontal overflow past the nearest scroll pane,
+  text under 14dp in the deck frame, and any RmlUi warning or error (an
+  unbound `{{variable}}` or unknown property shows up there and nowhere
+  else). The stub texture loader reports the icon sheet's size so sprites
+  resolve.
+- Rejected: per-row standing-order forms on Market (inputs are two-way
+  bound to one model string each; one form for the selected resource
+  instead), CSS ellipsis for the company name (truncated in code), SVG
+  icons through the RmlUi SVG plugin (adds lunasvg; a TGA sprite sheet is
+  enough for six icons).
