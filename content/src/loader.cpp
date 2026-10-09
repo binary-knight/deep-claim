@@ -1013,17 +1013,21 @@ std::optional<std::vector<std::string>> templatePlaceholders(std::string_view te
     std::vector<std::string> names;
     std::size_t pos = 0;
     while (pos < text.size()) {
-        const std::size_t open = text.find('{', pos);
-        if (open == std::string_view::npos) {
-            break;
+        const char c = text[pos];
+        if (c == '}') {
+            return std::nullopt;  // a closing brace outside a placeholder
         }
-        const std::size_t close = text.find('}', open + 1);
-        if (close == std::string_view::npos || close == open + 1) {
+        if (c != '{') {
+            ++pos;
+            continue;
+        }
+        const std::size_t close = text.find('}', pos + 1);
+        if (close == std::string_view::npos || close == pos + 1) {
             return std::nullopt;
         }
-        const std::string_view name = text.substr(open + 1, close - open - 1);
-        for (const char c : name) {
-            if (c == '{' || c == ' ' || ((c < 'a' || c > 'z') && c != '_')) {
+        const std::string_view name = text.substr(pos + 1, close - pos - 1);
+        for (const char n : name) {
+            if (n == '{' || n == ' ' || ((n < 'a' || n > 'z') && n != '_')) {
                 return std::nullopt;
             }
         }

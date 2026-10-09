@@ -4,8 +4,8 @@ notice.command_rejected.plot	Couldn't carry out the order on {plot}: {reason}.
 notice.command_rejected.plot_amount	Couldn't carry out the order on {plot} for {amount}: {reason}.
 notice.command_rejected.sale	Couldn't carry out the sale of {resource}: {reason}.
 notice.command_rejected.research	Couldn't start research on {tech}: {reason}.
-notice.command_rejected.loan	Loan request turned down: {reason}.
-notice.command_rejected.loan_amount	Loan request for {amount} turned down: {reason}.
+notice.command_rejected.loan	Couldn't carry out the order on the loan ledger: {reason}.
+notice.command_rejected.loan_amount	Couldn't carry out the loan order for {amount}: {reason}.
 notice.plot_listed	{plot} is up for auction. Asking price is {amount}.
 notice.plot_relisted	{plot} went unsold. Relisted at {amount}.
 notice.plot_sold	{company} bought {plot} at auction for {amount}.
@@ -23,7 +23,7 @@ notice.auto_sale_summary	Automatic sales moved {tonnes} of {resource} off the pi
 notice.storage_charged	Storage fees came to {amount}.
 notice.loan_taken	Drew a loan of {amount}.
 notice.loan_payment	Paid {amount} against the loan.
-notice.loan_repaid	The loan is paid off in full. The ledger is clear.
+notice.loan_repaid	That note is paid off in full.
 notice.insolvency_warning	The till has run dry. We have {months} months before bankruptcy.
 notice.bankrupt	{company} is bankrupt. The gates are locked and the books are closed.
 notice.research_started	The crew has started work on {tech}.

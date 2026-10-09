@@ -115,7 +115,7 @@ std::string fill(std::string_view tmpl, TextArgs args) {
 }
 
 std::string text(const sim::Content& content, std::string_view key) {
-    const auto it = content.strings.find(std::string(key));
+    const auto it = content.strings.find(key);  // no temporary string: std::less<>
     if (it == content.strings.end()) {
         return "[" + std::string(key) + "]";
     }

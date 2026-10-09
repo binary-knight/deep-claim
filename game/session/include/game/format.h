@@ -40,7 +40,8 @@ std::string formatRatio(sim::Fixed ratio);
 // Named substitution into a template from data/strings.json: every
 // "{name}" whose name is in `args` is replaced; unknown placeholders stay
 // visible as "{name}" so a mismatch shows in play instead of vanishing.
-// Locale-free, never throws.
+// Locale-free; a malformed template never raises a formatting error (only
+// allocation can fail, as for any std::string).
 using TextArg = std::pair<std::string_view, std::string>;
 using TextArgs = std::initializer_list<TextArg>;
 [[nodiscard]] std::string fill(std::string_view tmpl, TextArgs args);

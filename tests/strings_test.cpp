@@ -4,6 +4,7 @@
 #include "sim/content.h"
 #include "sim/ids.h"
 #include "sim/money.h"
+#include "sim/save.h"
 #include "sim/view.h"
 
 #include "content/loader.h"
@@ -172,13 +173,17 @@ TEST_CASE("The loader rejects a broken catalogue", "[strings][content]") {
         CHECK(hasError(result, "notice.auction_lost", "{company}"));
     }
     SECTION("malformed braces") {
-        content::Sources s = good;
         const std::string original =
             game::text(*content::loadFromStrings(good).content, "notice.auction_lost");
-        s.strings = replaceOnce(s.strings, original, "Outbid on {plot");
-        const auto result = content::loadFromStrings(s);
-        CHECK_FALSE(result.ok());
-        CHECK(hasError(result, "notice.auction_lost", "malformed"));
+        for (const char* broken : {"Outbid on {plot", "Outbid on {plot}}", "stray } here",
+                                   "}{plot} first", "empty {} name", "{Plot} upper"}) {
+            content::Sources s = good;
+            s.strings = replaceOnce(s.strings, original, broken);
+            const auto result = content::loadFromStrings(s);
+            INFO(broken);
+            CHECK_FALSE(result.ok());
+            CHECK(hasError(result, "notice.auction_lost", "malformed"));
+        }
     }
     SECTION("empty text") {
         content::Sources s = good;
@@ -204,10 +209,78 @@ TEST_CASE("The loader rejects a broken catalogue", "[strings][content]") {
     }
 }
 
+TEST_CASE("Every rejection variant renders with the figures it is given", "[strings][data]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    REQUIRE(result.ok());
+    const sim::Content& content = *result.content;
+    sim::CompanyView view;
+    sim::CompanyPublicView me;
+    me.id = sim::CompanyId(0);
+    me.name = "Deep Claim Mining";
+    view.companies.push_back(me);
+
+    struct Variant {
+        const char* name;
+        sim::PlotId plot;
+        sim::ResourceId resource;
+        sim::TechId tech;
+        sim::LoanId loan;
+        sim::Money amount;
+        const char* mustContain;
+    };
+    const sim::Money million = sim::Money::fromUnits(1'000'000);
+    const Variant variants[] = {
+        {"plot", sim::PlotId(2), {}, {}, {}, sim::Money::zero(), "#3"},
+        {"plot_amount", sim::PlotId(2), {}, {}, {}, million, "$1.00M"},
+        {"sale",
+         {},
+         sim::ResourceId(0),
+         {},
+         {},
+         sim::Money::zero(),
+         content.resources[0].name.c_str()},
+        {"research", {}, {}, sim::TechId(1), {}, sim::Money::zero(), content.techs[1].name.c_str()},
+        {"loan", {}, {}, {}, sim::LoanId(0), sim::Money::zero(), ""},
+        {"loan_amount", {}, {}, {}, sim::LoanId(0), million, "$1.00M"},
+        {"generic", {}, {}, {}, {}, sim::Money::zero(), ""},
+        {"amount", {}, {}, {}, {}, million, "$1.00M"},
+    };
+    for (const Variant& v : variants) {
+        sim::Notice n;
+        n.kind = sim::NoticeKind::CommandRejected;
+        n.company = sim::CompanyId(0);
+        n.plot = v.plot;
+        n.resource = v.resource;
+        n.tech = v.tech;
+        n.loan = v.loan;
+        n.amount = v.amount;
+        n.reason = sim::RejectReason::InsufficientFunds;
+        const std::string text = game::describeNotice(content, view, n);
+        INFO(v.name << ": " << text);
+        CHECK_FALSE(text.empty());
+        CHECK(text.front() != '[');
+        CHECK(text.find('{') == std::string::npos);
+        CHECK(text.find(v.mustContain) != std::string::npos);
+        CHECK(text.find(game::rejectReasonText(content, n.reason)) != std::string::npos);
+    }
+}
+
+TEST_CASE("A prose edit keeps the content fingerprint; a name edit moves it", "[strings][data]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    REQUIRE(result.ok());
+    sim::Content edited = *result.content;
+    const std::uint64_t before = sim::hashContent(edited);
+    edited.strings["notice.plot_sold"] = "Changed wording for {company}, {plot}, {amount}.";
+    edited.techs[0].description = "A different description.";
+    CHECK(sim::hashContent(edited) == before);
+    edited.techs[0].name = "Renamed";
+    CHECK(sim::hashContent(edited) != before);
+}
+
 TEST_CASE("The draft and the shipped catalogue agree on keys and placeholders", "[strings][data]") {
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
     REQUIRE(result.ok());
-    const std::map<std::string, std::string>& shipped = result.content->strings;
+    const auto& shipped = result.content->strings;
 
     std::map<std::string, std::string> draft;
     std::ifstream file(std::string(DC_SOURCE_DIR) + "/tools/prose/draft.tsv");

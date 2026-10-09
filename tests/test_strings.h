@@ -12,6 +12,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -59,9 +60,11 @@ inline std::string fixtureStrings(std::initializer_list<std::string_view> eventI
 // set them.
 inline void addStrings(sim::Content& content) {
     const content::LoadResult shipped = content::loadFromDirectory(DC_DATA_DIR);
-    if (shipped.content) {
-        content.strings = shipped.content->strings;
+    if (!shipped.content) {
+        throw std::runtime_error("shipped data does not load: " +
+                                 content::formatErrors(shipped.errors));
     }
+    content.strings = shipped.content->strings;
 }
 
 }  // namespace test

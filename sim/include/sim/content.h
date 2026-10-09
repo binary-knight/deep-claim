@@ -140,7 +140,7 @@ struct Content {
     // (data/strings.json). Prose only: it is not serialized and not part of
     // the content hash, so a wording fix never invalidates a save. The sim
     // never reads it; the client looks keys up through game::text.
-    std::map<std::string, std::string> strings;
+    std::map<std::string, std::string, std::less<>> strings;  // heterogeneous lookup by view
 
     // Lookups by string id. Return an invalid id when absent.
     [[nodiscard]] ResourceId findResource(std::string_view id) const;

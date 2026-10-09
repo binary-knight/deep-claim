@@ -12,9 +12,10 @@ or RML, and `tools/prose/polish.sh` can regenerate the whole catalogue.
 ## Player-facing behaviour
 The player sees the same information as today, written as a foreman's
 note or a month-end ledger line rather than a status-code sentence:
-"Survey crew finished on plot #4. Estimate is ~366,168 t of iron ore
-(error x0.50)." instead of "Survey of plot #4 complete". Numbers, units
-and ids never change between the plain draft and the polished text.
+"Survey crew finished on plot #4. The report is in." instead of "Survey of
+plot #4 complete" (the estimates themselves stay in the Plots table, as
+today; the notice carries only the plot). Numbers, units and ids never
+change between the plain draft and the polished text.
 
 ## Sim rules
 None. The sim emits structured notices (kind, ids, amounts) and knows no
@@ -130,3 +131,22 @@ before), filled from the catalogue by the loader.
   yet.
 - Short labels on buttons and column headers ("Pause", "Sell all",
   "Resource") stay literal in the RML, as the spec allows.
+- Codex review, applied: a stray `}` outside a placeholder is now a load
+  error (it slipped through before); `notice.command_rejected.loan*` no
+  longer says "request" because a rejected repayment uses the same key;
+  `notice.loan_repaid` no longer claims the whole ledger is clear;
+  `Content::strings` uses `std::less<>` so lookups take a string_view;
+  the polish script protects `*.name` keys, keeps units, signs and
+  currency prefixes with their figures, and falls back to the draft when
+  agy's output is unrecognisable instead of aborting; tests added for
+  balanced braces, every rejection variant with its real arguments, and
+  hash invariance under a prose edit (and the deliberate change under a
+  name edit); `test::addStrings` fails loudly if the shipped data does not
+  load.
+- Codex review, declined: enumerating `NoticeKind`/`RejectReason` until
+  the name table answers "unknown" assumes contiguous enums, which they
+  are (the sim owns those enums and this spec does not touch the sim; a
+  `kCount` can come with the next sim change). Cascading "unknown key"
+  diagnostics when an event or tech id fails to parse are noise on top of
+  a load that already fails. Descriptions are loaded but not yet shown; the
+  Research and World screens will use them in the design pass (sprint 2).
