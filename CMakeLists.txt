@@ -39,13 +39,15 @@ add_subdirectory(content)
 add_subdirectory(platform)
 add_subdirectory(game/session)
 
-if(DC_BUILD_RUNNER)
-    add_subdirectory(sim_runner)
-endif()
-
+# enable_testing() must precede any add_test(), so the runner's smoke test
+# registers with CTest; the runner is added below for that reason.
 if(DC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(DC_BUILD_RUNNER)
+    add_subdirectory(sim_runner)
 endif()
 
 if(DC_BUILD_GAME)
