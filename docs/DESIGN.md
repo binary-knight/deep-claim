@@ -579,3 +579,33 @@ architectural summary.
   notices), then the summaries are emitted and the totals reset.
 - The AI controller is unchanged for now; it keeps its own daily rule.
 - The golden determinism hash moved once (company state grew).
+
+## The prose catalogue (spec 002)
+
+- Every sentence a player reads lives in `data/strings.json`, a flat
+  `key -> template` object with named `{placeholders}`. The loader holds a
+  static table of every fixed key and the placeholders it may use, derives
+  the per-id keys (`event.<id>.name|description`, `tech.<id>.name|description`)
+  and the `reject.<reason>` keys from the data and the sim's enums, and
+  reports a missing key, an unknown key, an empty text, malformed braces
+  or a placeholder the key may not use as an ordinary content error. A new
+  `NoticeKind` without prose fails at load.
+- `Content::strings` is deliberately outside `serialize(Content)` and
+  therefore outside the content fingerprint: prose changes no simulation
+  state, and a wording fix must never invalidate a save. Event and tech
+  names stay in their defs (and so in the fingerprint, exactly as before)
+  but are filled from the catalogue; descriptions are new and also outside
+  the hash.
+- `game::fill` substitutes named placeholders and leaves unknown ones
+  visible; `game::text` returns `[key]` for a missing key so in-code test
+  content still produces readable output. `describeNotice` and
+  `rejectReasonText` choose keys and supply figures; they contain no
+  sentences. The client binds `ui.*` strings into the document through the
+  data model and sets status lines from `status.*`.
+- The pipeline is `tools/prose/draft.tsv` (source of truth for meaning) ->
+  `polish.sh` (agy, voice brief, invariant check) -> `polished.tsv` ->
+  `to_json.py` -> `data/strings.json`. All three files are committed; a
+  test keeps the draft and the catalogue in step on keys and placeholders.
+- Rejected: a built-in English fallback in C++ (it would hide a missing
+  key and keep prose in code), and loading strings before the other files
+  (the per-id keys need the ids first).
