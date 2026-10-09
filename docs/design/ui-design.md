@@ -1,7 +1,7 @@
 # Deep Claim interface design
 
-Status: in progress (Design Studio session, 2026-10-09). Code follows this
-document; the document is updated at the end of each sprint.
+Status: **locked 2026-10-09** after four Design Studio sprints. Code follows
+this document and `handoff.md`; changes go through a new sprint, not ad hoc.
 
 ## Intake (2026-10-09)
 
@@ -103,11 +103,22 @@ fix wording, it fixes where words sit and how many.
 
 ## Sprint 4: spatial calibration
 
-Pending: 4px grid audit, figure baselines, Steam Deck fit of all three
-screens, inverse-scheme survival; output is the token block and the
-component inventory below.
+Done: all five screens (Dashboard, Plots, Market, Research, Finance) on a
+4px grid with explicit line-heights so labels and figures share baselines;
+controls 36px tall on desktop and 40px in the Steam Deck frame, where every
+secondary text role is 14px; chips 20px tall with a 40px minimum width;
+16px gutters; inverse-scheme tokens darkened to clear 4.5:1. The bench
+source is `bench.html`.
 
 ## Tokens, components, states
 
-To be filled when the direction is locked (Sprint 1), then the hierarchy
-(Sprint 2), phrasing (Sprint 3) and spacing baselines (Sprint 4).
+The locked token block is `tokens.css` (colour, type scale 12/13/14/16/17/20
+with line-heights, spacing 4/8/12/16/20/24, 2px radii, 1px edges, 2px title
+rules, no shadows). The component inventory with exact CSS, states, the
+per-screen block order and the RmlUi translation notes is `handoff.md`.
+The client restyle (spec 003) implements them.
+
+## Inevitability gate
+
+Passed 2026-10-09: the owner reviewed all five screens and locked the
+design.
