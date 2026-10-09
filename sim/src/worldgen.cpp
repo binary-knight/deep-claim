@@ -25,9 +25,6 @@ const Fixed kMaxDepositSigma = Fixed::fromInt(3);
 // Land price noise around the area-based interpolation, as a fraction.
 const Fixed kPriceNoise = Fixed::fromRatio(1, 5);
 constexpr std::int64_t kMaxDepositTonnes = 1'000'000'000'000'000LL;
-// A region counts as mineable on day one when an ore that needs no research
-// turns up on at least this share of its plots (spec 005).
-const Fixed kOpeningPresenceMin = Fixed::fromRatio(1, 2);
 
 Money interpolatePrice(const RegionDef& region, std::int64_t area, Pcg32& rng) {
     // Linear in area between the region's min and max, then +/- up to 20%
@@ -56,13 +53,12 @@ std::int64_t sampleTonnes(const DepositPrior& prior, const RegionDef& region, st
     // mean area = (min + max) / 2, kept exact by doubling the numerator.
     std::int64_t tonnes =
         mulDiv(scaled, 2 * area, region.plotAreaMinHectares + region.plotAreaMaxHectares);
-    if (tonnes < 1) {
-        tonnes = 1;
-    }
-    if (tonnes > kMaxDepositTonnes) {
-        tonnes = kMaxDepositTonnes;
-    }
-    return tonnes;
+    // The cap applies to what the plot ends up holding, area included.
+    const std::int64_t cap =
+        checkedMulDiv(prior.tonnesMedian, prior.tonnesMaxMult.raw(), Fixed::kScale)
+            .value_or(kMaxDepositTonnes);
+    tonnes = std::min({tonnes, cap, kMaxDepositTonnes});
+    return std::max<std::int64_t>(tonnes, 1);
 }
 
 // The plots not yet placed in the listing queue, grouped by region so a draw
@@ -230,7 +226,10 @@ RegionStart classifyRegionAtStart(const Content& content, const RegionDef& regio
             fatal("classifyRegionAtStart: a deposit names a resource that does not exist");
         }
         const bool lockedOre = content.resources[prior.resource.index()].unlockedBy.valid();
-        if (!lockedOre && prior.presenceProb >= kOpeningPresenceMin) {
+        // An ore that never turns up makes nothing mineable, whatever the
+        // threshold: a threshold of zero means "any chance", not "none".
+        if (!lockedOre && prior.presenceProb > Fixed::zero() &&
+            prior.presenceProb >= content.balance.openingMineablePresence) {
             return RegionStart::Mineable;
         }
         hasLocked = hasLocked || lockedOre;

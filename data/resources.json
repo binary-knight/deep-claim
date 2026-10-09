@@ -2,7 +2,7 @@
   {
     "id": "iron",
     "name": "Iron ore",
-    "base_price": 60,
+    "base_price": 90,
     "base_demand_tonnes_per_day": 1600,
     "base_output_tonnes_per_day": 400,
     "elasticity": 0.5,

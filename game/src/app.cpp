@@ -282,6 +282,16 @@ void App::bindModel() {
         h.RegisterMember("flag", &SaleRow::flag);
         h.RegisterMember("flag_class", &SaleRow::flag_class);
         h.RegisterMember("has_flag", &SaleRow::has_flag);
+        h.RegisterMember("major", &SaleRow::major);
+    }
+    if (auto h = ctor.RegisterStruct<SoldRow>()) {
+        h.RegisterMember("index", &SoldRow::index);
+        h.RegisterMember("name", &SoldRow::name);
+        h.RegisterMember("buyer", &SoldRow::buyer);
+        h.RegisterMember("paid", &SoldRow::paid);
+        h.RegisterMember("over", &SoldRow::over);
+        h.RegisterMember("day", &SoldRow::day);
+        h.RegisterMember("mine", &SoldRow::mine);
     }
     if (auto h = ctor.RegisterStruct<OwnedRow>()) {
         h.RegisterMember("index", &OwnedRow::index);
@@ -303,6 +313,7 @@ void App::bindModel() {
         h.RegisterMember("error", &EstimateRow::error);
         h.RegisterMember("needs", &EstimateRow::needs);
         h.RegisterMember("locked", &EstimateRow::locked);
+        h.RegisterMember("major", &EstimateRow::major);
     }
     ctor.RegisterArray<std::vector<EstimateRow>>();
     if (auto h = ctor.RegisterStruct<PlotPanel>()) {
@@ -326,6 +337,7 @@ void App::bindModel() {
         h.RegisterMember("can_survey", &PlotPanel::can_survey);
         h.RegisterMember("survey_label", &PlotPanel::survey_label);
         h.RegisterMember("survey_note", &PlotPanel::survey_note);
+        h.RegisterMember("sale", &PlotPanel::sale);
         h.RegisterMember("can_build", &PlotPanel::can_build);
         h.RegisterMember("can_afford_mine", &PlotPanel::can_afford_mine);
         h.RegisterMember("build_label", &PlotPanel::build_label);
@@ -390,6 +402,7 @@ void App::bindModel() {
     }
     ctor.RegisterArray<std::vector<NeedRow>>();
     ctor.RegisterArray<std::vector<SaleRow>>();
+    ctor.RegisterArray<std::vector<SoldRow>>();
     ctor.RegisterArray<std::vector<OwnedRow>>();
     ctor.RegisterArray<std::vector<ResourceRow>>();
     ctor.RegisterArray<std::vector<TechRow>>();
@@ -443,6 +456,8 @@ void App::bindModel() {
     ctor.Bind("panel", &model_.panel);
     ctor.Bind("techs", &model_.techs);
     ctor.Bind("no_unlisted", &model_.no_unlisted);
+    ctor.Bind("recent_sales", &model_.recent_sales);
+    ctor.Bind("no_sales", &model_.no_sales);
     // Market
     ctor.Bind("resources", &model_.resources);
     ctor.Bind("chart_title", &model_.chart_title);

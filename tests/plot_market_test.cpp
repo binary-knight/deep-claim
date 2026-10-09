@@ -215,6 +215,130 @@ TEST_CASE("Highest bid wins, ties go to the earlier bid, winner pays", "[market]
     CHECK(simulation.state().plots[other.index()].owner == kPlayer);
 }
 
+TEST_CASE("Settled auctions are kept as public sales with their premium", "[market][view]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    CHECK(simulation.view(kPlayer).recentSales.empty());
+    const sim::PlotId plot = firstListed(simulation.state());
+    const sim::Money ask = simulation.state().plots[plot.index()].askPrice;
+    // 16% over the ask, to the cent.
+    const sim::Money bid = ask.scaled(sim::Fixed::fromRatio(116, 100));
+    simulation.submit(sim::BidOnPlot{kRival, plot, bid});
+    simulation.tick(content.balance.auctionWindowDays + 1);
+    REQUIRE(simulation.state().plots[plot.index()].owner == kRival);
+
+    // Both companies see the same record: sale prices are public.
+    for (const sim::CompanyId viewer : {kPlayer, kRival}) {
+        const sim::CompanyView view = simulation.view(viewer);
+        REQUIRE(view.recentSales.size() == 1);
+        const sim::SaleView& sale = view.recentSales.front();
+        CHECK(sale.plot == plot);
+        CHECK(sale.buyer == kRival);
+        CHECK(sale.ask == ask);
+        CHECK(sale.paid == bid);
+        CHECK(sale.day == content.balance.auctionWindowDays);
+        CHECK(sale.premium > sim::Fixed::fromRatio(159, 1000));
+        CHECK(sale.premium <= sim::Fixed::fromRatio(16, 100));
+        REQUIRE(view.plots[plot.index()].sale.has_value());
+        CHECK(view.plots[plot.index()].sale->paid == bid);
+    }
+    // Unsold plots carry no sale; a relisted auction opens at the cut ask.
+    const sim::CompanyView view = simulation.view(kPlayer);
+    for (const sim::PlotView& other : view.plots) {
+        CHECK(other.sale.has_value() == (other.id == plot));
+    }
+    for (const sim::Auction& auction : simulation.state().auctions) {
+        if (auction.open != 0) {
+            CHECK(auction.askPrice == simulation.state().plots[auction.plot.index()].askPrice);
+        }
+    }
+
+    // The record survives a save, and a tampered one does not load.
+    sim::Simulation restored(content, 7, test::setup());
+    REQUIRE(restored.load(simulation.save()));
+    CHECK(restored.view(kPlayer).recentSales.front().paid == bid);
+    sim::WorldState broken = simulation.state();
+    for (sim::Auction& auction : broken.auctions) {
+        if (auction.winner.valid()) {
+            auction.askPrice = auction.winningAmount + sim::Money::fromCents(1);
+        }
+    }
+    CHECK_FALSE(restored.load(sim::saveGame(broken, {}, sim::hashContent(content))));
+    broken = simulation.state();
+    for (sim::Auction& auction : broken.auctions) {
+        if (auction.open != 0) {
+            auction.askPrice += sim::Money::fromCents(1);
+            break;
+        }
+    }
+    CHECK_FALSE(restored.load(sim::saveGame(broken, {}, sim::hashContent(content))));
+}
+
+TEST_CASE("The sales record keeps the sixteen most recent, newest first", "[market][view]") {
+    sim::Content content = test::makeContent();
+    content.balance.plotsListedAtStart = 3;
+    content.balance.plotsListedPerMonth = 3;
+    sim::Simulation simulation(content, 2, test::setup());
+    // The player bids the ask on everything listed, every day, for two years.
+    std::size_t sold = 0;
+    for (sim::Day d = 0; d < sim::kDaysPerYear * 2; ++d) {
+        const sim::CompanyView view = simulation.view(kPlayer);
+        for (const sim::PlotView& plot : view.plots) {
+            if (plot.listing == sim::PlotListing::Listed &&
+                plot.auction->myBid == sim::Money::zero() &&
+                view.cash - view.reservedCash >= plot.askPrice) {
+                simulation.submit(sim::BidOnPlot{kPlayer, plot.id, plot.askPrice});
+            }
+        }
+        const sim::TickReport& report = simulation.tick();
+        sold += static_cast<std::size_t>(std::count_if(
+            report.notices.begin(), report.notices.end(),
+            [](const sim::Notice& n) { return n.kind == sim::NoticeKind::PlotSold; }));
+        // Keep the buyer in funds without touching the market.
+        if (simulation.state().companies[0].cash < sim::Money::fromUnits(20'000'000)) {
+            sim::WorldState topped = simulation.state();
+            topped.companies[0].cash = sim::Money::fromUnits(60'000'000);
+            REQUIRE(simulation.load(sim::saveGame(topped, {}, sim::hashContent(content))));
+        }
+    }
+    REQUIRE(sold > sim::kRecentSales);
+    const sim::CompanyView view = simulation.view(kRival);
+    REQUIRE(view.recentSales.size() == sim::kRecentSales);
+    // Exactly the last sixteen auctions that ended in a sale, newest first.
+    std::vector<const sim::Auction*> settled;
+    for (const sim::Auction& auction : simulation.state().auctions) {
+        if (auction.open == 0 && auction.winner.valid()) {
+            settled.push_back(&auction);
+        }
+    }
+    REQUIRE(settled.size() == sold);
+    for (std::size_t i = 0; i < view.recentSales.size(); ++i) {
+        const sim::Auction& expected = *settled[settled.size() - 1 - i];
+        CHECK(view.recentSales[i].plot == expected.plot);
+        CHECK(view.recentSales[i].day == expected.closesOnDay);
+        CHECK(view.recentSales[i].paid == expected.winningAmount);
+        CHECK(view.recentSales[i].premium == sim::Fixed::zero());
+        if (i > 0) {
+            CHECK(view.recentSales[i - 1].day >= view.recentSales[i].day);
+        }
+    }
+    // The record relies on auctions being stored in closing order: a save
+    // whose auctions are out of order does not load.
+    sim::WorldState shuffled = simulation.state();
+    REQUIRE(shuffled.auctions.size() > 8);
+    REQUIRE(shuffled.auctions[0].closesOnDay < shuffled.auctions[8].closesOnDay);
+    std::swap(shuffled.auctions[0].opensOnDay, shuffled.auctions[8].opensOnDay);
+    std::swap(shuffled.auctions[0].closesOnDay, shuffled.auctions[8].closesOnDay);
+    sim::Simulation other(content, 9, test::setup());
+    CHECK_FALSE(other.load(sim::saveGame(shuffled, {}, sim::hashContent(content))));
+    // The oldest sale has dropped out of the record but stays on its plot.
+    std::size_t withSale = 0;
+    for (const sim::PlotView& plot : view.plots) {
+        withSale += plot.sale.has_value() ? 1U : 0U;
+    }
+    CHECK(withSale == sold);
+}
+
 TEST_CASE("Commands change the hash and replays reproduce it", "[market][determinism]") {
     const sim::Content content = test::makeContent();
     sim::Simulation quiet(content, 3, test::setup());

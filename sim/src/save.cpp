@@ -195,6 +195,13 @@ bool validateAuctions(const WorldState& state) {
             auction.closesOnDay > kMaxDeadline) {
             return false;
         }
+        // Auctions are stored in the order they opened and all run the same
+        // window, so they also close in that order. The view's record of
+        // recent sales relies on it.
+        if (a > 0 && (auction.opensOnDay < state.auctions[a - 1].opensOnDay ||
+                      auction.closesOnDay < state.auctions[a - 1].closesOnDay)) {
+            return false;
+        }
         const Plot& plot = state.plots[auction.plot.index()];
         if (auction.open != 0 &&
             (plot.listing != PlotListing::Listed || plot.auction != AuctionId(a))) {
@@ -204,8 +211,13 @@ bool validateAuctions(const WorldState& state) {
             return false;
         }
         if (auction.winner.valid() &&
-            (auction.open != 0 || auction.winner.index() >= state.companies.size())) {
-            return false;
+            (auction.open != 0 || auction.winner.index() >= state.companies.size() ||
+             auction.winningAmount < auction.askPrice)) {
+            return false;  // a sale is a closed auction won at or above its ask
+        }
+        if (auction.askPrice < Money::zero() || auction.askPrice.cents() > kMaxCashCents ||
+            (auction.open != 0 && auction.askPrice != plot.askPrice)) {
+            return false;  // an open auction stands at its plot's ask
         }
     }
     return true;

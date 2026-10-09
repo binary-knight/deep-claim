@@ -94,6 +94,84 @@ TEST_CASE("Regions are classified by what a new company can mine", "[worldgen][o
     CHECK(sim::classifyRegionAtStart(content, thin) == sim::RegionStart::Other);
 }
 
+TEST_CASE("The mineable threshold comes from the balance data", "[worldgen][opening]") {
+    sim::Content content = test::makeContent();
+    // North has iron on 80% of plots: mineable at 0.5 and at 0.8, not at 0.9.
+    content.balance.openingMineablePresence = sim::Fixed::fromRatio(8, 10);
+    CHECK(sim::classifyRegionAtStart(content, content.regions[0]) == sim::RegionStart::Mineable);
+    content.balance.openingMineablePresence = sim::Fixed::fromRatio(9, 10);
+    CHECK(sim::classifyRegionAtStart(content, content.regions[0]) == sim::RegionStart::Other);
+    // With no mineable region the hand's promise gives way, as for scarce land.
+    for (sim::Seed seed = 1; seed <= 20; ++seed) {
+        const sim::WorldState state = generate(content, seed);
+        REQUIRE(isPermutation(state.listingQueue, state.plots.size()));
+        CHECK(shapeOf(content, state).handMineable == 0);
+    }
+    // A threshold of zero means any chance at all, never an ore that cannot
+    // turn up: a listed deposit with no probability makes nothing mineable.
+    content.balance.openingMineablePresence = sim::Fixed::zero();
+    sim::RegionDef never = content.regions[1];
+    never.deposits.push_back(
+        {sim::ResourceId(1), sim::Fixed::zero(), 30'000, sim::Fixed::fromInt(2)});
+    CHECK(sim::classifyRegionAtStart(content, never) == sim::RegionStart::Locked);
+    never.deposits.back().presenceProb = sim::Fixed::fromRaw(1);
+    CHECK(sim::classifyRegionAtStart(content, never) == sim::RegionStart::Mineable);
+    // A low threshold makes a long-shot ore count.
+    content.balance.openingMineablePresence = sim::Fixed::fromRatio(1, 10);
+    sim::RegionDef mixed = content.regions[1];
+    mixed.deposits.push_back(
+        {sim::ResourceId(1), sim::Fixed::fromRatio(2, 10), 30'000, sim::Fixed::fromInt(2)});
+    CHECK(sim::classifyRegionAtStart(content, mixed) == sim::RegionStart::Mineable);
+}
+
+TEST_CASE("No deposit exceeds its cap over 200 seeds", "[worldgen]") {
+    sim::Content content = test::makeContent();
+    const sim::Fixed cap = sim::Fixed::fromRatio(3, 2);
+    for (sim::RegionDef& region : content.regions) {
+        for (sim::DepositPrior& prior : region.deposits) {
+            prior.tonnesMaxMult = cap;
+        }
+    }
+    const sim::Content uncapped = test::makeContent();
+    std::uint32_t atCap = 0;
+    std::uint32_t deposits = 0;
+    std::uint32_t differing = 0;
+    for (sim::Seed seed = 1; seed <= 200; ++seed) {
+        const sim::WorldState state = generate(content, seed);
+        const sim::WorldState free = generate(uncapped, seed);
+        for (std::size_t p = 0; p < state.plots.size(); ++p) {
+            const sim::RegionDef& region = content.regions[state.plots[p].region.index()];
+            const auto& found = state.hidden.plotDeposits[p].deposits;
+            // The cap changes sizes only: the same deposits are present.
+            REQUIRE(found.size() == free.hidden.plotDeposits[p].deposits.size());
+            for (std::size_t d = 0; d < found.size(); ++d) {
+                const sim::DepositTruth& truth = found[d];
+                std::int64_t limit = 0;
+                for (const sim::DepositPrior& prior : region.deposits) {
+                    if (prior.resource == truth.resource) {
+                        limit = prior.tonnesMedian * 3 / 2;
+                    }
+                }
+                REQUIRE(limit > 0);
+                CHECK(truth.tonnesTotal >= 1);
+                CHECK(truth.tonnesTotal <= limit);
+                CHECK(truth.tonnesRemaining == truth.tonnesTotal);
+                const std::int64_t freeTonnes = free.hidden.plotDeposits[p].deposits[d].tonnesTotal;
+                CHECK(truth.tonnesTotal == std::min(freeTonnes, limit));
+                atCap += truth.tonnesTotal == limit ? 1U : 0U;
+                differing += truth.tonnesTotal != freeTonnes ? 1U : 0U;
+                ++deposits;
+            }
+        }
+        // Capping a deposit draws nothing extra: land is the same.
+        CHECK(state.listingQueue == free.listingQueue);
+    }
+    // A cap of 1.5 medians bites often with a spread of 2.5, but not always.
+    CHECK(atCap > deposits / 10);
+    CHECK(atCap < deposits);
+    CHECK(differing > 0);
+}
+
 TEST_CASE("The opening hand and the queue keep their promises over 200 seeds",
           "[worldgen][opening]") {
     const sim::Content content = test::makeContent();

@@ -360,7 +360,8 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   the ask when the surveyed value covers twice the ask plus capex and 10%
   over when it covers four times; research the cheapest available tech when
   cash exceeds 2.5M; borrow 2M chunks only while producing and below 750k.
-  Its knobs live in code because they shape one opponent, not the economy.
+  Its knobs lived in code until spec 006 moved them to `data/ai.json`
+  (see "Balance: a contested economy").
 - Hosts drive controllers with `collectCommands` before each tick; the sim
   never calls controllers itself, so the player's UI and the AI use the same
   path.
@@ -816,3 +817,94 @@ Client (all presentation of view data):
 | Day company 0's first mine opened | 227 | 273 | 603 |
 | Final cash, company 0 | -$0.58M | $187M | $1,086M |
 | Final cash, company 1 | -$1.01M | $831M | $1,219M |
+
+## Balance: a contested economy (spec 006)
+
+- **The competitor's knobs are content.** Sixteen constants left
+  `ai_controller.cpp` for `data/ai.json` (`Content::ai`, `AiParams`),
+  joined by three new ones; the "mineable region" threshold left
+  `worldgen.cpp` for `balance.json` (`opening_mineable_presence`). The
+  controller runs inside the deterministic sim, so all of it is hashed
+  into the content fingerprint: a changed knob invalidates saves and
+  traces exactly as a changed price does. `data/` now holds seven files.
+- **Bid offsets were biased, and that was the runaway.** The per-plot
+  offset meant to stop identical AIs tying was `(plot * 7 + company * 13)
+  % 7`; the plot term vanishes, so company 1 outbid company 0 by six
+  points on every plot. It is now a hash of plot and company
+  (`aiBidJitterPercent`). This one line took the leader's lead from 3.06x
+  to 1.27x and the AI-played company's first mine from day 273 to 228,
+  and it explains the rival's 16% and 32% winning premiums in both
+  playtests (10 + 6 and 25 + 6). Rival premiums now vary from 10 to 16%
+  and 25 to 31%.
+- **Valuation is marginal revenue.** `aiValuedPrice`: today's price, never
+  above base, moved by the market's own rule for the new mine's output
+  (`(before / (before + added)) ^ elasticity`), with the same drop charged
+  on what the company's operating mines already sell. A company with four
+  mines of an ore values a fifth far below a newcomer. `supply_discount`
+  scales it (shipped at 1). Player and AI share the market rule; only the
+  AI's appetite changed.
+- **First-mine terms.** A company with no mine uses
+  `first_mine_required_return` and `first_mine_recoverable_share` (1.1
+  and 0.6). Measured to make no difference once bids are fair; kept as
+  knobs.
+- **No wind-down rule.** The sim has no order that closes a mine, and
+  adding one for the AI alone would be a control the player lacks. It was
+  conditional on what killed trailing companies; that turned out to be
+  the bid bias and iron's margin, and with both fixed no company fails in
+  150 seeds.
+- **Deposits end.** `DepositPrior::tonnesMaxMult` caps a deposit at a
+  multiple of its median after the plot's area has scaled it. Shipped:
+  spread 1.6 and a cap of 4 on every deposit, medians raised about 1.4x
+  (the narrower spread alone shortened the typical mine). The largest
+  Copper Belt find is 600k t; playtest 2 drew 1.59M t. In-code fixtures
+  keep the default cap, which never binds.
+- **Iron at 90.** Revenue over opex at base goes from 3.0 to 4.5 (a data
+  test computes it from the shipped files). This, not an AI rule, is what
+  ended the bankruptcies: a company with one or two iron mines could live
+  at 60 but never save for another plot.
+- **Sales are public history.** `Auction::askPrice` records the ask an
+  auction opened with; auctions are never erased, so that is the whole
+  history (no second list). `CompanyView::recentSales` is the sixteen
+  newest settled auctions with the premium over the ask, `PlotView::sale`
+  a sold plot's own, and `SurveyEstimateView::major` marks an estimate
+  above twice the regional median. The Plots tab shows the newest five
+  sales under the for-sale table. The record reads the auctions newest
+  first, so load validation now requires them in opening and closing
+  order (true of every generated state; the Codex review asked that it be
+  enforced).
+- **Golden hash.** `0x118a72ce0f57d9f7` to `0x2a5da3177ab7c69d`, once,
+  for the auction field. Save format v1 gains it; the content fingerprint
+  changes as well (AI knobs, deposit caps, prices), so saves and traces
+  from before this spec do not load.
+- **The sweep reports the contest and gates it.** `--sweep` adds mines
+  built per company at years 2, 5, 8 and the end, mines by state,
+  bankruptcy days, first depletion, the lives of mines opened at least
+  seven years before the end, and mean price over base. `runner_sweep`
+  (ten seeds, eight years) now fails on a median first mine at day 250 or
+  later, more than one bankrupt seed in fifty, a median leader-over-trailer
+  ratio above 3.0x, or a seed with no depleted mine by year 8. Mean
+  prices, mine life and withdrawn land are printed with their goals and
+  do not gate.
+- **What is not solved.** Ore trades at 0.50 to 0.57x base once two
+  companies are established, against a goal of 0.75x, and 37 of 120 plots
+  sit withdrawn at year 8 against a goal of 25. One copper mine is 30% of
+  base copper demand and still earns twice its opex at a third of base,
+  so two rational companies build until prices are near there; the AI's
+  knobs barely move it. Tripling every base demand gets prices to 0.68 to
+  0.79x. Market size was outside this spec.
+
+50 seeds, 10 years, one rival, release build (seeds 51 to 150 in the last
+column were never used for tuning):
+
+| Measure | Spec 005 | Target | Seeds 1 to 50 | Seeds 51 to 150 |
+| --- | --- | --- | --- | --- |
+| Median day company 0's first mine operates | 273 | under 250 | 228 | 230 |
+| Seeds with a bankrupt company | 6 of 50 | at most 1 in 50 | 0 of 50 | 0 of 100 |
+| Mines built, leader over trailer, median seed | 3.06x | at most 2.5x | 1.08x | 1.08x |
+| Mean price over base: iron, copper, nickel, lithium | 0.61 0.53 0.66 0.99 | 0.75 or more | 0.57 0.50 0.54 0.96 | 0.57 0.50 0.56 1.00 |
+| Median life of a mine opened in the first three years | 1,789 days | 1,800 to 2,520 | 2,167 | 2,355 |
+| Seeds with no depleted mine by year 8 | 0 | none | 0 | 0 |
+| Median withdrawn plots at year 8 | 44 | 25 or fewer | 37 | 38 |
+| Iron revenue over opex at base | 3.0 | 4.5 | 4.5 | 4.5 |
+| Mines built by year 10, company 0 / company 1, median | 16 / 49 | | 37 / 37 | 37 / 37 |
+| Final cash, company 0 / company 1, median | $187M / $831M | | $765M / $832M | $764M / $818M |

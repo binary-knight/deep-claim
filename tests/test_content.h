@@ -126,6 +126,7 @@ inline sim::Content makeContent() {
     // most one from Flats (lithium only, locked).
     c.balance.openingMinMineable = 2;
     c.balance.openingMaxLockedRegion = 1;
+    c.balance.openingMineablePresence = sim::Fixed::fromRatio(1, 2);
     c.balance.bankruptcyGraceMonths = 3;
     c.balance.marketSupplySmoothingDays = 30;
     c.balance.marketPriceAdjustDays = 10;
@@ -135,6 +136,30 @@ inline sim::Content makeContent() {
     c.balance.priceFloorMult = sim::Fixed::fromRatio(1, 10);
     c.balance.priceCapMult = sim::Fixed::fromInt(10);
     c.balance.demandGrowthPerYear = sim::Fixed::fromRatio(4, 100);
+
+    // The competitor's knobs as they stood in code before spec 006 moved
+    // them to data/ai.json; tests that tune the AI change copies of these.
+    c.ai.sellAboveBase = sim::Fixed::fromRatio(85, 100);
+    c.ai.dumpStorageShare = sim::Fixed::fromRatio(2, 100);
+    c.ai.recoverableShare = sim::Fixed::fromRatio(1, 2);
+    c.ai.requiredReturn = sim::Fixed::fromRatio(6, 5);
+    c.ai.paybackHorizonDays = 1800;
+    c.ai.bidPremium = sim::Fixed::fromRatio(11, 10);
+    c.ai.bidPremiumHigh = sim::Fixed::fromRatio(5, 4);
+    c.ai.maxOpenProspects = 2;
+    c.ai.reopenMargin = sim::Fixed::fromRatio(5, 4);
+    c.ai.idleMineGraceDays = 30;
+    c.ai.opexReserveDays = 60;
+    c.ai.cashReserve = sim::Money::fromUnits(500'000);
+    c.ai.researchFloor = sim::Money::fromUnits(2'500'000);
+    c.ai.loanFloor = sim::Money::fromUnits(750'000);
+    c.ai.loanChunk = sim::Money::fromUnits(2'000'000);
+    c.ai.bootstrapLoan = sim::Money::fromUnits(4'000'000);
+    // Spec 006 rules switched off: a first mine is valued like any other and
+    // the company's own supply is ignored, as before the spec.
+    c.ai.firstMineRecoverableShare = c.ai.recoverableShare;
+    c.ai.firstMineRequiredReturn = c.ai.requiredReturn;
+    c.ai.supplyDiscount = sim::Fixed::zero();
     return c;
 }
 

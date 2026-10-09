@@ -7,7 +7,9 @@
 // With --sweep N it instead plays N consecutive seeds and reports, per seed
 // and in summary, how the world's land and opening behaved (spec 005): the
 // opening hand, the listing queue, how long unlisted land lasts and when the
-// first mine opens. Its exit code is the spec's goal thresholds.
+// first mine opens; and how the contest between the companies went (spec
+// 006): mines per company, bankruptcies, how long mines last and where
+// prices sat. Its exit code is the specs' goal thresholds.
 #include "sim/ai_controller.h"
 #include "sim/commands.h"
 #include "sim/content.h"
@@ -159,7 +161,8 @@ std::string jsonString(std::string_view text) {
 }
 
 void writeCsvHeader(std::ostream& csv, const sim::Content& content) {
-    csv << "day,company,cash,debt,plots,mines_operating,inventory_value";
+    csv << "day,company,cash,debt,plots,mines_operating,mines_mothballed,mines_depleted,"
+           "inventory_value";
     for (const sim::ResourceDef& resource : content.resources) {
         csv << ",price_" << resource.id;
     }
@@ -171,9 +174,10 @@ void writeCsvRows(std::ostream& csv, const sim::Simulation& simulation) {
     const std::size_t companyCount = simulation.state().companies.size();
     for (std::uint32_t c = 0; c < companyCount; ++c) {
         const sim::CompanyView view = simulation.view(sim::CompanyId(c));
-        const auto operating =
-            std::count_if(view.mines.begin(), view.mines.end(),
-                          [](const auto& m) { return m.state == sim::MineState::Operating; });
+        const auto inState = [&view](sim::MineState state) {
+            return std::count_if(view.mines.begin(), view.mines.end(),
+                                 [state](const auto& m) { return m.state == state; });
+        };
         std::int64_t inventoryValue = 0;
         for (std::size_t r = 0; r < view.inventoryTonnes.size(); ++r) {
             inventoryValue = saturatingAdd(
@@ -183,7 +187,9 @@ void writeCsvRows(std::ostream& csv, const sim::Simulation& simulation) {
         }
         csv << day << ',' << c << ',' << sim::toString(view.cash) << ','
             << sim::toString(view.outstandingPrincipal) << ',' << view.companies[c].plotsOwned
-            << ',' << operating << ',' << sim::toString(sim::Money::fromCents(inventoryValue));
+            << ',' << inState(sim::MineState::Operating) << ','
+            << inState(sim::MineState::Mothballed) << ',' << inState(sim::MineState::Depleted)
+            << ',' << sim::toString(sim::Money::fromCents(inventoryValue));
         for (const sim::MarketView& market : view.markets) {
             csv << ',' << sim::toString(market.price);
         }
@@ -354,14 +360,36 @@ void printSummary(const Options& options, const sim::Content& content,
 
 // The years at which unlisted and withdrawn land are sampled.
 constexpr std::array<std::uint32_t, 3> kSweepYears = {2, 5, 8};
-// Goal thresholds from docs/specs/005-world-and-opening.md. The first two
-// are properties of the world and gate the exit code. The first-mine day is
-// reported, not gated: the land allows a mine by day 227 in the best seeds,
-// but when the built-in AI buys depends on its bidding rules, which belong to
-// spec 006. Gate it there once the AI is tuned.
+// Goal thresholds from docs/specs/005-world-and-opening.md. All three gate
+// the exit code; the first-mine day was reported only until spec 006 found
+// why the AI-played company bought late (its bids always lost to the
+// rival's) and fixed it.
 constexpr std::uint32_t kGoalMineableOpening = 2;
 constexpr std::uint32_t kGoalLandYear = 8;
 constexpr sim::Day kGoalFirstMineDay = 250;
+// Goal thresholds from docs/specs/006-balance.md. The spec's targets are for
+// 50 seeds over ten years; the gates are what a ten-seed, eight-year CTest
+// run can hold without noise (the ratio gate is looser than its target).
+constexpr std::int64_t kGoalBankruptSeedsPer50 = 1;
+constexpr std::int64_t kGoalMinesRatioPercent = 250;  // leader over trailer, median seed
+constexpr std::int64_t kGateMinesRatioPercent = 300;
+constexpr std::int64_t kGoalPriceMeanPermille = 750;  // mean price over base, each resource
+constexpr sim::Day kGoalMineLifeMinDays = 5 * sim::kDaysPerYear;
+constexpr sim::Day kGoalMineLifeMaxDays = 7 * sim::kDaysPerYear;
+constexpr std::int64_t kGoalWithdrawnYear8 = 25;
+// Mines opened this long before the end of the run form the cohort whose
+// lives are measured: long enough that a mine inside the goal has finished.
+constexpr sim::Day kMineLifeCohortDays = kGoalMineLifeMaxDays;
+// The spec 006 goals that decide the exit code: bankruptcies, the lead of
+// one company over the other, and depletion by year 8. Mean prices, mine
+// life and withdrawn land are reported with their goals but do not gate:
+// the first and last pull against each other under the market rule (see
+// the spec's Decisions), and mine life needs a ten-year run to measure.
+constexpr bool kGateContest = true;
+
+// Mine counts are sampled at the sweep years and at the end of the run.
+constexpr std::size_t kMineSamples = kSweepYears.size() + 1;
+constexpr std::size_t kMineStates = 5;  // sim::MineState, in declaration order
 
 struct SweepRow {
     sim::Seed seed = 0;
@@ -376,6 +404,21 @@ struct SweepRow {
     sim::Day firstMineOperatingDay = 0;  // company 0; 1-based, 0 = never
     std::vector<std::int64_t> finalCashCents;
     bool worldValid = true;
+    // Spec 006, per company: mines ever built at each sample, mines by state
+    // at the end, and the day of bankruptcy (1-based, 0 = never).
+    std::vector<std::array<std::uint32_t, kMineSamples>> minesBuilt;
+    std::vector<std::array<std::uint32_t, kMineStates>> minesByState;
+    std::vector<sim::Day> bankruptDay;
+    sim::Day firstDepletionDay = 0;        // any company; 1-based, 0 = never
+    std::uint32_t depletedByGoalYear = 0;  // mines depleted by the end of year 8
+    // Days from opening to depletion for every mine in the cohort (opened at
+    // least kMineLifeCohortDays before the end); a mine still running counts
+    // as never (run length + 1).
+    std::vector<std::int64_t> mineLives;
+    std::vector<std::int64_t> priceMeanPermille;  // per resource: mean price over base
+    // Working state while the seed runs.
+    std::vector<sim::Day> depletedDay;        // per mine, 1-based, 0 = not yet
+    std::vector<std::int64_t> priceSumCents;  // per resource, saturating
 };
 
 // The opening hand by region class, and the longest run of one region among
@@ -426,6 +469,72 @@ void recordLand(const sim::Content& content, const sim::WorldState& state, Sweep
     }
 }
 
+// The contest (spec 006), sampled once a day after the tick.
+void recordContest(const sim::WorldState& state, const sim::TickReport& report, SweepRow& row) {
+    for (const sim::Notice& notice : report.notices) {
+        if (notice.kind == sim::NoticeKind::Bankrupt &&
+            row.bankruptDay[notice.company.index()] == 0) {
+            row.bankruptDay[notice.company.index()] = report.day + 1;
+        }
+    }
+    row.depletedDay.resize(state.mines.size(), 0);
+    for (std::size_t m = 0; m < state.mines.size(); ++m) {
+        if (state.mines[m].state != sim::MineState::Depleted || row.depletedDay[m] != 0) {
+            continue;
+        }
+        row.depletedDay[m] = report.day + 1;
+        if (row.firstDepletionDay == 0) {
+            row.firstDepletionDay = report.day + 1;
+        }
+        row.depletedByGoalYear += state.day <= kGoalLandYear * sim::kDaysPerYear ? 1U : 0U;
+    }
+    for (std::size_t r = 0; r < state.markets.size(); ++r) {
+        row.priceSumCents[r] = saturatingAdd(row.priceSumCents[r], state.markets[r].price.cents());
+    }
+    for (std::size_t y = 0; y < kSweepYears.size(); ++y) {
+        if (state.day != kSweepYears.at(y) * sim::kDaysPerYear) {
+            continue;
+        }
+        for (const sim::Mine& mine : state.mines) {
+            ++row.minesBuilt[mine.owner.index()].at(y);
+        }
+    }
+}
+
+// End of the run: final mine counts, the lives of the cohort, mean prices.
+void finishContest(const Options& options, const sim::Content& content,
+                   const sim::WorldState& state, SweepRow& row) {
+    row.depletedDay.resize(state.mines.size(), 0);
+    for (std::size_t m = 0; m < state.mines.size(); ++m) {
+        const sim::Mine& mine = state.mines[m];
+        ++row.minesBuilt[mine.owner.index()].at(kMineSamples - 1);
+        ++row.minesByState[mine.owner.index()].at(static_cast<std::size_t>(mine.state));
+        const bool opened = mine.state != sim::MineState::Building;
+        if (!opened || options.days < kMineLifeCohortDays ||
+            mine.operationalDay > options.days - kMineLifeCohortDays) {
+            continue;
+        }
+        // A mine closed by its owner's bankruptcy before it ran out says
+        // nothing about deposits; one that ran out first keeps its life.
+        if (mine.state == sim::MineState::Closed && row.depletedDay[m] == 0) {
+            continue;
+        }
+        row.mineLives.push_back(row.depletedDay[m] == 0
+                                    ? std::int64_t{options.days} + 1
+                                    : std::int64_t{row.depletedDay[m]} - mine.operationalDay);
+    }
+    for (std::size_t r = 0; r < row.priceSumCents.size(); ++r) {
+        // sum x 1000 / (days x base), truncated once, so a cheap ore's mean
+        // is not rounded to whole cents first. The sum saturates only at
+        // prices no content bound allows over a run of any permitted length.
+        const std::int64_t base = content.resources[r].basePrice.cents();
+        const std::int64_t span =
+            sim::checkedMulDiv(base, std::int64_t{options.days}, 1).value_or(0);
+        row.priceMeanPermille.push_back(
+            span > 0 ? sim::checkedMulDiv(row.priceSumCents[r], 1000, span).value_or(0) : 0);
+    }
+}
+
 SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::Seed seed) {
     sim::GameSetup setup;
     setup.playerName = "Player (AI)";
@@ -441,6 +550,10 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
     row.worldValid = sim::validateWorld(content, state);
 
     const std::size_t companyCount = state.companies.size();
+    row.minesBuilt.assign(companyCount, {});
+    row.minesByState.assign(companyCount, {});
+    row.bankruptDay.assign(companyCount, 0);
+    row.priceSumCents.assign(content.resources.size(), 0);
     for (sim::Day d = 0; d < options.days; ++d) {
         for (std::uint32_t c = 0; c < companyCount; ++c) {
             simulation.collectCommands(sim::CompanyId(c), ai);
@@ -452,7 +565,9 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
         }
         recordFirstMine(report, row);
         recordLand(content, state, row);
+        recordContest(state, report, row);
     }
+    finishContest(options, content, state, row);
     row.worldValid = row.worldValid && sim::validateWorld(content, state);
     for (const sim::Company& company : state.companies) {
         row.finalCashCents.push_back(company.cash.cents());
@@ -511,6 +626,100 @@ std::int64_t dayOrNever(sim::Day day, sim::Day days) {
     return day == 0 ? std::int64_t{days} + 1 : std::int64_t{day};
 }
 
+template <class Range>
+std::string joined(const Range& values) {
+    std::string out;
+    for (const auto& value : values) {
+        out += (out.empty() ? "" : ", ") + std::to_string(value);
+    }
+    return out;
+}
+
+std::uint32_t minesAtEnd(const SweepRow& row, std::size_t company) {
+    return row.minesBuilt[company].at(kMineSamples - 1);
+}
+
+// The ratio of a seed in which some company never built a mine: there is no
+// contest to measure, and it must fail any limit. Larger than any real ratio.
+constexpr std::int64_t kNoContestPercent = 1'000'000'000;
+
+// Mines ever built by the company with most over the company with fewest, as
+// a percentage. A bankrupt company keeps the mines it built.
+std::int64_t minesRatioPercent(const SweepRow& row) {
+    std::uint32_t leader = 0;
+    std::uint32_t trailer = std::numeric_limits<std::uint32_t>::max();
+    for (std::size_t c = 0; c < row.minesBuilt.size(); ++c) {
+        leader = std::max(leader, minesAtEnd(row, c));
+        trailer = std::min(trailer, minesAtEnd(row, c));
+    }
+    if (row.minesBuilt.empty() || trailer == 0) {
+        return kNoContestPercent;
+    }
+    return std::int64_t{leader} * 100 / std::int64_t{trailer};
+}
+
+bool anyBankrupt(const SweepRow& row) {
+    return std::ranges::any_of(row.bankruptDay, [](sim::Day day) { return day != 0; });
+}
+
+// Lives of every cohort mine in every seed, pooled.
+std::vector<std::int64_t> pooledMineLives(const std::vector<SweepRow>& rows) {
+    std::vector<std::int64_t> lives;
+    for (const SweepRow& row : rows) {
+        lives.insert(lives.end(), row.mineLives.begin(), row.mineLives.end());
+    }
+    return lives;
+}
+
+// The spec 006 part of a row: per company, mines built at each sample (null
+// for a year the run stops short of) and mines by state at the end, in the
+// order building, operating, mothballed, depleted, closed.
+std::string contestJson(const Options& options, const SweepRow& row) {
+    std::string built;
+    std::string states;
+    for (std::size_t c = 0; c < row.minesBuilt.size(); ++c) {
+        std::string samples;
+        for (std::size_t y = 0; y < kMineSamples; ++y) {
+            const bool sampled = y + 1 == kMineSamples || yearSampled(options.days, y);
+            samples += (y == 0 ? "" : ", ") +
+                       (sampled ? std::to_string(row.minesBuilt[c].at(y)) : std::string("null"));
+        }
+        built += (c == 0 ? "[" : ", [") + samples + "]";
+        states += (c == 0 ? "[" : ", [") + joined(row.minesByState[c]) + "]";
+    }
+    std::string prices;
+    for (const std::int64_t permille : row.priceMeanPermille) {
+        prices += std::format("{}{:.3f}", prices.empty() ? "" : ", ",
+                              static_cast<double>(permille) / 1000.0);
+    }
+    // A run that stops short of year 8 has not measured depletion by then.
+    const std::string depleted = options.days >= kGoalLandYear * sim::kDaysPerYear
+                                     ? std::to_string(row.depletedByGoalYear)
+                                     : std::string("null");
+    return std::format(
+        "\"mines_built\": [{}], \"mines_by_state\": [{}], \"bankrupt_day\": [{}], "
+        "\"first_depletion_day\": {}, \"depleted_by_y{}\": {}, "
+        "\"cohort_mines\": {}, \"price_mean\": [{}]",
+        built, states, joined(row.bankruptDay), row.firstDepletionDay, kGoalLandYear, depleted,
+        row.mineLives.size(), prices);
+}
+
+// The spec 006 columns of one CSV row.
+void writeContestCsv(std::ostream& csv, const SweepRow& row, sim::Day days) {
+    for (std::size_t c = 0; c < row.minesBuilt.size(); ++c) {
+        csv << ',' << minesAtEnd(row, c) << ','
+            << row.minesByState[c].at(static_cast<std::size_t>(sim::MineState::Operating)) << ','
+            << row.bankruptDay[c];
+    }
+    csv << ',' << row.firstDepletionDay << ',';
+    if (days >= kGoalLandYear * sim::kDaysPerYear) {
+        csv << row.depletedByGoalYear;
+    }
+    for (const std::int64_t permille : row.priceMeanPermille) {
+        csv << ',' << permille;
+    }
+}
+
 void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows, sim::Day days) {
     csv << "seed,opening_mineable,opening_locked,longest_region_run,last_new_listing_day";
     for (const std::uint32_t year : kSweepYears) {
@@ -523,6 +732,14 @@ void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows, sim::Da
     const std::size_t companies = rows.empty() ? 0 : rows.front().finalCashCents.size();
     for (std::size_t c = 0; c < companies; ++c) {
         csv << ",final_cash_" << c;
+    }
+    for (std::size_t c = 0; c < companies; ++c) {
+        csv << ",mines_built_" << c << ",mines_operating_" << c << ",bankrupt_day_" << c;
+    }
+    csv << ",first_depletion_day,depleted_by_y" << kGoalLandYear;
+    const std::size_t resources = rows.empty() ? 0 : rows.front().priceMeanPermille.size();
+    for (std::size_t r = 0; r < resources; ++r) {
+        csv << ",price_mean_permille_" << r;
     }
     csv << '\n';
     for (const SweepRow& row : rows) {
@@ -541,6 +758,7 @@ void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows, sim::Da
         for (const std::int64_t cents : row.finalCashCents) {
             csv << ',' << sim::toString(sim::Money::fromCents(cents));
         }
+        writeContestCsv(csv, row, days);
         csv << '\n';
     }
 }
@@ -579,13 +797,99 @@ std::vector<Check> sweepChecks(const Options& options, const std::vector<SweepRo
                            firstMine.median > options.days ? std::string("never")
                                                            : std::to_string(firstMine.median),
                            kGoalFirstMineDay, never, rows.size())
-             : std::format("not evaluated: the run is shorter than {} days", kGoalFirstMineDay),
-         false});
+             : std::format("not evaluated: the run is shorter than {} days", kGoalFirstMineDay)});
 
     const bool valid = std::ranges::all_of(rows, [](const SweepRow& r) { return r.worldValid; });
     checks.push_back(
         {"world_valid", valid, "validation at the start, every year end and the end, every seed"});
     return checks;
+}
+
+// The goals of docs/specs/006-balance.md. Each needs a run long enough to
+// measure it; one that is not is reported as not evaluated and passes.
+void contestChecks(const Options& options, const sim::Content& content,
+                   const std::vector<SweepRow>& rows, std::vector<Check>& checks) {
+    const auto seeds = static_cast<std::int64_t>(rows.size());
+    const auto bankrupt = std::count_if(rows.begin(), rows.end(), anyBankrupt);
+    // One seed in fifty, rounded up, so a ten-seed run still allows one.
+    const std::int64_t allowed = (seeds * kGoalBankruptSeedsPer50 + 49) / 50;
+    checks.push_back({"seeds_with_bankruptcy", bankrupt <= allowed,
+                      std::format("{} of {} seeds had a bankrupt company (goal: at most {})",
+                                  bankrupt, seeds, allowed),
+                      kGateContest});
+
+    // A contest needs two companies; with one there is nothing to compare.
+    const bool contested = options.aiCompanies >= 1;
+    const Spread ratio = spreadOver(rows, minesRatioPercent);
+    std::string ratioDetail = "not evaluated: the sweep has one company (use --ai 1 or more)";
+    if (contested && ratio.median >= kNoContestPercent) {
+        ratioDetail =
+            "in the median seed a company never built a mine (goal: leader over "
+            "trailer at most 2.5x)";
+    } else if (contested) {
+        ratioDetail = std::format(
+            "mines built, leader over trailer, median seed: {:.2f}x (goal: "
+            "at most {:.1f}x; gate: {:.1f}x)",
+            static_cast<double>(ratio.median) / 100.0,
+            static_cast<double>(kGoalMinesRatioPercent) / 100.0,
+            static_cast<double>(kGateMinesRatioPercent) / 100.0);
+    }
+    checks.push_back({"mines_leader_over_trailer",
+                      !contested || ratio.median <= kGateMinesRatioPercent, ratioDetail,
+                      kGateContest});
+
+    bool pricesOk = true;
+    std::string prices;
+    for (std::size_t r = 0; r < content.resources.size(); ++r) {
+        const Spread mean =
+            spreadOver(rows, [r](const SweepRow& row) { return row.priceMeanPermille[r]; });
+        pricesOk = pricesOk && mean.median >= kGoalPriceMeanPermille;
+        prices += std::format("{}{} {:.2f}x", r == 0 ? "" : ", ", content.resources[r].id,
+                              static_cast<double>(mean.median) / 1000.0);
+    }
+    checks.push_back({"mean_prices", pricesOk,
+                      std::format("mean price over base, median seed: {} (goal: {:.2f}x or more)",
+                                  prices, static_cast<double>(kGoalPriceMeanPermille) / 1000.0),
+                      false});
+
+    const bool lifeMeasured = options.days > kMineLifeCohortDays;
+    const std::vector<std::int64_t> lives = pooledMineLives(rows);
+    const Spread life = spreadOf(lives);
+    const bool lifeOk = !lives.empty() && life.median >= kGoalMineLifeMinDays &&
+                        life.median <= kGoalMineLifeMaxDays;
+    checks.push_back(
+        {"median_mine_life", !lifeMeasured || lifeOk,
+         lifeMeasured
+             ? std::format(
+                   "median days from opening to depletion, {} mines opened in the first "
+                   "{} days: {} (goal: {} to {})",
+                   lives.size(), options.days - kMineLifeCohortDays,
+                   life.median > options.days ? std::string("never") : std::to_string(life.median),
+                   kGoalMineLifeMinDays, kGoalMineLifeMaxDays)
+             : std::format("not evaluated: the run is not longer than {} days",
+                           kMineLifeCohortDays),
+         false});
+
+    const bool yearMeasured = options.days >= kGoalLandYear * sim::kDaysPerYear;
+    const auto undepleted = std::count_if(
+        rows.begin(), rows.end(), [](const SweepRow& r) { return r.depletedByGoalYear == 0; });
+    checks.push_back(
+        {"depletion_by_year_8", !yearMeasured || undepleted == 0,
+         yearMeasured
+             ? std::format("{} of {} seeds had no depleted mine by year {} (goal: none)",
+                           undepleted, seeds, kGoalLandYear)
+             : std::format("not evaluated: the run is shorter than {} years", kGoalLandYear),
+         kGateContest});
+
+    const Spread withdrawn =
+        spreadOver(rows, [](const SweepRow& r) { return r.withdrawn.at(kSweepYears.size() - 1); });
+    checks.push_back(
+        {"withdrawn_land_at_year_8", !yearMeasured || withdrawn.median <= kGoalWithdrawnYear8,
+         yearMeasured
+             ? std::format("median withdrawn plots at year {}: {} (goal: {} or fewer)",
+                           kGoalLandYear, withdrawn.median, kGoalWithdrawnYear8)
+             : std::format("not evaluated: the run is shorter than {} years", kGoalLandYear),
+         false});
 }
 
 void printSweepRows(const Options& options, const std::vector<SweepRow>& rows) {
@@ -600,16 +904,58 @@ void printSweepRows(const Options& options, const std::vector<SweepRow>& rows) {
             "    {{\"seed\": {}, \"opening_mineable\": {}, \"opening_locked\": {}, "
             "\"longest_region_run\": {}, \"last_new_listing_day\": {}, \"unlisted\": [{}], "
             "\"withdrawn\": [{}], \"first_mine_started_day\": {}, "
-            "\"first_mine_operating_day\": {}, \"final_cash\": [{}]}}{}\n",
+            "\"first_mine_operating_day\": {}, \"final_cash\": [{}], {}}}{}\n",
             row.seed, row.openingMineable, row.openingLocked, row.longestRegionRun,
             row.lastNewListingDay, sampleList(row.unlisted, options.days),
             sampleList(row.withdrawn, options.days), row.firstMineStartedDay,
-            row.firstMineOperatingDay, cash, i + 1 < rows.size() ? "," : "");
+            row.firstMineOperatingDay, cash, contestJson(options, row),
+            i + 1 < rows.size() ? "," : "");
     }
 }
 
-void printSweep(const Options& options, const std::vector<SweepRow>& rows,
-                const std::vector<Check>& checks, bool allPassed) {
+// The spec 006 lines of the summary, which end it.
+void printContestSummary(const Options& options, const sim::Content& content,
+                         const std::vector<SweepRow>& rows) {
+    const auto line = [](std::string_view name, const Spread& spread) {
+        std::cout << std::format("    {}: {},\n", jsonString(name), spreadJson(spread));
+    };
+    const std::size_t companies = rows.empty() ? 0 : rows.front().finalCashCents.size();
+    for (std::size_t c = 0; c < companies; ++c) {
+        line(std::format("mines_built_{}", c),
+             spreadOver(rows, [c](const SweepRow& r) { return minesAtEnd(r, c); }));
+    }
+    // kNoContestPercent in a seed where a company never built a mine.
+    line("mines_leader_over_trailer_percent", spreadOver(rows, minesRatioPercent));
+    const std::size_t resources = rows.empty() ? 0 : rows.front().priceMeanPermille.size();
+    for (std::size_t r = 0; r < resources; ++r) {
+        line(std::format("price_mean_permille_{}", content.resources[r].id),
+             spreadOver(rows, [r](const SweepRow& row) { return row.priceMeanPermille[r]; }));
+    }
+    line("first_depletion_day", spreadOver(rows, [&](const SweepRow& r) {
+             return dayOrNever(r.firstDepletionDay, options.days);
+         }));
+    // Unmeasured figures are null, never zero: depletion by a year the run
+    // stops short of, and the life of a cohort with no mines in it.
+    const auto lineOrNull = [&](const std::string& name, bool measured, const Spread& spread) {
+        if (measured) {
+            line(name, spread);
+        } else {
+            std::cout << std::format("    {}: null,\n", jsonString(name));
+        }
+    };
+    lineOrNull(std::format("depleted_by_y{}", kGoalLandYear),
+               options.days >= kGoalLandYear * sim::kDaysPerYear,
+               spreadOver(rows, [](const SweepRow& r) { return r.depletedByGoalYear; }));
+    lineOrNull("cohort_mine_life_days", !pooledMineLives(rows).empty(),
+               spreadOf(pooledMineLives(rows)));
+    std::cout << std::format("    \"cohort_mines\": {},\n    \"seeds_with_bankruptcy\": {}\n",
+                             pooledMineLives(rows).size(),
+                             std::count_if(rows.begin(), rows.end(), anyBankrupt));
+}
+
+void printSweep(const Options& options, const sim::Content& content,
+                const std::vector<SweepRow>& rows, const std::vector<Check>& checks,
+                bool allPassed) {
     std::cout << std::format(
         "{{\n  \"sweep\": {{\"first_seed\": {}, \"seeds\": {}, \"days\": {}, "
         "\"ai\": {}}},\n  \"rows\": [\n",
@@ -655,9 +1001,9 @@ void printSweep(const Options& options, const std::vector<SweepRow>& rows,
     for (std::size_t c = 0; c < companies; ++c) {
         // Whole currency units: a spread of cents reads badly at this size.
         line(std::format("final_cash_{}", c),
-             spreadOver(rows, [c](const SweepRow& r) { return r.finalCashCents[c] / 100; }),
-             c + 1 == companies);
+             spreadOver(rows, [c](const SweepRow& r) { return r.finalCashCents[c] / 100; }));
     }
+    printContestSummary(options, content, rows);
     std::cout << "  },\n  \"never_day\": " << std::int64_t{options.days} + 1
               << ",\n  \"checks\": [\n";
     for (std::size_t i = 0; i < checks.size(); ++i) {
@@ -677,10 +1023,11 @@ int runSweep(const Options& options, const sim::Content& content) {
     for (std::uint32_t i = 0; i < options.sweep; ++i) {
         rows.push_back(sweepSeed(options, content, options.seed + i));
     }
-    const std::vector<Check> checks = sweepChecks(options, rows);
+    std::vector<Check> checks = sweepChecks(options, rows);
+    contestChecks(options, content, rows, checks);
     const bool allPassed = std::ranges::all_of(
         checks, [](const Check& check) { return check.passed || !check.gated; });
-    printSweep(options, rows, checks, allPassed);
+    printSweep(options, content, rows, checks, allPassed);
     if (!options.csvPath.empty()) {
         std::ofstream csv(options.csvPath);
         writeSweepCsv(csv, rows, options.days);

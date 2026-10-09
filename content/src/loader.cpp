@@ -664,7 +664,7 @@ void parseDeposits(const Node& region, const sim::Content& content, sim::RegionD
             continue;
         }
         const Node node(item.value(), path, sink);
-        node.allowKeys({"presence_prob", "tonnes_median", "tonnes_spread"});
+        node.allowKeys({"presence_prob", "tonnes_median", "tonnes_spread", "tonnes_max_mult"});
         sim::DepositPrior prior;
         prior.resource = resource;
         prior.presenceProb =
@@ -675,6 +675,9 @@ void parseDeposits(const Node& region, const sim::Content& content, sim::RegionD
         prior.tonnesSpread =
             valueOr(node.fixed("tonnes_spread", true, sim::Fixed::one(), sim::Fixed::fromInt(20)),
                     sim::Fixed::one());
+        prior.tonnesMaxMult = valueOr(
+            node.fixed("tonnes_max_mult", true, sim::Fixed::one(), sim::Fixed::fromInt(1'000'000)),
+            sim::Fixed::one());
         def.deposits.push_back(prior);
     }
 }
@@ -790,6 +793,7 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "plots_listed_per_month",
                     "opening_min_mineable",
                     "opening_max_locked_region",
+                    "opening_mineable_presence",
                     "max_unsold_rounds",
                     "relist_cooldown_days",
                     "bankruptcy_grace_months",
@@ -844,6 +848,9 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     }
     balance.openingMaxLockedRegion = static_cast<std::uint32_t>(
         valueOr(node.integer("opening_max_locked_region", true, 0, 1000), 0LL));
+    balance.openingMineablePresence = valueOr(
+        node.fixed("opening_mineable_presence", true, sim::Fixed::zero(), sim::Fixed::one()),
+        sim::Fixed::one());
     balance.maxUnsoldRounds =
         static_cast<std::uint32_t>(valueOr(node.integer("max_unsold_rounds", true, 0, 100), 0LL));
     balance.relistCooldownDays = static_cast<sim::Day>(valueOr(
@@ -883,6 +890,52 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
             valueOr(policy->money("floor_price", true, zero), zero);
     }
     balance.defaultCoverCosts = valueOr(node.boolean("default_cover_costs", true), false);
+}
+
+// The built-in competitor's tuning (ai.json, spec 006). Every key is
+// required and bounded: the controller trusts these numbers.
+void parseAi(const json& document, sim::AiParams& ai, ErrorSink& sink) {
+    if (!document.is_object()) {
+        sink.add("", "expected a top-level object, got " + std::string(typeName(document)));
+        return;
+    }
+    const Node node(document, "", sink);
+    node.allowKeys({"sell_above_base", "dump_storage_share", "recoverable_share", "required_return",
+                    "payback_horizon_days", "bid_premium", "bid_premium_high", "max_open_prospects",
+                    "reopen_margin", "idle_mine_grace_days", "opex_reserve_days", "cash_reserve",
+                    "research_floor", "loan_floor", "loan_chunk", "bootstrap_loan",
+                    "first_mine_recoverable_share", "first_mine_required_return",
+                    "supply_discount"});
+    const sim::Fixed zero = sim::Fixed::zero();
+    const sim::Fixed one = sim::Fixed::one();
+    const sim::Fixed ten = sim::Fixed::fromInt(10);
+    const sim::Money none = sim::Money::zero();
+    ai.sellAboveBase = valueOr(node.fixed("sell_above_base", true, zero, ten), one);
+    ai.dumpStorageShare = valueOr(node.fixed("dump_storage_share", true, zero, one), one);
+    ai.recoverableShare = valueOr(node.fixed("recoverable_share", true, zero, one), one);
+    ai.requiredReturn = valueOr(node.fixed("required_return", true, one, ten), one);
+    ai.firstMineRecoverableShare =
+        valueOr(node.fixed("first_mine_recoverable_share", true, zero, one), one);
+    ai.firstMineRequiredReturn =
+        valueOr(node.fixed("first_mine_required_return", true, one, ten), one);
+    ai.supplyDiscount = valueOr(node.fixed("supply_discount", true, zero, one), zero);
+    ai.paybackHorizonDays = valueOr(node.integer("payback_horizon_days", true, 1, kMaxDays), 1LL);
+    ai.bidPremium = valueOr(node.fixed("bid_premium", true, one, ten), one);
+    ai.bidPremiumHigh = valueOr(node.fixed("bid_premium_high", true, one, ten), one);
+    if (ai.bidPremiumHigh < ai.bidPremium) {
+        node.report("bid_premium_high", "must not be below bid_premium");
+    }
+    ai.maxOpenProspects =
+        static_cast<std::uint32_t>(valueOr(node.integer("max_open_prospects", true, 1, 1000), 1LL));
+    ai.reopenMargin = valueOr(node.fixed("reopen_margin", true, one, ten), one);
+    ai.idleMineGraceDays = static_cast<sim::Day>(
+        valueOr(node.integer("idle_mine_grace_days", true, 0, kMaxDays), 0LL));
+    ai.opexReserveDays = valueOr(node.integer("opex_reserve_days", true, 0, 3600), 0LL);
+    ai.cashReserve = valueOr(node.money("cash_reserve", true, none), none);
+    ai.researchFloor = valueOr(node.money("research_floor", true, none), none);
+    ai.loanFloor = valueOr(node.money("loan_floor", true, none), none);
+    ai.loanChunk = valueOr(node.money("loan_chunk", true, sim::Money::fromCents(1)), none);
+    ai.bootstrapLoan = valueOr(node.money("bootstrap_loan", true, sim::Money::fromCents(1)), none);
 }
 
 // ---------------------------------------------------------------------------
@@ -1140,6 +1193,11 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.loan_blocked_credit", "amount,min"},
     {"ui.loan_blocked_count", "count"},
     {"ui.log_empty", ""},
+    {"ui.sale_over", "percent"},
+    {"ui.sale_at_ask", ""},
+    {"ui.sale_buyer_you", ""},
+    {"ui.no_sales", ""},
+    {"ui.panel_sale", "day,paid,over"},
 });
 
 // Names of the {placeholders} a template uses. Braces that do not form a
@@ -1310,6 +1368,7 @@ LoadResult loadFromStrings(const Sources& sources) {
     ErrorSink regionSink(result.errors, kRegionsFile);
     ErrorSink eventSink(result.errors, kEventsFile);
     ErrorSink balanceSink(result.errors, kBalanceFile);
+    ErrorSink aiSink(result.errors, kAiFile);
     ErrorSink stringsSink(result.errors, kStringsFile);
 
     std::vector<std::string> unlockedByNames;
@@ -1329,6 +1388,9 @@ LoadResult loadFromStrings(const Sources& sources) {
     }
     if (const auto document = parseDocument(sources.balance, balanceSink)) {
         parseBalance(*document, content.balance, balanceSink);
+    }
+    if (const auto document = parseDocument(sources.ai, aiSink)) {
+        parseAi(*document, content.ai, aiSink);
     }
     // Last: the per-id keys depend on the event and tech ids parsed above.
     if (const auto document = parseDocument(sources.strings, stringsSink)) {
@@ -1357,6 +1419,7 @@ LoadResult loadFromDirectory(const std::filesystem::path& directory) {
     read(kRegionsFile, sources.regions);
     read(kEventsFile, sources.events);
     read(kBalanceFile, sources.balance);
+    read(kAiFile, sources.ai);
     read(kStringsFile, sources.strings);
     if (!errors.empty()) {
         LoadResult result;
