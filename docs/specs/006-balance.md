@@ -364,3 +364,82 @@ Market rules.
   CTest run the cohort is 21 mines.
 - 2026-10-09 (build, step 5): the wind-down rule stays unbuilt: with no
   bankruptcy in 150 seeds there is nothing for it to prevent.
+- 2026-10-09 (build, step 3, client): the sales record sits inside the
+  For sale sheet, under the land-horizon line, as a second small table
+  (Plot, Sold to, Paid, Against the ask, Closed) with a caption, not as a
+  new numbered sheet: the locked design numbers the Plots tab's sheets 01
+  to 05 and this spec adds no screen. A row selects its plot. The panel of
+  a sold plot gains a "Sold" line ("day 45, $1.14M, 16% over the ask").
+  A survey estimate above twice its region's median carries "major
+  deposit" on the panel, and a for-sale row does when the ore is one the
+  player can mine. The percentage is rounded to the nearest whole number
+  (the premium is a truncated ratio, so a bid of exactly 16% over is
+  stored as 0.159999). The layout probe checks an empty record on a fresh
+  game and the player's own purchase at 50% over after the first auction;
+  its scenario did not need retuning. Not checked on a screen: this build
+  ran headless, so how the new table reads in the real window is for the
+  owner's playtest.
+- 2026-10-09 (build, prose): five strings. Four are cells and stay as
+  drafted ("{percent}% over the ask", "at the ask", "You", "day {day},
+  {paid}, {over}"), the first because the spec quotes it. The one
+  sentence went through agy: "No land has sold yet." became "No land sold
+  yet. Nothing down in the ledger." "Major deposit" and the table headers
+  are literals in `main.rml`, like the other chips and headers.
+- 2026-10-09 (build): things the spec's text says that the build does
+  differently, in one place: 40-plot regions and every item under "Not
+  changed" are untouched; `WorldState` keeps no separate 16-entry list
+  (one field on `Auction` instead); the first-mine delay was a biased bid
+  offset, fixed in code, not the return test; the wind-down rule is not
+  built; deposit medians are higher than the draft's starting values; the
+  price and withdrawn-land targets are missed and reported.
+- 2026-10-09 (review): Codex reviewed the diff and this spec. It found
+  correct: the first-mine helpers applied at every use of the return
+  multiple and the haircut, and `view.mines.empty()` as the test; the bid
+  hash's 32-bit wraparound as deterministic; the valuation's clamp and
+  its checked product; the new auction checks; the fingerprint covering
+  all nineteen AI knobs, the threshold and the cap; no read of hidden
+  state from the view; the bankruptcy allowance of one in a ten-seed
+  sweep. Applied:
+  - The view's sales record assumed auctions close in the order they are
+    stored. True of every generated state, but nothing enforced it on
+    load. `validateAuctions` now rejects a save whose auctions are not in
+    opening and closing order; the test compares the record with the last
+    sixteen settled auctions exactly and loads a shuffled save.
+  - A region whose only unlocked ore has a presence of zero counted as
+    mineable when `opening_mineable_presence` was zero. The classifier
+    now requires a presence above zero. Test added.
+  - "Major deposit" missed the first tonne over twice the median (201
+    against a median of 100). The comparison is exact now; the test uses
+    twice the median plus one.
+  - The first-mine test could pass if the AI bought a second plot on the
+    wrong terms, or built no mine at all. Replaced by a hand-built view
+    of one surveyed plot, decided with and without a mine, once for the
+    return multiple and once for the haircut.
+  - Runner: a seed where a company never builds a mine is no contest and
+    now fails the ratio (it used to count the trailer as one mine, so
+    2 against 0 read 2.0x and passed); a one-company sweep says "not
+    evaluated"; a mine that ran out and was later closed by bankruptcy
+    keeps its measured life; depletion by year 8 and an empty cohort
+    print `null` in short runs instead of zero; mean price is computed as
+    sum x 1000 / (days x base) with one truncation instead of rounding
+    the mean to whole cents first.
+  Declined:
+  - "`sampleTonnes` can abort before the cap is applied (median 1e15,
+    spread 20)." The loader bounds the median at 1e12 and the spread at
+    20, and the draw at three sigma: 1e12 x 8,000 x 2 for area is 1.6e16,
+    inside 64 bits. The multiplication is unchanged from before this
+    spec; the cap only lowers its result.
+  - A wider accumulator for the runner's price sum. It saturates only at
+    prices no content bound allows (the cap is a multiple of base) over a
+    run of any permitted length.
+  - A sale above a zero ask reads "at the ask". Land listed at zero needs
+    a region whose `land_price` is zero; no shipped or planned region has
+    one, and the premium of such a sale is undefined rather than large.
+    Worth a string of its own if free land ever exists.
+- 2026-10-09 (verify): after the review fixes the 50-seed sweep is
+  unchanged (228, 0 of 50, 1.08x, 2,167 days, 37 withdrawn) and every
+  gate passes; the ten-seed CTest reads 227, 0 of 10 and 1.10x. Tests:
+  212 in debug, asan and release, 213 in debug-game (the layout probe).
+  clang-format and clang-tidy clean on the changed sources. Not run: the
+  Windows build and the CI matrix (the branch is not pushed), and the
+  client on a real display.

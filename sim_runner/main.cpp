@@ -514,8 +514,9 @@ void finishContest(const Options& options, const sim::Content& content,
             mine.operationalDay > options.days - kMineLifeCohortDays) {
             continue;
         }
-        // A mine closed by its owner's bankruptcy says nothing about deposits.
-        if (mine.state == sim::MineState::Closed) {
+        // A mine closed by its owner's bankruptcy before it ran out says
+        // nothing about deposits; one that ran out first keeps its life.
+        if (mine.state == sim::MineState::Closed && row.depletedDay[m] == 0) {
             continue;
         }
         row.mineLives.push_back(row.depletedDay[m] == 0
@@ -523,9 +524,14 @@ void finishContest(const Options& options, const sim::Content& content,
                                     : std::int64_t{row.depletedDay[m]} - mine.operationalDay);
     }
     for (std::size_t r = 0; r < row.priceSumCents.size(); ++r) {
-        const std::int64_t mean = row.priceSumCents[r] / std::int64_t{options.days};
+        // sum x 1000 / (days x base), truncated once, so a cheap ore's mean
+        // is not rounded to whole cents first. The sum saturates only at
+        // prices no content bound allows over a run of any permitted length.
+        const std::int64_t base = content.resources[r].basePrice.cents();
+        const std::int64_t span =
+            sim::checkedMulDiv(base, std::int64_t{options.days}, 1).value_or(0);
         row.priceMeanPermille.push_back(
-            sim::checkedMulDiv(mean, 1000, content.resources[r].basePrice.cents()).value_or(0));
+            span > 0 ? sim::checkedMulDiv(row.priceSumCents[r], 1000, span).value_or(0) : 0);
     }
 }
 
@@ -633,8 +639,12 @@ std::uint32_t minesAtEnd(const SweepRow& row, std::size_t company) {
     return row.minesBuilt[company].at(kMineSamples - 1);
 }
 
+// The ratio of a seed in which some company never built a mine: there is no
+// contest to measure, and it must fail any limit. Larger than any real ratio.
+constexpr std::int64_t kNoContestPercent = 1'000'000'000;
+
 // Mines ever built by the company with most over the company with fewest, as
-// a percentage; a company with none counts as one so the ratio stays finite.
+// a percentage. A bankrupt company keeps the mines it built.
 std::int64_t minesRatioPercent(const SweepRow& row) {
     std::uint32_t leader = 0;
     std::uint32_t trailer = std::numeric_limits<std::uint32_t>::max();
@@ -642,8 +652,10 @@ std::int64_t minesRatioPercent(const SweepRow& row) {
         leader = std::max(leader, minesAtEnd(row, c));
         trailer = std::min(trailer, minesAtEnd(row, c));
     }
-    return row.minesBuilt.empty() ? 100
-                                  : std::int64_t{leader} * 100 / std::max<std::int64_t>(trailer, 1);
+    if (row.minesBuilt.empty() || trailer == 0) {
+        return kNoContestPercent;
+    }
+    return std::int64_t{leader} * 100 / std::int64_t{trailer};
 }
 
 bool anyBankrupt(const SweepRow& row) {
@@ -680,12 +692,32 @@ std::string contestJson(const Options& options, const SweepRow& row) {
         prices += std::format("{}{:.3f}", prices.empty() ? "" : ", ",
                               static_cast<double>(permille) / 1000.0);
     }
+    // A run that stops short of year 8 has not measured depletion by then.
+    const std::string depleted = options.days >= kGoalLandYear * sim::kDaysPerYear
+                                     ? std::to_string(row.depletedByGoalYear)
+                                     : std::string("null");
     return std::format(
         "\"mines_built\": [{}], \"mines_by_state\": [{}], \"bankrupt_day\": [{}], "
         "\"first_depletion_day\": {}, \"depleted_by_y{}\": {}, "
         "\"cohort_mines\": {}, \"price_mean\": [{}]",
-        built, states, joined(row.bankruptDay), row.firstDepletionDay, kGoalLandYear,
-        row.depletedByGoalYear, row.mineLives.size(), prices);
+        built, states, joined(row.bankruptDay), row.firstDepletionDay, kGoalLandYear, depleted,
+        row.mineLives.size(), prices);
+}
+
+// The spec 006 columns of one CSV row.
+void writeContestCsv(std::ostream& csv, const SweepRow& row, sim::Day days) {
+    for (std::size_t c = 0; c < row.minesBuilt.size(); ++c) {
+        csv << ',' << minesAtEnd(row, c) << ','
+            << row.minesByState[c].at(static_cast<std::size_t>(sim::MineState::Operating)) << ','
+            << row.bankruptDay[c];
+    }
+    csv << ',' << row.firstDepletionDay << ',';
+    if (days >= kGoalLandYear * sim::kDaysPerYear) {
+        csv << row.depletedByGoalYear;
+    }
+    for (const std::int64_t permille : row.priceMeanPermille) {
+        csv << ',' << permille;
+    }
 }
 
 void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows, sim::Day days) {
@@ -726,15 +758,7 @@ void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows, sim::Da
         for (const std::int64_t cents : row.finalCashCents) {
             csv << ',' << sim::toString(sim::Money::fromCents(cents));
         }
-        for (std::size_t c = 0; c < row.minesBuilt.size(); ++c) {
-            csv << ',' << minesAtEnd(row, c) << ','
-                << row.minesByState[c].at(static_cast<std::size_t>(sim::MineState::Operating))
-                << ',' << row.bankruptDay[c];
-        }
-        csv << ',' << row.firstDepletionDay << ',' << row.depletedByGoalYear;
-        for (const std::int64_t permille : row.priceMeanPermille) {
-            csv << ',' << permille;
-        }
+        writeContestCsv(csv, row, days);
         csv << '\n';
     }
 }
@@ -794,13 +818,24 @@ void contestChecks(const Options& options, const sim::Content& content,
                                   bankrupt, seeds, allowed),
                       kGateContest});
 
+    // A contest needs two companies; with one there is nothing to compare.
+    const bool contested = options.aiCompanies >= 1;
     const Spread ratio = spreadOver(rows, minesRatioPercent);
-    checks.push_back({"mines_leader_over_trailer", ratio.median <= kGateMinesRatioPercent,
-                      std::format("mines built, leader over trailer, median seed: {:.2f}x (goal: "
-                                  "at most {:.1f}x; gate: {:.1f}x)",
-                                  static_cast<double>(ratio.median) / 100.0,
-                                  static_cast<double>(kGoalMinesRatioPercent) / 100.0,
-                                  static_cast<double>(kGateMinesRatioPercent) / 100.0),
+    std::string ratioDetail = "not evaluated: the sweep has one company (use --ai 1 or more)";
+    if (contested && ratio.median >= kNoContestPercent) {
+        ratioDetail =
+            "in the median seed a company never built a mine (goal: leader over "
+            "trailer at most 2.5x)";
+    } else if (contested) {
+        ratioDetail = std::format(
+            "mines built, leader over trailer, median seed: {:.2f}x (goal: "
+            "at most {:.1f}x; gate: {:.1f}x)",
+            static_cast<double>(ratio.median) / 100.0,
+            static_cast<double>(kGoalMinesRatioPercent) / 100.0,
+            static_cast<double>(kGateMinesRatioPercent) / 100.0);
+    }
+    checks.push_back({"mines_leader_over_trailer",
+                      !contested || ratio.median <= kGateMinesRatioPercent, ratioDetail,
                       kGateContest});
 
     bool pricesOk = true;
@@ -878,6 +913,46 @@ void printSweepRows(const Options& options, const std::vector<SweepRow>& rows) {
     }
 }
 
+// The spec 006 lines of the summary, which end it.
+void printContestSummary(const Options& options, const sim::Content& content,
+                         const std::vector<SweepRow>& rows) {
+    const auto line = [](std::string_view name, const Spread& spread) {
+        std::cout << std::format("    {}: {},\n", jsonString(name), spreadJson(spread));
+    };
+    const std::size_t companies = rows.empty() ? 0 : rows.front().finalCashCents.size();
+    for (std::size_t c = 0; c < companies; ++c) {
+        line(std::format("mines_built_{}", c),
+             spreadOver(rows, [c](const SweepRow& r) { return minesAtEnd(r, c); }));
+    }
+    // kNoContestPercent in a seed where a company never built a mine.
+    line("mines_leader_over_trailer_percent", spreadOver(rows, minesRatioPercent));
+    const std::size_t resources = rows.empty() ? 0 : rows.front().priceMeanPermille.size();
+    for (std::size_t r = 0; r < resources; ++r) {
+        line(std::format("price_mean_permille_{}", content.resources[r].id),
+             spreadOver(rows, [r](const SweepRow& row) { return row.priceMeanPermille[r]; }));
+    }
+    line("first_depletion_day", spreadOver(rows, [&](const SweepRow& r) {
+             return dayOrNever(r.firstDepletionDay, options.days);
+         }));
+    // Unmeasured figures are null, never zero: depletion by a year the run
+    // stops short of, and the life of a cohort with no mines in it.
+    const auto lineOrNull = [&](const std::string& name, bool measured, const Spread& spread) {
+        if (measured) {
+            line(name, spread);
+        } else {
+            std::cout << std::format("    {}: null,\n", jsonString(name));
+        }
+    };
+    lineOrNull(std::format("depleted_by_y{}", kGoalLandYear),
+               options.days >= kGoalLandYear * sim::kDaysPerYear,
+               spreadOver(rows, [](const SweepRow& r) { return r.depletedByGoalYear; }));
+    lineOrNull("cohort_mine_life_days", !pooledMineLives(rows).empty(),
+               spreadOf(pooledMineLives(rows)));
+    std::cout << std::format("    \"cohort_mines\": {},\n    \"seeds_with_bankruptcy\": {}\n",
+                             pooledMineLives(rows).size(),
+                             std::count_if(rows.begin(), rows.end(), anyBankrupt));
+}
+
 void printSweep(const Options& options, const sim::Content& content,
                 const std::vector<SweepRow>& rows, const std::vector<Check>& checks,
                 bool allPassed) {
@@ -928,25 +1003,7 @@ void printSweep(const Options& options, const sim::Content& content,
         line(std::format("final_cash_{}", c),
              spreadOver(rows, [c](const SweepRow& r) { return r.finalCashCents[c] / 100; }));
     }
-    for (std::size_t c = 0; c < companies; ++c) {
-        line(std::format("mines_built_{}", c),
-             spreadOver(rows, [c](const SweepRow& r) { return minesAtEnd(r, c); }));
-    }
-    line("mines_leader_over_trailer_percent", spreadOver(rows, minesRatioPercent));
-    const std::size_t resources = rows.empty() ? 0 : rows.front().priceMeanPermille.size();
-    for (std::size_t r = 0; r < resources; ++r) {
-        line(std::format("price_mean_permille_{}", content.resources[r].id),
-             spreadOver(rows, [r](const SweepRow& row) { return row.priceMeanPermille[r]; }));
-    }
-    line("first_depletion_day", spreadOver(rows, [&](const SweepRow& r) {
-             return dayOrNever(r.firstDepletionDay, options.days);
-         }));
-    line(std::format("depleted_by_y{}", kGoalLandYear),
-         spreadOver(rows, [](const SweepRow& r) { return r.depletedByGoalYear; }));
-    line("cohort_mine_life_days", spreadOf(pooledMineLives(rows)));
-    std::cout << std::format("    \"cohort_mines\": {},\n    \"seeds_with_bankruptcy\": {}\n",
-                             pooledMineLives(rows).size(),
-                             std::count_if(rows.begin(), rows.end(), anyBankrupt));
+    printContestSummary(options, content, rows);
     std::cout << "  },\n  \"never_day\": " << std::int64_t{options.days} + 1
               << ",\n  \"checks\": [\n";
     for (std::size_t i = 0; i < checks.size(); ++i) {

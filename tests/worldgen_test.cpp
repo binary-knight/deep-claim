@@ -107,6 +107,15 @@ TEST_CASE("The mineable threshold comes from the balance data", "[worldgen][open
         REQUIRE(isPermutation(state.listingQueue, state.plots.size()));
         CHECK(shapeOf(content, state).handMineable == 0);
     }
+    // A threshold of zero means any chance at all, never an ore that cannot
+    // turn up: a listed deposit with no probability makes nothing mineable.
+    content.balance.openingMineablePresence = sim::Fixed::zero();
+    sim::RegionDef never = content.regions[1];
+    never.deposits.push_back(
+        {sim::ResourceId(1), sim::Fixed::zero(), 30'000, sim::Fixed::fromInt(2)});
+    CHECK(sim::classifyRegionAtStart(content, never) == sim::RegionStart::Locked);
+    never.deposits.back().presenceProb = sim::Fixed::fromRaw(1);
+    CHECK(sim::classifyRegionAtStart(content, never) == sim::RegionStart::Mineable);
     // A low threshold makes a long-shot ore count.
     content.balance.openingMineablePresence = sim::Fixed::fromRatio(1, 10);
     sim::RegionDef mixed = content.regions[1];

@@ -226,7 +226,10 @@ RegionStart classifyRegionAtStart(const Content& content, const RegionDef& regio
             fatal("classifyRegionAtStart: a deposit names a resource that does not exist");
         }
         const bool lockedOre = content.resources[prior.resource.index()].unlockedBy.valid();
-        if (!lockedOre && prior.presenceProb >= content.balance.openingMineablePresence) {
+        // An ore that never turns up makes nothing mineable, whatever the
+        // threshold: a threshold of zero means "any chance", not "none".
+        if (!lockedOre && prior.presenceProb > Fixed::zero() &&
+            prior.presenceProb >= content.balance.openingMineablePresence) {
             return RegionStart::Mineable;
         }
         hasLocked = hasLocked || lockedOre;

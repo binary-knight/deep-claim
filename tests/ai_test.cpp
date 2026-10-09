@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -231,22 +232,99 @@ TEST_CASE("A company with no mine buys on the first-mine terms", "[ai]") {
     for (sim::Seed seed = 1; seed <= 4; ++seed) {
         CHECK(firstBidDay(content, seed, sim::kDaysPerYear) == sim::kDaysPerYear);
     }
+}
 
-    // And once it has a mine the general terms apply: with those unmeetable
-    // it builds its first mine and never buys a second plot.
-    content.ai.firstMineRequiredReturn = sim::Fixed::one();
-    for (sim::Seed seed = 1; seed <= 4; ++seed) {
-        sim::Simulation simulation(content, seed, test::setup());
-        sim::HeuristicController ai(content);
-        std::uint32_t rejections = 0;
-        playYears(simulation, ai, sim::kDaysPerYear * 6, rejections);
-        const sim::CompanyView view = simulation.view(kRival);
-        CHECK(view.mines.size() <= view.companies[1].plotsOwned);
-        // Bids placed before the first mine existed may all win, so a few
-        // plots are possible; a company on general terms of 1000x buys none
-        // after that, which keeps it far below what six years allow.
-        CHECK(view.companies[1].plotsOwned <= 4);
+namespace {
+
+// A hand-built view for the rival: one listed plot at an ask of 1M with a
+// 2M mine quote, surveyed at `tonnes` of iron, and cash for anything. In the
+// fixture iron sells at 60 and a mine costs 8,000 a day for 400 t, so every
+// recoverable tonne is worth 34 after opex (60 less 8,000 x 1.3 / 400).
+sim::CompanyView prospectView(const sim::Content& content, std::int64_t tonnes, bool hasMine) {
+    sim::CompanyView view;
+    view.me = kRival;
+    view.day = 30;
+    view.cash = sim::Money::fromUnits(20'000'000);
+    view.loanCapacity = content.balance.loanMaxPrincipal;
+    view.mineOpexQuote = content.balance.mineOpexPerDay;
+    view.inventoryTonnes.assign(content.resources.size(), 0);
+    for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
+        sim::MarketView market;
+        market.resource = sim::ResourceId(r);
+        market.price = content.resources[r].basePrice;
+        market.basePrice = content.resources[r].basePrice;
+        market.baseDemandTonnesPerDay = content.resources[r].baseDemandTonnesPerDay;
+        view.markets.push_back(market);
     }
+    view.companies.resize(2);
+    sim::PlotView plot;
+    plot.id = sim::PlotId(0);
+    plot.region = sim::RegionId(0);
+    plot.areaHectares = 500;
+    plot.askPrice = sim::Money::fromUnits(1'000'000);
+    plot.listing = sim::PlotListing::Listed;
+    plot.auction = sim::AuctionView{sim::AuctionId(0), 60, 0, sim::Money::zero()};
+    plot.mineCapexQuote = sim::Money::fromUnits(2'000'000);
+    view.plots.push_back(plot);
+    sim::SurveyView survey;
+    survey.id = sim::SurveyId(0);
+    survey.plot = plot.id;
+    survey.completesDay = 25;
+    survey.complete = true;
+    survey.estimates.push_back({sim::ResourceId(0), tonnes, sim::Fixed::fromRatio(1, 2), false});
+    view.surveys.push_back(survey);
+    if (hasMine) {
+        // A mine elsewhere, too new to be judged, producing nothing yet.
+        sim::MineView mine;
+        mine.id = sim::MineId(0);
+        mine.state = sim::MineState::Operating;
+        mine.operationalDay = view.day;
+        mine.lastOutputTonnes.assign(content.resources.size(), 0);
+        view.mines.push_back(mine);
+    }
+    return view;
+}
+
+bool bids(const sim::Content& content, const sim::CompanyView& view) {
+    sim::HeuristicController ai(content);
+    std::vector<sim::Command> out;
+    ai.decide(view, out);
+    return std::any_of(out.begin(), out.end(), [](const sim::Command& command) {
+        return std::holds_alternative<sim::BidOnPlot>(command);
+    });
+}
+
+}  // namespace
+
+TEST_CASE("The same plot is bought without a mine and passed over with one", "[ai]") {
+    // 200,000 t of iron is worth 6.8M net at full recovery against an outlay
+    // of 3M (ask plus mine). The two cases differ only in owning a mine.
+    constexpr std::int64_t kTonnes = 200'000;
+
+    // The return multiple: 1 for a first mine (3M needed), 3 otherwise (9M).
+    sim::Content byReturn = test::makeContent();
+    byReturn.ai.recoverableShare = sim::Fixed::one();
+    byReturn.ai.firstMineRecoverableShare = sim::Fixed::one();
+    byReturn.ai.firstMineRequiredReturn = sim::Fixed::one();
+    byReturn.ai.requiredReturn = sim::Fixed::fromInt(3);
+    CHECK(bids(byReturn, prospectView(byReturn, kTonnes, false)));
+    CHECK_FALSE(bids(byReturn, prospectView(byReturn, kTonnes, true)));
+    // With the general multiple as easy, the mine owner buys too.
+    byReturn.ai.requiredReturn = sim::Fixed::one();
+    CHECK(bids(byReturn, prospectView(byReturn, kTonnes, true)));
+
+    // The tonnage haircut: all of it for a first mine, a tenth otherwise
+    // (0.68M, under the 3M outlay), with both return multiples at 1.
+    sim::Content byShare = test::makeContent();
+    byShare.ai.requiredReturn = sim::Fixed::one();
+    byShare.ai.firstMineRequiredReturn = sim::Fixed::one();
+    byShare.ai.firstMineRecoverableShare = sim::Fixed::one();
+    byShare.ai.recoverableShare = sim::Fixed::fromRatio(1, 10);
+    CHECK(bids(byShare, prospectView(byShare, kTonnes, false)));
+    CHECK_FALSE(bids(byShare, prospectView(byShare, kTonnes, true)));
+    // And a first mine is held to its own haircut, not waved through.
+    byShare.ai.firstMineRecoverableShare = sim::Fixed::fromRatio(1, 10);
+    CHECK_FALSE(bids(byShare, prospectView(byShare, kTonnes, false)));
 }
 
 TEST_CASE("The AI stops acting once bankrupt", "[ai]") {

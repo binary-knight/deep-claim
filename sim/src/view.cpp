@@ -98,6 +98,16 @@ void addSales(const WorldState& state, CompanyView& view) {
     }
 }
 
+// More than kMajorDepositMult medians, exactly: the quotient and remainder
+// keep the comparison inside 64 bits for any estimate.
+bool isMajorDeposit(std::int64_t estimate, std::int64_t median) {
+    if (median <= 0) {
+        return false;
+    }
+    const std::int64_t whole = estimate / median;
+    return whole > kMajorDepositMult || (whole == kMajorDepositMult && estimate % median > 0);
+}
+
 // The median deposit of `resource` in `region`, zero when the region's
 // priors do not list it.
 std::int64_t regionalMedianTonnes(const Content& content, RegionId region, ResourceId resource) {
@@ -125,8 +135,7 @@ void addOwnSurveys(const Content& content, const WorldState& state, CompanyId vi
         const RegionId region = state.plots[survey.plot.index()].region;
         for (const SurveyEstimate& estimate : survey.estimates) {
             const std::int64_t median = regionalMedianTonnes(content, region, estimate.resource);
-            // Dividing keeps the comparison inside 64 bits for any estimate.
-            const bool major = median > 0 && estimate.tonnesEstimate / kMajorDepositMult > median;
+            const bool major = isMajorDeposit(estimate.tonnesEstimate, median);
             surveyView.estimates.push_back(
                 {estimate.resource, estimate.tonnesEstimate, estimate.relativeError, major});
         }

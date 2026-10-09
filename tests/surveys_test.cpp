@@ -189,8 +189,8 @@ TEST_CASE("A survey marks an estimate above twice the regional median as major",
     }
     REQUIRE(median > 0);
 
-    // Just over twice the median of its region is major; exactly twice is not.
-    estimate.tonnesEstimate = median * 2 + 2;
+    // One tonne over twice the median of its region is major; exactly twice is not.
+    estimate.tonnesEstimate = median * 2 + 1;
     REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
     REQUIRE(simulation.view(kPlayer).surveys.size() == 1);
     CHECK(simulation.view(kPlayer).surveys[0].estimates[0].major);

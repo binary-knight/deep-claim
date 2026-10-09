@@ -868,7 +868,10 @@ Client (all presentation of view data):
   newest settled auctions with the premium over the ask, `PlotView::sale`
   a sold plot's own, and `SurveyEstimateView::major` marks an estimate
   above twice the regional median. The Plots tab shows the newest five
-  sales under the for-sale table.
+  sales under the for-sale table. The record reads the auctions newest
+  first, so load validation now requires them in opening and closing
+  order (true of every generated state; the Codex review asked that it be
+  enforced).
 - **Golden hash.** `0x118a72ce0f57d9f7` to `0x2a5da3177ab7c69d`, once,
   for the auction field. Save format v1 gains it; the content fingerprint
   changes as well (AI knobs, deposit caps, prices), so saves and traces

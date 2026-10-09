@@ -304,10 +304,33 @@ TEST_CASE("The sales record keeps the sixteen most recent, newest first", "[mark
     REQUIRE(sold > sim::kRecentSales);
     const sim::CompanyView view = simulation.view(kRival);
     REQUIRE(view.recentSales.size() == sim::kRecentSales);
-    for (std::size_t i = 1; i < view.recentSales.size(); ++i) {
-        CHECK(view.recentSales[i - 1].day >= view.recentSales[i].day);
-        CHECK(view.recentSales[i].premium == sim::Fixed::zero());
+    // Exactly the last sixteen auctions that ended in a sale, newest first.
+    std::vector<const sim::Auction*> settled;
+    for (const sim::Auction& auction : simulation.state().auctions) {
+        if (auction.open == 0 && auction.winner.valid()) {
+            settled.push_back(&auction);
+        }
     }
+    REQUIRE(settled.size() == sold);
+    for (std::size_t i = 0; i < view.recentSales.size(); ++i) {
+        const sim::Auction& expected = *settled[settled.size() - 1 - i];
+        CHECK(view.recentSales[i].plot == expected.plot);
+        CHECK(view.recentSales[i].day == expected.closesOnDay);
+        CHECK(view.recentSales[i].paid == expected.winningAmount);
+        CHECK(view.recentSales[i].premium == sim::Fixed::zero());
+        if (i > 0) {
+            CHECK(view.recentSales[i - 1].day >= view.recentSales[i].day);
+        }
+    }
+    // The record relies on auctions being stored in closing order: a save
+    // whose auctions are out of order does not load.
+    sim::WorldState shuffled = simulation.state();
+    REQUIRE(shuffled.auctions.size() > 8);
+    REQUIRE(shuffled.auctions[0].closesOnDay < shuffled.auctions[8].closesOnDay);
+    std::swap(shuffled.auctions[0].opensOnDay, shuffled.auctions[8].opensOnDay);
+    std::swap(shuffled.auctions[0].closesOnDay, shuffled.auctions[8].closesOnDay);
+    sim::Simulation other(content, 9, test::setup());
+    CHECK_FALSE(other.load(sim::saveGame(shuffled, {}, sim::hashContent(content))));
     // The oldest sale has dropped out of the record but stays on its plot.
     std::size_t withSale = 0;
     for (const sim::PlotView& plot : view.plots) {
