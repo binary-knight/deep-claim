@@ -154,8 +154,11 @@ enum class NoticeKind : std::uint8_t {
     AutoSaleSummary,    // private: company, resource, tonnes, amount sold by policy this month
     IdleMineWarning,    // private: company, plot, mine (month end; operating, nothing extractable)
     MineFoundNothing,   // private: company, plot, mine (opened on a plot with nothing extractable)
-    MineRunningLow,     // private: company, plot, mine, tonnes = days of ore left by the owner's
-                        // survey at the current output (month end, 30 days or fewer)
+    MineRunningLow,     // private: company, plot, mine, tonnes = days of ore left by the low
+                        // end of the owner's survey at the current output (month end, once,
+                        // when 30 days or fewer remain)
+    PlotWithdrawn,      // public: plot, amount = the ask it left with (unsold too many times)
+    RivalUnlockedResource,  // public: company, tech, resource (research unlocked a resource)
 };
 
 struct Notice {

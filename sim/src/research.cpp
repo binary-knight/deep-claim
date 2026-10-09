@@ -84,7 +84,7 @@ void applyStartResearch(const Content& content, WorldState& state, const StartRe
         researchNotice(NoticeKind::ResearchStarted, command.company, command.tech, tech.cost));
 }
 
-void runResearch(WorldState& state, TickReport& report) {
+void runResearch(const Content& content, WorldState& state, TickReport& report) {
     for (Research& research : state.research) {
         if (research.complete != 0 || research.completesDay > state.day) {
             continue;
@@ -96,6 +96,16 @@ void runResearch(WorldState& state, TickReport& report) {
         }
         report.notices.push_back(
             researchNotice(NoticeKind::ResearchComplete, research.company, research.tech));
+        // What a company can newly mine is public news (spec 004): once per
+        // resource the finished tech unlocks, in resource order.
+        for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
+            if (content.resources[r].unlockedBy == research.tech) {
+                Notice unlocked = researchNotice(NoticeKind::RivalUnlockedResource,
+                                                 research.company, research.tech);
+                unlocked.resource = ResourceId(r);
+                report.notices.push_back(unlocked);
+            }
+        }
     }
 }
 

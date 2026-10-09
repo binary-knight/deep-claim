@@ -65,9 +65,11 @@ void warnIdleMines(const Content& content, const WorldState& state, TickReport& 
                                                     const Survey& survey,
                                                     const SurveyEstimate& estimate);
 
-// Month end: a MineRunningLow notice (tonnes = days) for every operating
-// mine of a solvent company whose estimatedRemainingTonnes lasts kRunningLowDays or fewer at the
-// current output. Surveys are estimates, so this is a cue, not a fact; unsurveyed mines never warn.
+// Month end: a MineRunningLow notice (tonnes = days) for an operating mine
+// of a solvent company, given once, in the month the low end of its survey
+// (estimate x (1 - relative error)) first lasts kRunningLowDays or fewer at
+// the current output. The low end is used because a survey that reads high
+// would otherwise never warn (playtest 2). Unsurveyed mines never warn.
 constexpr Day kRunningLowDays = 30;
 void warnRunningLow(const Content& content, const WorldState& state, TickReport& report);
 

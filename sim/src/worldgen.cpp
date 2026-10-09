@@ -66,6 +66,7 @@ void generateWorld(const Content& content, WorldState& state) {
     state.hidden.plotDeposits.clear();
     state.listingQueue.clear();
     state.nextListing = 0;
+    state.withdrawnQueue.clear();
 
     for (std::uint32_t regionIndex = 0; regionIndex < content.regions.size(); ++regionIndex) {
         const RegionDef& region = content.regions[regionIndex];

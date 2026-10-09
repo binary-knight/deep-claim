@@ -269,3 +269,5 @@ ui.pause_menu_title	Stop the clock when
 status.paused_by	Paused: {text}
 notice.mine_running_low	By the last survey, the mine on {plot} has about {days} days of ore left.
 ui.notice_survey_pending	The survey is not back yet. Until it is, a mine here is a blind bet.
+notice.plot_withdrawn	{plot} went unsold again and was withdrawn from sale at {amount}.
+notice.rival_unlocked_resource	{company} can now process {resource}.

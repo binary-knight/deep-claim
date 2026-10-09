@@ -109,9 +109,19 @@ bool validateCompanies(const Content& content, const WorldState& state) {
 }
 
 bool validatePlots(const Content& content, const WorldState& state) {
+    const std::uint32_t maxRounds = content.balance.maxUnsoldRounds;
     for (std::uint32_t i = 0; i < state.plots.size(); ++i) {
         const Plot& plot = state.plots[i];
         if (!plot.region.valid() || plot.region.index() >= content.regions.size()) {
+            return false;
+        }
+        // Unsold rounds only accumulate while listed and never reach the
+        // withdrawal threshold; a cooldown exists only on unlisted plots
+        // (validateListingQueue ties it to the withdrawn queue).
+        if (plot.relistNotBefore > kMaxDeadline ||
+            (plot.listing != PlotListing::Listed && plot.unsoldCount != 0) ||
+            (plot.listing != PlotListing::Unlisted && plot.relistNotBefore != 0) ||
+            (maxRounds != 0 && plot.unsoldCount >= maxRounds)) {
             return false;
         }
         if (plot.areaHectares < 1 || plot.askPrice < Money::zero() ||
@@ -200,9 +210,31 @@ bool validateAuctions(const WorldState& state) {
     return true;
 }
 
+// The withdrawn queue: distinct unlisted plots in withdrawal order, so their
+// cooldowns never decrease along it. Marks its members in `withdrawn`.
+bool validateWithdrawnQueue(const WorldState& state, std::vector<std::uint8_t>& withdrawn) {
+    Day previous = 0;
+    for (const PlotId plot : state.withdrawnQueue) {
+        if (!plot.valid() || plot.index() >= state.plots.size() || withdrawn[plot.index()] != 0) {
+            return false;
+        }
+        withdrawn[plot.index()] = 1;
+        const Plot& entry = state.plots[plot.index()];
+        if (entry.listing != PlotListing::Unlisted || entry.relistNotBefore < previous) {
+            return false;
+        }
+        previous = entry.relistNotBefore;
+    }
+    return true;
+}
+
 bool validateListingQueue(const WorldState& state) {
     if (state.listingQueue.size() != state.plots.size() ||
         state.nextListing > state.listingQueue.size()) {
+        return false;
+    }
+    std::vector<std::uint8_t> withdrawn(state.plots.size(), 0);
+    if (!validateWithdrawnQueue(state, withdrawn)) {
         return false;
     }
     std::vector<std::uint8_t> seen(state.plots.size(), 0);
@@ -212,10 +244,13 @@ bool validateListingQueue(const WorldState& state) {
             return false;
         }
         seen[plot.index()] = 1;
-        // Consumed entries have been listed (and maybe sold); the rest have not.
+        // Consumed entries have been listed: they are listed or sold now, or
+        // were withdrawn. The rest have never been offered and carry no
+        // cooldown.
+        const Plot& entry = state.plots[plot.index()];
         const bool consumed = i < state.nextListing;
-        const bool listedOrSold = state.plots[plot.index()].listing != PlotListing::Unlisted;
-        if (consumed != listedOrSold) {
+        const bool offered = entry.listing != PlotListing::Unlisted || withdrawn[plot.index()] != 0;
+        if (consumed != offered || (withdrawn[plot.index()] == 0 && entry.relistNotBefore != 0)) {
             return false;
         }
     }

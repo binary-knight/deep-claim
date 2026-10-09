@@ -199,7 +199,7 @@ const TickReport& Simulation::tick() {
     runSellPolicies(*content_, state_);         // 4b (spec 001)
     runMarkets(*content_, state_);              // 5
     runFinance(*content_, state_, report_);     // 6
-    runResearch(state_, report_);               // 7
+    runResearch(*content_, state_, report_);    // 7
     runEvents(*content_, state_, report_);      // 8
     ++state_.day;                               // 9
     return report_;

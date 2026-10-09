@@ -29,6 +29,11 @@ struct Plot {
     CompanyId owner;    // valid only when Sold
     AuctionId auction;  // valid only while Listed
     MineId mine;        // valid once a mine has been built here
+    // Auctions in a row that closed without a sale since the plot was last
+    // put up; at balance.maxUnsoldRounds the plot is withdrawn (spec 004).
+    std::uint32_t unsoldCount = 0;
+    // Set while withdrawn: the first day the plot may be listed again.
+    Day relistNotBefore = 0;
 };
 
 // True deposit of one resource on one plot. Hidden from every company;
@@ -179,7 +184,10 @@ struct WorldState {
     std::vector<ActiveEvent> events;
     std::vector<PlotId> listingQueue;  // shuffled at generation; listed in order
     std::uint32_t nextListing = 0;     // index into listingQueue
-    std::uint32_t bidCounter = 0;      // monotonic order stamp for tie-breaks
+    // Plots withdrawn after going unsold, oldest first. They return to sale
+    // behind the never-listed plots, once their cooldown has passed.
+    std::vector<PlotId> withdrawnQueue;
+    std::uint32_t bidCounter = 0;  // monotonic order stamp for tie-breaks
     HiddenState hidden;
 };
 

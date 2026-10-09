@@ -678,3 +678,40 @@ architectural summary.
   instead), CSS ellipsis for the company name (truncated in code), SVG
   icons through the RmlUi SVG plugin (adds lunasvg; a TGA sprite sheet is
   enough for six icons).
+
+## Playtest 2 fixes (spec 004)
+
+Sim:
+- **Unsold land is withdrawn.** A plot counts its unsold rounds
+  (`Plot::unsoldCount`). At `balance.max_unsold_rounds` (3) it leaves the
+  market instead of relisting: listing Unlisted, `relistNotBefore` = close
+  day + `balance.relist_cooldown_days` (360), appended to
+  `WorldState::withdrawnQueue`, public `PlotWithdrawn` notice. The monthly
+  lister offers never-listed plots first; when none remain it takes the
+  front of the withdrawn queue once its cooldown has passed. Only the front
+  is checked: cooldowns end in withdrawal order. A returning plot keeps the
+  reduced ask it left with and starts a fresh count. `listingQueue` stays a
+  permutation of all plots, so "behind never-listed plots" is structural
+  rather than a sort. `max_unsold_rounds` 0 keeps the old relist-forever
+  rule; the in-code test fixture uses it.
+- **The golden determinism hash moved once**, 0x0fc2e895ca56a363 to
+  0x28adea3aad5623a7: plot state grew by two fields, world state by the
+  withdrawn queue and balance by two parameters, all of which are hashed.
+  No rule that the fixture exercises changed.
+- **Rival unlocks are news.** `runResearch` emits the public
+  `RivalUnlockedResource` (company, tech, resource) once per resource a
+  completed tech unlocks. The owner still gets its private
+  `ResearchComplete`; the session drops the player's own unlock line.
+- **Running low uses the low end.** The month-end check works on
+  estimate x (1 - relative error), floored at zero, minus extraction since
+  the survey. It speaks once: in the month the low-end figure first comes
+  within 30 days, or at a survey's first month end if it is already lower.
+  The old rule repeated every month and waited for the central estimate.
+- **View.** `unlistedPlotsRemaining` (never-listed plots), `withdrawnPlots`,
+  and per resource `unlockDaysRemaining` (days until the ore is mineable
+  when the unlocking tech is in the lab: completion day - today + 1) and
+  `unlockReady` (prerequisites complete, tech neither done nor running).
+- Saves validate the new state: counts only on listed plots and under the
+  limit, cooldowns only on withdrawn plots, the withdrawn queue distinct,
+  unlisted and in nondecreasing cooldown order, and every offered plot
+  that is unlisted and unowned accounted for by that queue.

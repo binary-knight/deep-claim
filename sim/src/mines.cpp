@@ -205,9 +205,12 @@ const Survey* latestOwnSurvey(const WorldState& state, const Mine& mine) {
     return latest;
 }
 
-std::int64_t estimatedRemainingTonnes(const WorldState& state, const Mine& mine,
-                                      const Survey& survey, const SurveyEstimate& estimate) {
-    const std::size_t r = estimate.resource.index();
+namespace {
+
+// Tonnes of a resource taken out since the survey reported (see mines.h).
+std::int64_t extractedSinceSurvey(const WorldState& state, const Mine& mine, const Survey& survey,
+                                  ResourceId resource) {
+    const std::size_t r = resource.index();
     std::int64_t since = mine.extractedTonnes[r];
     if (mine.state != MineState::Building && survey.completesDay >= mine.operationalDay) {
         const std::int64_t days = state.day > survey.completesDay
@@ -216,7 +219,21 @@ std::int64_t estimatedRemainingTonnes(const WorldState& state, const Mine& mine,
                                       : 0;
         since = std::min(since, checkedMulDiv(mine.lastOutputTonnes[r], days, 1).value_or(since));
     }
-    return std::max<std::int64_t>(0, estimate.tonnesEstimate - since);
+    return since;
+}
+
+std::int64_t estimateLowerBound(const SurveyEstimate& estimate) {
+    // estimate x (1 - relative error), never below zero.
+    const Fixed share = std::max(Fixed::zero(), Fixed::one() - estimate.relativeError);
+    return mulDiv(estimate.tonnesEstimate, share.raw(), Fixed::kScale);
+}
+
+}  // namespace
+
+std::int64_t estimatedRemainingTonnes(const WorldState& state, const Mine& mine,
+                                      const Survey& survey, const SurveyEstimate& estimate) {
+    return std::max<std::int64_t>(
+        0, estimate.tonnesEstimate - extractedSinceSurvey(state, mine, survey, estimate.resource));
 }
 
 void warnRunningLow(const Content& /*content*/, const WorldState& state, TickReport& report) {
@@ -230,19 +247,34 @@ void warnRunningLow(const Content& /*content*/, const WorldState& state, TickRep
         if (latest == nullptr) {
             continue;
         }
-        std::int64_t daysLeft = -1;
+        // Days of ore left by the cautious end of the survey, for the
+        // resource that lasts longest. Kept signed: once the low end is
+        // passed the figure goes negative, which is how the warning knows it
+        // has already been given.
+        bool any = false;
+        std::int64_t daysLeft = 0;
         for (const SurveyEstimate& estimate : latest->estimates) {
             const std::int64_t output = mine.lastOutputTonnes[estimate.resource.index()];
-            if (output > 0) {
-                daysLeft = std::max(
-                    daysLeft, estimatedRemainingTonnes(state, mine, *latest, estimate) / output);
+            if (output <= 0) {
+                continue;
             }
+            const std::int64_t used = extractedSinceSurvey(state, mine, *latest, estimate.resource);
+            const std::int64_t days = (estimateLowerBound(estimate) - used) / output;
+            daysLeft = any ? std::max(daysLeft, days) : days;
+            any = true;
         }
-        if (daysLeft < 0 || daysLeft > kRunningLowDays) {
+        // Month-end check: say it once, in the month the figure first comes
+        // within kRunningLowDays (a month ago it was still above it). A
+        // survey's first month end always speaks if the figure is that low,
+        // so a fresh survey that is already past its low end is not silent.
+        const std::int64_t window = kRunningLowDays;
+        const bool firstCheck = state.day - latest->completesDay <= kDaysPerMonth;
+        const bool crossedThisMonth = daysLeft > window - static_cast<std::int64_t>(kDaysPerMonth);
+        if (!any || daysLeft > window || (!crossedThisMonth && !firstCheck)) {
             continue;
         }
         Notice notice = mineNotice(NoticeKind::MineRunningLow, mine, MineId(i));
-        notice.tonnes = daysLeft;
+        notice.tonnes = std::max<std::int64_t>(0, daysLeft);
         report.notices.push_back(notice);
     }
 }

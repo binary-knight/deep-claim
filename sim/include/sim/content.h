@@ -115,6 +115,11 @@ struct BalanceParams {
     Day auctionWindowDays = 0;
     std::uint32_t plotsListedAtStart = 0;
     std::uint32_t plotsListedPerMonth = 0;
+    // Land nobody wants (spec 004): after this many auctions in a row
+    // without a sale a plot is withdrawn, and may be listed again only after
+    // the cooldown. Zero rounds means plots relist forever.
+    std::uint32_t maxUnsoldRounds = 0;
+    Day relistCooldownDays = 0;
     std::uint32_t bankruptcyGraceMonths = 0;
     // Commodity market dynamics (see DESIGN.md, step 9).
     std::uint32_t marketSupplySmoothingDays = 0;  // EMA window for company supply

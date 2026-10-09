@@ -12,12 +12,14 @@
 
 namespace sim {
 
-// Opens an auction for the next `count` plots in the listing queue.
+// Opens an auction for the next `count` plots: never-listed plots in queue
+// order first, then withdrawn plots whose cooldown has passed, oldest first.
 void listPlots(const Content& content, WorldState& state, std::uint32_t count, TickReport& report);
 
 // Closes auctions due today: the highest affordable bid wins and pays, the
 // plot becomes Sold; an auction without an affordable bid relists the plot
-// at a lower ask. Then lists new plots on month boundaries.
+// at a lower ask, or withdraws it after balance.maxUnsoldRounds in a row.
+// Then lists new plots on month boundaries.
 void runPlotMarket(const Content& content, WorldState& state, TickReport& report);
 
 // Cash a company has committed to standing bids on open auctions.

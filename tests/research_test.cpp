@@ -147,3 +147,80 @@ TEST_CASE("Pending research must have been startable", "[research][save]") {
     CHECK_FALSE(simulation.load(saveOf(broken)));
     CHECK(simulation.load(saveOf(simulation.state())));
 }
+
+TEST_CASE("Unlocking a resource is public news, once", "[research]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::ResourceId lithium = content.findResource("lithium");
+    REQUIRE(lithium.valid());
+    REQUIRE(content.resources[lithium.index()].unlockedBy == sim::TechId(1));
+
+    // The first tech unlocks nothing: no news.
+    simulation.submit(sim::StartResearch{kRival, sim::TechId(0)});
+    int unlockNotices = 0;
+    for (sim::Day d = 0; d <= content.techs[0].durationDays + 1; ++d) {
+        for (const sim::Notice& notice : simulation.tick().notices) {
+            unlockNotices += notice.kind == sim::NoticeKind::RivalUnlockedResource ? 1 : 0;
+        }
+    }
+    CHECK(unlockNotices == 0);
+
+    simulation.submit(sim::StartResearch{kRival, sim::TechId(1)});
+    for (sim::Day d = 0; d <= content.techs[1].durationDays + 30; ++d) {
+        simulation.tick();
+        for (const sim::Notice& notice : simulation.reportFor(kPlayer)) {
+            if (notice.kind == sim::NoticeKind::RivalUnlockedResource) {
+                ++unlockNotices;
+                CHECK(notice.company == kRival);
+                CHECK(notice.tech == sim::TechId(1));
+                CHECK(notice.resource == lithium);
+            }
+            // The rival's own completion stays private.
+            CHECK(notice.kind != sim::NoticeKind::ResearchComplete);
+        }
+    }
+    CHECK(unlockNotices == 1);
+    CHECK(sim::noticeIsPublic(sim::NoticeKind::RivalUnlockedResource));
+}
+
+TEST_CASE("The view says how close each locked resource is", "[research][view]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const std::size_t lithium = content.findResource("lithium").index();
+    const std::size_t iron = content.findResource("iron").index();
+
+    // Nothing researched: the unlocking tech still needs its prerequisite.
+    sim::CompanyView view = simulation.view(kPlayer);
+    REQUIRE(view.unlockDaysRemaining.size() == content.resources.size());
+    REQUIRE(view.unlockReady.size() == content.resources.size());
+    CHECK(view.unlockDaysRemaining[lithium] == 0);
+    CHECK(view.unlockReady[lithium] == 0);
+    CHECK(view.unlockDaysRemaining[iron] == 0);
+    CHECK(view.unlockReady[iron] == 0);
+
+    // Prerequisite done: one project away.
+    simulation.submit(sim::StartResearch{kPlayer, sim::TechId(0)});
+    simulation.tick(content.techs[0].durationDays + 2);
+    view = simulation.view(kPlayer);
+    CHECK(view.unlockReady[lithium] == 1);
+    CHECK(view.unlockDaysRemaining[lithium] == 0);
+    // The rival has researched nothing; its view is its own.
+    CHECK(simulation.view(kRival).unlockReady[lithium] == 0);
+
+    // Researching it: a countdown that ends the day the ore becomes mineable.
+    simulation.submit(sim::StartResearch{kPlayer, sim::TechId(1)});
+    simulation.tick();
+    view = simulation.view(kPlayer);
+    REQUIRE(view.activeResearch.has_value());
+    CHECK(view.unlockReady[lithium] == 0);
+    CHECK(view.unlockDaysRemaining[lithium] == view.activeResearch->completesDay - view.day + 1);
+    const sim::Day days = view.unlockDaysRemaining[lithium];
+    simulation.tick(days - 1);
+    CHECK(simulation.view(kPlayer).unlockDaysRemaining[lithium] == 1);
+    simulation.tick();
+    view = simulation.view(kPlayer);
+    CHECK(view.unlockDaysRemaining[lithium] == 0);
+    CHECK(view.unlockReady[lithium] == 0);
+    CHECK(std::find(view.completedTechs.begin(), view.completedTechs.end(), sim::TechId(1)) !=
+          view.completedTechs.end());
+}

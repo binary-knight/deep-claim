@@ -47,6 +47,7 @@ content::Sources goodSources() {
       "survey_base_noise": 0.5, "mine_capex_per_hectare": 4000, "mine_build_days": 180,
       "mine_opex_per_day": 12000, "mine_mothball_opex_mult": 0.2,
       "auction_window_days": 30, "plots_listed_at_start": 3, "plots_listed_per_month": 1,
+      "max_unsold_rounds": 3, "relist_cooldown_days": 360,
       "bankruptcy_grace_months": 3, "market_supply_smoothing_days": 30,
       "market_price_adjust_days": 10, "demand_reversion_rate": 0.01, "demand_mult_min": 0.3,
       "demand_mult_max": 3, "price_floor_mult": 0.1, "price_cap_mult": 10,
@@ -243,6 +244,28 @@ TEST_CASE("Default sell policy keys load and are validated", "[content]") {
     CHECK_FALSE(bad.ok());
     CHECK(hasError(bad, "balance.json", "default_cover_costs", "expected true or false"));
     CHECK(hasError(bad, "balance.json", "default_sell_policy.reserve_tonnes", "must be between"));
+}
+
+TEST_CASE("Unsold-land keys load and are validated", "[content]") {
+    content::Sources s = goodSources();
+    const auto good = content::loadFromStrings(s);
+    REQUIRE(good.ok());
+    CHECK(good.content->balance.maxUnsoldRounds == 3);
+    CHECK(good.content->balance.relistCooldownDays == 360);
+
+    s.balance = replaceOnce(s.balance, R"("max_unsold_rounds": 3)", R"("max_unsold_rounds": -1)");
+    s.balance =
+        replaceOnce(s.balance, R"("relist_cooldown_days": 360)", R"("relist_cooldown_days": 1.5)");
+    const auto bad = content::loadFromStrings(s);
+    CHECK_FALSE(bad.ok());
+    CHECK(hasError(bad, "balance.json", "max_unsold_rounds", "must be between"));
+    CHECK(hasError(bad, "balance.json", "relist_cooldown_days", ""));
+
+    content::Sources missing = goodSources();
+    missing.balance = replaceOnce(missing.balance, R"("max_unsold_rounds": 3, )", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "balance.json", "max_unsold_rounds", ""));
 }
 
 TEST_CASE("Large valid money values with cents are accepted", "[content]") {

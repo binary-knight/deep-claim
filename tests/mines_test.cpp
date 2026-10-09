@@ -390,9 +390,9 @@ TEST_CASE("The mine view carries the owner's latest survey estimate", "[mines][v
 }
 
 // Injects a completed survey of `plot` for the player estimating `tonnes`
-// of resource 0, as the latest survey on record.
+// of resource 0 with the given relative error, as the latest survey on record.
 void injectSurvey(sim::Simulation& simulation, const sim::Content& content, sim::PlotId plot,
-                  std::int64_t tonnes) {
+                  std::int64_t tonnes, sim::Fixed error = sim::Fixed::zero()) {
     sim::WorldState edited = simulation.state();
     sim::Survey survey;
     survey.company = kPlayer;
@@ -403,7 +403,7 @@ void injectSurvey(sim::Simulation& simulation, const sim::Content& content, sim:
     survey.completesDay = edited.day - 1;
     survey.commissionedDay = survey.completesDay - content.balance.surveyDurationDays;
     survey.complete = 1;
-    survey.estimates.push_back({sim::ResourceId(0), tonnes, sim::Fixed::one()});
+    survey.estimates.push_back({sim::ResourceId(0), tonnes, error});
     edited.surveys.push_back(survey);
     REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
 }
@@ -440,11 +440,58 @@ TEST_CASE("A mine warns at month end when the survey estimate is nearly spent", 
         if (notice.kind == sim::NoticeKind::MineRunningLow) {
             CHECK(notice.plot == plot);
             CHECK(notice.tonnes <= sim::kRunningLowDays);
+            CHECK(notice.tonnes >= 0);
             CHECK(notice.company == kPlayer);
         }
     }
+    // Said once: the mine keeps working past the estimate without repeating it.
+    CHECK_FALSE(hasNotice(tickToMonthEnd(simulation).notices, sim::NoticeKind::MineRunningLow));
+    CHECK_FALSE(hasNotice(tickToMonthEnd(simulation).notices, sim::NoticeKind::MineRunningLow));
     // The rival never sees it.
     CHECK(simulation.view(kRival).mines.empty());
+}
+
+TEST_CASE("The running-low warning uses the low end of the survey", "[mines]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(50'000'000));
+    setDeposit(simulation, content, plot, sim::ResourceId(0), 10'000'000'000);
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    simulation.tick(content.balance.mineBuildDays + 1);
+    const std::int64_t output = simulation.view(kPlayer).mines.at(0).lastOutputTonnes.at(0);
+    REQUIRE(output > 0);
+    const auto half = sim::Fixed::fromRatio(1, 2);
+
+    // Central estimate: 400 days of ore. Low end at x0.5: 200 days. Neither
+    // is close, so the first months are quiet.
+    injectSurvey(simulation, content, plot, output * 400, half);
+    int quietMonths = 0;
+    int warnings = 0;
+    std::int64_t daysAtWarning = -1;
+    for (int month = 0; month < 12; ++month) {
+        const sim::TickReport& report = tickToMonthEnd(simulation);
+        const std::int64_t centralDaysLeft =
+            simulation.view(kPlayer).mines.at(0).estimatedRemainingTonnes.at(0) / output;
+        for (const sim::Notice& notice : report.notices) {
+            if (notice.kind == sim::NoticeKind::MineRunningLow) {
+                ++warnings;
+                daysAtWarning = centralDaysLeft;
+                CHECK(notice.tonnes > 0);
+                CHECK(notice.tonnes <= sim::kRunningLowDays);
+            }
+        }
+        if (warnings == 0) {
+            ++quietMonths;
+        }
+    }
+    // One warning, about when the low end (200 days) ran out: the central
+    // estimate still showed roughly 200 days of ore, far above the 30-day
+    // threshold the old rule waited for.
+    CHECK(warnings == 1);
+    CHECK(quietMonths >= 4);
+    CHECK(daysAtWarning > 150);
+    CHECK(daysAtWarning < 260);
 }
 
 TEST_CASE("A fresh survey of a working mine is not charged for earlier extraction",

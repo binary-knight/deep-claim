@@ -788,6 +788,8 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "price_cap_mult",
                     "demand_growth_per_year",
                     "plots_listed_per_month",
+                    "max_unsold_rounds",
+                    "relist_cooldown_days",
                     "bankruptcy_grace_months",
                     "default_sell_policy",
                     "default_cover_costs"});
@@ -830,6 +832,10 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
         valueOr(node.integer("plots_listed_at_start", true, 0, 1000), 0LL));
     balance.plotsListedPerMonth = static_cast<std::uint32_t>(
         valueOr(node.integer("plots_listed_per_month", true, 0, 1000), 0LL));
+    balance.maxUnsoldRounds =
+        static_cast<std::uint32_t>(valueOr(node.integer("max_unsold_rounds", true, 0, 100), 0LL));
+    balance.relistCooldownDays = static_cast<sim::Day>(
+        valueOr(node.integer("relist_cooldown_days", true, 0, sim::kDaysPerYear * 100), 0LL));
     balance.bankruptcyGraceMonths = static_cast<std::uint32_t>(
         valueOr(node.integer("bankruptcy_grace_months", true, 0, 120), 0LL));
     balance.marketSupplySmoothingDays = static_cast<std::uint32_t>(
@@ -880,7 +886,7 @@ struct StringKeySpec {
     std::string_view placeholders;  // comma separated, no spaces
 };
 
-constexpr std::array<StringKeySpec, 213> kStringKeys = {{
+constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"notice.command_rejected", "reason"},
     {"notice.command_rejected.amount", "amount,reason"},
     {"notice.command_rejected.plot", "plot,reason"},
@@ -1094,7 +1100,10 @@ constexpr std::array<StringKeySpec, 213> kStringKeys = {{
     {"ui.tech_available", ""},
     {"ui.tech_available_busy", ""},
     {"ui.game_over", "company"},
-}};
+    // Spec 004.
+    {"notice.plot_withdrawn", "plot,amount"},
+    {"notice.rival_unlocked_resource", "company,resource,tech"},
+});
 
 // Names of the {placeholders} a template uses. Braces that do not form a
 // placeholder are reported as a malformed template.
