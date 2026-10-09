@@ -73,8 +73,7 @@ Fixed requiredReturn(const Content& content, const CompanyView& view) {
 }
 
 Fixed recoverableShare(const Content& content, const CompanyView& view) {
-    return view.mines.empty() ? content.ai.firstMineRecoverableShare
-                              : content.ai.recoverableShare;
+    return view.mines.empty() ? content.ai.firstMineRecoverableShare : content.ai.recoverableShare;
 }
 
 // Zero to six percent added to a bid, fixed for a given plot and company, so
@@ -118,7 +117,8 @@ std::size_t openProspects(const Content& content, const CompanyView& view) {
             continue;
         }
         const Money outlay = plot.askPrice + plot.mineCapexQuote;
-        if (surveyedNetValue(content, view, survey) >= outlay.scaled(requiredReturn(content, view))) {
+        if (surveyedNetValue(content, view, survey) >=
+            outlay.scaled(requiredReturn(content, view))) {
             ++count;
         }
     }
@@ -154,11 +154,9 @@ Money valuedPrice(const Content& content, const CompanyView& view, ResourceId re
     }
     // What the price drop costs on existing output, per tonne of the new mine.
     const Money drop = today - after;
-    const std::int64_t lostCents =
-        checkedMulDiv(drop.cents(), own, added).value_or(today.cents());
-    const Money adjustment =
-        (drop + Money::fromCents(std::min(lostCents, today.cents()))).scaled(
-            content.ai.supplyDiscount);
+    const std::int64_t lostCents = checkedMulDiv(drop.cents(), own, added).value_or(today.cents());
+    const Money adjustment = (drop + Money::fromCents(std::min(lostCents, today.cents())))
+                                 .scaled(content.ai.supplyDiscount);
     return std::max(today - adjustment, Money::zero());
 }
 
@@ -227,7 +225,8 @@ void decideSales(const Content& content, const CompanyView& view, Budget& budget
         const Money storage =
             Money::fromCents(std::min(storageCents, kMaxCashCents)).scaled(storageMult);
         const bool goodPrice = price >= market.basePrice.scaled(content.ai.sellAboveBase);
-        const bool costlyToHold = storage > Money::fromCents(valueCents).scaled(content.ai.dumpStorageShare);
+        const bool costlyToHold =
+            storage > Money::fromCents(valueCents).scaled(content.ai.dumpStorageShare);
         if (!goodPrice && !costlyToHold) {
             continue;
         }
@@ -259,8 +258,7 @@ Money dailyOutputValue(const CompanyView& view, const MineView& mine) {
 // Mothball mines that lose money on a day's output (after a grace period so a
 // new mine gets to produce); reopen when the output would clear opex with a
 // margin, so prices must recover before the mine restarts.
-void decideMothballing(const Content& content, const CompanyView& view,
-                       std::vector<Command>& out) {
+void decideMothballing(const Content& content, const CompanyView& view, std::vector<Command>& out) {
     for (const MineView& mine : view.mines) {
         if (mine.state != MineState::Operating && mine.state != MineState::Mothballed) {
             continue;
@@ -272,7 +270,8 @@ void decideMothballing(const Content& content, const CompanyView& view,
         const Money opex = view.mineOpexQuote;
         if (mine.state == MineState::Operating && revenue < opex) {
             out.emplace_back(SetMineState{view.me, mine.id, 0});
-        } else if (mine.state == MineState::Mothballed && revenue >= opex.scaled(content.ai.reopenMargin)) {
+        } else if (mine.state == MineState::Mothballed &&
+                   revenue >= opex.scaled(content.ai.reopenMargin)) {
             out.emplace_back(SetMineState{view.me, mine.id, 1});
         }
     }
@@ -294,7 +293,8 @@ void decideBuilding(const Content& content, const CompanyView& view, Budget& bud
             continue;
         }
         const Money capex = plot.mineCapexQuote;
-        if (surveyedNetValue(content, view, *survey) >= capex.scaled(requiredReturn(content, view)) &&
+        if (surveyedNetValue(content, view, *survey) >=
+                capex.scaled(requiredReturn(content, view)) &&
             budget.canSpend(capex + constructionReserve(content, view))) {
             out.emplace_back(BuildMine{view.me, plot.id});
             budget.spend(capex);
@@ -414,7 +414,8 @@ void decideLoans(const Content& content, const CompanyView& view, bool producing
     if (!needsCapex && !shortWhileProducing && !bootstrap) {
         return;
     }
-    const Money chunk = std::min(bootstrap ? content.ai.bootstrapLoan : content.ai.loanChunk, view.loanCapacity);
+    const Money chunk =
+        std::min(bootstrap ? content.ai.bootstrapLoan : content.ai.loanChunk, view.loanCapacity);
     if (chunk >= content.balance.loanMinPrincipal && chunk.cents() <= budget.headroomCents()) {
         out.emplace_back(TakeLoan{view.me, chunk});
     }

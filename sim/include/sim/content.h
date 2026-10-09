@@ -158,8 +158,8 @@ struct AiParams {
     Fixed sellAboveBase;     // sell when the price is at least this share of base
     Fixed dumpStorageShare;  // ...or a month's storage exceeds this share of the stock's value
     // Valuing a surveyed plot.
-    Fixed recoverableShare;               // haircut on surveyed tonnage
-    Fixed requiredReturn;                 // net value must cover the outlay times this
+    Fixed recoverableShare;  // haircut on surveyed tonnage
+    Fixed requiredReturn;    // net value must cover the outlay times this
     // The same two for a company that has no mine yet: easier, so the first
     // purchase can happen at the opening ask.
     Fixed firstMineRecoverableShare;

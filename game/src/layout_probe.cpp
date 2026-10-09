@@ -287,6 +287,25 @@ bool probeTab(Rml::Context& context, game::App& app, LoggingSystem& system, cons
 constexpr std::uint64_t kScenarioSeed = 20261009;
 constexpr int kScenarioMaxDays = 900;
 
+// The player's purchase is in the sales record at half again the ask, and
+// on the selected plot's panel (spec 006).
+bool checkSalesRecord(const game::UiModel& model, const sim::Content& content, sim::PlotId target) {
+    const std::string over = game::text(content, "ui.sale_over", {{"percent", "50"}});
+    const bool recorded = std::any_of(
+        model.recent_sales.begin(), model.recent_sales.end(), [&](const game::SoldRow& row) {
+            return row.mine && row.index == static_cast<int>(target.value()) && row.over == over;
+        });
+    if (recorded && model.no_sales.empty() && model.recent_sales.size() <= 5 &&
+        model.panel.sale.find(over) != std::string::npos) {
+        return true;
+    }
+    std::cout << std::format(
+        "SCENARIO: the player's purchase is missing from the sales record "
+        "({} rows, panel \"{}\", expected \"{}\")\n",
+        model.recent_sales.size(), model.panel.sale, over);
+    return false;
+}
+
 // Plays a fixed game until every table has rows: a loan, a survey, a won
 // auction, a mine that has opened and produced, a research project. Returns
 // false (with a reason) when the fixed seed no longer gets there, which
@@ -354,21 +373,7 @@ bool playScenario(game::App& app, const sim::Content& content) {
             unlisted, model.no_unlisted);
         return false;
     }
-    // The player's purchase is in the sales record at half again the ask,
-    // and on the selected plot's panel (spec 006).
-    const std::string over = game::text(content, "ui.sale_over", {{"percent", "50"}});
-    const bool recorded =
-        std::any_of(model.recent_sales.begin(), model.recent_sales.end(),
-                    [&](const game::SoldRow& row) {
-                        return row.mine && row.index == static_cast<int>(target.value()) &&
-                               row.over == over;
-                    });
-    if (!recorded || !model.no_sales.empty() || model.recent_sales.size() > 5 ||
-        model.panel.sale.find(over) == std::string::npos) {
-        std::cout << std::format(
-            "SCENARIO: the player's purchase is missing from the sales record "
-            "({} rows, panel \"{}\", expected \"{}\")\n",
-            model.recent_sales.size(), model.panel.sale, over);
+    if (!checkSalesRecord(model, content, target)) {
         return false;
     }
     std::cout << std::format(

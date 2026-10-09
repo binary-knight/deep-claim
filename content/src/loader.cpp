@@ -900,12 +900,12 @@ void parseAi(const json& document, sim::AiParams& ai, ErrorSink& sink) {
         return;
     }
     const Node node(document, "", sink);
-    node.allowKeys({"sell_above_base", "dump_storage_share", "recoverable_share",
-                    "required_return", "payback_horizon_days", "bid_premium", "bid_premium_high",
-                    "max_open_prospects", "reopen_margin", "idle_mine_grace_days",
-                    "opex_reserve_days", "cash_reserve", "research_floor", "loan_floor",
-                    "loan_chunk", "bootstrap_loan", "first_mine_recoverable_share",
-                    "first_mine_required_return", "supply_discount"});
+    node.allowKeys({"sell_above_base", "dump_storage_share", "recoverable_share", "required_return",
+                    "payback_horizon_days", "bid_premium", "bid_premium_high", "max_open_prospects",
+                    "reopen_margin", "idle_mine_grace_days", "opex_reserve_days", "cash_reserve",
+                    "research_floor", "loan_floor", "loan_chunk", "bootstrap_loan",
+                    "first_mine_recoverable_share", "first_mine_required_return",
+                    "supply_discount"});
     const sim::Fixed zero = sim::Fixed::zero();
     const sim::Fixed one = sim::Fixed::one();
     const sim::Fixed ten = sim::Fixed::fromInt(10);
@@ -928,8 +928,8 @@ void parseAi(const json& document, sim::AiParams& ai, ErrorSink& sink) {
     ai.maxOpenProspects =
         static_cast<std::uint32_t>(valueOr(node.integer("max_open_prospects", true, 1, 1000), 1LL));
     ai.reopenMargin = valueOr(node.fixed("reopen_margin", true, one, ten), one);
-    ai.idleMineGraceDays =
-        static_cast<sim::Day>(valueOr(node.integer("idle_mine_grace_days", true, 0, kMaxDays), 0LL));
+    ai.idleMineGraceDays = static_cast<sim::Day>(
+        valueOr(node.integer("idle_mine_grace_days", true, 0, kMaxDays), 0LL));
     ai.opexReserveDays = valueOr(node.integer("opex_reserve_days", true, 0, 3600), 0LL);
     ai.cashReserve = valueOr(node.money("cash_reserve", true, none), none);
     ai.researchFloor = valueOr(node.money("research_floor", true, none), none);

@@ -790,8 +790,7 @@ void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
 // the minimum bid. Whole percent, to the nearest: the premium is a
 // truncated ratio, so a bid of exactly 16% over arrives as 15.9999.
 std::string overAskText(const sim::Content& content, const sim::SaleView& sale) {
-    const std::int64_t percent =
-        (sale.premium * 100 + sim::Fixed::fromRatio(1, 2)).truncToInt();
+    const std::int64_t percent = (sale.premium * 100 + sim::Fixed::fromRatio(1, 2)).truncToInt();
     return percent <= 0 ? text(content, "ui.sale_at_ask")
                         : text(content, "ui.sale_over", {{"percent", std::to_string(percent)}});
 }

@@ -70,10 +70,10 @@ SaleView makeSaleView(const Auction& auction) {
     // saturates there, far past anything the interface needs to tell apart.
     const std::int64_t over = (auction.winningAmount - auction.askPrice).cents();
     if (auction.askPrice > Money::zero() && over > 0) {
-        sale.premium = Fixed::fromRaw(
-            std::min(checkedMulDiv(over, Fixed::kScale, auction.askPrice.cents())
-                         .value_or(kMaxSalePremium.raw()),
-                     kMaxSalePremium.raw()));
+        sale.premium =
+            Fixed::fromRaw(std::min(checkedMulDiv(over, Fixed::kScale, auction.askPrice.cents())
+                                        .value_or(kMaxSalePremium.raw()),
+                                    kMaxSalePremium.raw()));
     }
     return sale;
 }

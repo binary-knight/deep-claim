@@ -126,8 +126,7 @@ TEST_CASE("The AI values an ore lower the more of it the company already sells",
             owner.mines.push_back(mine);
         }
         // What those mines sell is already in the market's supply.
-        owner.markets[copper.index()].recentSupplyTonnesPerDay =
-            def.baseOutputTonnesPerDay * count;
+        owner.markets[copper.index()].recentSupplyTonnesPerDay = def.baseOutputTonnesPerDay * count;
         return owner;
     };
 

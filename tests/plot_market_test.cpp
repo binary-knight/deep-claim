@@ -284,16 +284,16 @@ TEST_CASE("The sales record keeps the sixteen most recent, newest first", "[mark
     for (sim::Day d = 0; d < sim::kDaysPerYear * 2; ++d) {
         const sim::CompanyView view = simulation.view(kPlayer);
         for (const sim::PlotView& plot : view.plots) {
-            if (plot.listing == sim::PlotListing::Listed && plot.auction->myBid == sim::Money::zero() &&
+            if (plot.listing == sim::PlotListing::Listed &&
+                plot.auction->myBid == sim::Money::zero() &&
                 view.cash - view.reservedCash >= plot.askPrice) {
                 simulation.submit(sim::BidOnPlot{kPlayer, plot.id, plot.askPrice});
             }
         }
         const sim::TickReport& report = simulation.tick();
-        sold += static_cast<std::size_t>(
-            std::count_if(report.notices.begin(), report.notices.end(), [](const sim::Notice& n) {
-                return n.kind == sim::NoticeKind::PlotSold;
-            }));
+        sold += static_cast<std::size_t>(std::count_if(
+            report.notices.begin(), report.notices.end(),
+            [](const sim::Notice& n) { return n.kind == sim::NoticeKind::PlotSold; }));
         // Keep the buyer in funds without touching the market.
         if (simulation.state().companies[0].cash < sim::Money::fromUnits(20'000'000)) {
             sim::WorldState topped = simulation.state();

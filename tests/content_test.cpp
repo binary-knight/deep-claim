@@ -371,7 +371,8 @@ TEST_CASE("A deposit's size cap loads and must be at least the median", "[conten
 
     content::Sources missing = goodSources();
     missing.regions = replaceOnce(missing.regions, R"(,
-                           "tonnes_max_mult": 4)", "");
+                           "tonnes_max_mult": 4)",
+                                  "");
     const auto absent = content::loadFromStrings(missing);
     CHECK_FALSE(absent.ok());
     CHECK(hasError(absent, "regions.json", "[0].deposits.iron.tonnes_max_mult",

@@ -409,7 +409,7 @@ struct SweepRow {
     std::vector<std::array<std::uint32_t, kMineSamples>> minesBuilt;
     std::vector<std::array<std::uint32_t, kMineStates>> minesByState;
     std::vector<sim::Day> bankruptDay;
-    sim::Day firstDepletionDay = 0;       // any company; 1-based, 0 = never
+    sim::Day firstDepletionDay = 0;        // any company; 1-based, 0 = never
     std::uint32_t depletedByGoalYear = 0;  // mines depleted by the end of year 8
     // Days from opening to depletion for every mine in the cohort (opened at
     // least kMineLifeCohortDays before the end); a mine still running counts
@@ -417,7 +417,7 @@ struct SweepRow {
     std::vector<std::int64_t> mineLives;
     std::vector<std::int64_t> priceMeanPermille;  // per resource: mean price over base
     // Working state while the seed runs.
-    std::vector<sim::Day> depletedDay;       // per mine, 1-based, 0 = not yet
+    std::vector<sim::Day> depletedDay;        // per mine, 1-based, 0 = not yet
     std::vector<std::int64_t> priceSumCents;  // per resource, saturating
 };
 
@@ -680,11 +680,12 @@ std::string contestJson(const Options& options, const SweepRow& row) {
         prices += std::format("{}{:.3f}", prices.empty() ? "" : ", ",
                               static_cast<double>(permille) / 1000.0);
     }
-    return std::format("\"mines_built\": [{}], \"mines_by_state\": [{}], \"bankrupt_day\": [{}], "
-                       "\"first_depletion_day\": {}, \"depleted_by_y{}\": {}, "
-                       "\"cohort_mines\": {}, \"price_mean\": [{}]",
-                       built, states, joined(row.bankruptDay), row.firstDepletionDay,
-                       kGoalLandYear, row.depletedByGoalYear, row.mineLives.size(), prices);
+    return std::format(
+        "\"mines_built\": [{}], \"mines_by_state\": [{}], \"bankrupt_day\": [{}], "
+        "\"first_depletion_day\": {}, \"depleted_by_y{}\": {}, "
+        "\"cohort_mines\": {}, \"price_mean\": [{}]",
+        built, states, joined(row.bankruptDay), row.firstDepletionDay, kGoalLandYear,
+        row.depletedByGoalYear, row.mineLives.size(), prices);
 }
 
 void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows, sim::Day days) {
@@ -824,12 +825,12 @@ void contestChecks(const Options& options, const sim::Content& content,
     checks.push_back(
         {"median_mine_life", !lifeMeasured || lifeOk,
          lifeMeasured
-             ? std::format("median days from opening to depletion, {} mines opened in the first "
-                           "{} days: {} (goal: {} to {})",
-                           lives.size(), options.days - kMineLifeCohortDays,
-                           life.median > options.days ? std::string("never")
-                                                      : std::to_string(life.median),
-                           kGoalMineLifeMinDays, kGoalMineLifeMaxDays)
+             ? std::format(
+                   "median days from opening to depletion, {} mines opened in the first "
+                   "{} days: {} (goal: {} to {})",
+                   lives.size(), options.days - kMineLifeCohortDays,
+                   life.median > options.days ? std::string("never") : std::to_string(life.median),
+                   kGoalMineLifeMinDays, kGoalMineLifeMaxDays)
              : std::format("not evaluated: the run is not longer than {} days",
                            kMineLifeCohortDays),
          false});
@@ -839,20 +840,20 @@ void contestChecks(const Options& options, const sim::Content& content,
         rows.begin(), rows.end(), [](const SweepRow& r) { return r.depletedByGoalYear == 0; });
     checks.push_back(
         {"depletion_by_year_8", !yearMeasured || undepleted == 0,
-         yearMeasured ? std::format("{} of {} seeds had no depleted mine by year {} (goal: none)",
-                                    undepleted, seeds, kGoalLandYear)
-                      : std::format("not evaluated: the run is shorter than {} years",
-                                    kGoalLandYear),
+         yearMeasured
+             ? std::format("{} of {} seeds had no depleted mine by year {} (goal: none)",
+                           undepleted, seeds, kGoalLandYear)
+             : std::format("not evaluated: the run is shorter than {} years", kGoalLandYear),
          kGateContest});
 
     const Spread withdrawn =
         spreadOver(rows, [](const SweepRow& r) { return r.withdrawn.at(kSweepYears.size() - 1); });
     checks.push_back(
         {"withdrawn_land_at_year_8", !yearMeasured || withdrawn.median <= kGoalWithdrawnYear8,
-         yearMeasured ? std::format("median withdrawn plots at year {}: {} (goal: {} or fewer)",
-                                    kGoalLandYear, withdrawn.median, kGoalWithdrawnYear8)
-                      : std::format("not evaluated: the run is shorter than {} years",
-                                    kGoalLandYear),
+         yearMeasured
+             ? std::format("median withdrawn plots at year {}: {} (goal: {} or fewer)",
+                           kGoalLandYear, withdrawn.median, kGoalWithdrawnYear8)
+             : std::format("not evaluated: the run is shorter than {} years", kGoalLandYear),
          false});
 }
 

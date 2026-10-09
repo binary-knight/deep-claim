@@ -159,7 +159,8 @@ TEST_CASE("Survey estimates are noisy but unbiased in log space", "[surveys]") {
     CHECK(sd < 0.6);
 }
 
-TEST_CASE("A survey marks an estimate above twice the regional median as major", "[surveys][view]") {
+TEST_CASE("A survey marks an estimate above twice the regional median as major",
+          "[surveys][view]") {
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 1, test::setup());
     // A listed plot that holds something, so its survey reports an estimate.
