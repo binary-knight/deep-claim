@@ -43,9 +43,9 @@ struct AutoPause {
     [[nodiscard]] static AutoPause defaults();
 
     [[nodiscard]] bool isEnabled(PauseOn reason) const {
-        return enabled[static_cast<std::size_t>(reason)];
+        return enabled.at(static_cast<std::size_t>(reason));
     }
-    void set(PauseOn reason, bool on) { enabled[static_cast<std::size_t>(reason)] = on; }
+    void set(PauseOn reason, bool on) { enabled.at(static_cast<std::size_t>(reason)) = on; }
 
     // The reason a notice to `player` would pause for, if it is one of the
     // pausing kinds (regardless of whether that reason is enabled).

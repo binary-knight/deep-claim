@@ -230,8 +230,13 @@ void PriceChartElement::buildLine(const ChartSeries& series, Rml::Vector2f size)
     if (series.hasBaseline) {
         Rml::Mesh dashes;
         const float y = yOf(series.baseline);
-        for (float x = 0.0F; x < size.x; x += 2.0F * kDash) {
+        const int dashCount = static_cast<int>(size.x / (2.0F * kDash)) + 1;
+        for (int n = 0; n < dashCount; ++n) {
+            const float x = static_cast<float>(n) * 2.0F * kDash;
             const float w = std::min(kDash, size.x - x);
+            if (w <= 0.0F) {
+                break;
+            }
             Rml::MeshUtilities::GenerateQuad(dashes, Rml::Vector2f(x, y - 0.5F),
                                              Rml::Vector2f(w, 1.0F), kBaseline);
         }

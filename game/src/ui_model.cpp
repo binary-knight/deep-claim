@@ -16,7 +16,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace game {
@@ -65,12 +67,11 @@ const char* mineStateClass(sim::MineState state) {
             return "warn";
         case sim::MineState::Operating:
             return "good";
-        case sim::MineState::Mothballed:
-            return "muted";
-        case sim::MineState::Depleted:
-            return "muted";
         case sim::MineState::Closed:
             return "danger";
+        case sim::MineState::Mothballed:
+        case sim::MineState::Depleted:
+            break;
     }
     return "muted";
 }
@@ -83,9 +84,18 @@ std::string dayLabel(sim::Day day) {
     return std::format("day {}", day);
 }
 
+sim::Day daysLeft(sim::Day target, sim::Day today) {
+    return target > today ? target - today : 0;
+}
+
 std::string daysUntil(const sim::Content& content, sim::Day target, sim::Day today) {
-    const sim::Day days = target > today ? target - today : 0;
-    return text(content, "ui.days_in", {{"days", std::to_string(days)}});
+    return text(content, "ui.days_in", {{"days", std::to_string(daysLeft(target, today))}});
+}
+
+std::string moneyTimesTonnes(sim::Money price, std::int64_t tonnes) {
+    const std::int64_t cents =
+        sim::checkedMulDiv(price.cents(), tonnes, 1).value_or(kMaxDisplayCents);
+    return formatMoney(sim::Money::fromCents(std::min(cents, kMaxDisplayCents)));
 }
 
 bool knowsTech(const sim::CompanyView& view, sim::TechId id) {
@@ -176,6 +186,11 @@ const sim::MineView* findMine(const sim::CompanyView& view, sim::MineId id) {
     return nullptr;
 }
 
+// Bids on a listed plot that are not the player's.
+std::uint32_t rivalBids(const sim::AuctionView& auction) {
+    return auction.bidCount - (auction.myBid > sim::Money::zero() ? 1U : 0U);
+}
+
 // An operating mine that produced nothing on its last processed day after
 // its opening day has nothing it can extract (the sim says why in the log).
 bool mineIdle(const sim::MineView& mine, sim::Day today) {
@@ -189,9 +204,9 @@ std::string outputText(const sim::Content& content, const sim::MineView& mine) {
     std::string out;
     for (std::uint32_t r = 0; r < mine.lastOutputTonnes.size(); ++r) {
         if (mine.lastOutputTonnes[r] > 0) {
-            out += std::format("{}{} t/day {}", out.empty() ? "" : " + ",
-                               formatTonnes(mine.lastOutputTonnes[r])
-                                   .substr(0, formatTonnes(mine.lastOutputTonnes[r]).size() - 2),
+            std::string tonnes = formatTonnes(mine.lastOutputTonnes[r]);
+            tonnes.resize(tonnes.size() - 2);  // drop the " t": the unit is t/day
+            out += std::format("{}{} t/day {}", out.empty() ? "" : " + ", tonnes,
                                content.resources[r].name);
         }
     }
@@ -203,10 +218,8 @@ std::string outputText(const sim::Content& content, const sim::MineView& mine) {
 std::string remainingText(const sim::Content& content, const sim::MineView& mine, sim::Day today) {
     switch (mine.state) {
         case sim::MineState::Building:
-            return text(
-                content, "ui.remaining_building",
-                {{"days",
-                  std::to_string(mine.operationalDay > today ? mine.operationalDay - today : 0)}});
+            return text(content, "ui.remaining_building",
+                        {{"days", std::to_string(daysLeft(mine.operationalDay, today))}});
         case sim::MineState::Depleted:
             return text(content, "ui.remaining_exhausted");
         case sim::MineState::Closed:
@@ -266,6 +279,11 @@ std::string oddsText(const sim::Content& content, const sim::PlotView& plot) {
     return odds;
 }
 
+std::string monthsBeforeBankruptcy(const sim::Content& content, const sim::CompanyView& view) {
+    const std::uint32_t grace = content.balance.bankruptcyGraceMonths + 1;
+    return std::to_string(grace > view.monthsInsolvent ? grace - view.monthsInsolvent : 0);
+}
+
 // ---- header and strip ----
 
 void fillStrip(const Session& session, UiModel& model) {
@@ -282,26 +300,30 @@ void fillStrip(const Session& session, UiModel& model) {
     model.storage_month_long = formatMoney(view.monthlyStorageCost) + "/month";
     model.solvent = view.monthsInsolvent == 0;
     model.solvency = model.solvent ? "solvent" : "insolvent";
-    const std::uint32_t grace = content.balance.bankruptcyGraceMonths;
     model.solvency_sub =
-        model.solvent ? text(content, "ui.solvency_grace", {{"months", std::to_string(grace)}})
+        model.solvent ? text(content, "ui.solvency_grace",
+                             {{"months", std::to_string(content.balance.bankruptcyGraceMonths)}})
                       : text(content, "ui.solvency_left",
-                             {{"months", std::to_string(grace + 1 > view.monthsInsolvent
-                                                            ? grace + 1 - view.monthsInsolvent
-                                                            : 0)}});
+                             {{"months", monthsBeforeBankruptcy(content, view)}});
 
     const sim::PlotView* next = nullptr;
+    sim::Day nextDay = 0;
     for (const sim::PlotView& plot : view.plots) {
-        if (plot.listing == sim::PlotListing::Listed && plot.auction &&
-            (next == nullptr || plot.auction->closesOnDay < next->auction->closesOnDay)) {
+        if (plot.listing != sim::PlotListing::Listed || !plot.auction) {
+            continue;
+        }
+        const sim::Day closes = plot.auction->closesOnDay;
+        if (next == nullptr || closes < nextDay) {
             next = &plot;
+            nextDay = closes;
         }
     }
-    model.next_auction = next == nullptr
-                             ? text(content, "ui.strip_no_auction")
-                             : text(content, "ui.strip_next_auction",
-                                    {{"plot", plotLabel(next->id)},
-                                     {"day", std::to_string(next->auction->closesOnDay)}});
+    model.next_auction = text(content, "ui.strip_no_auction");
+    if (next != nullptr) {
+        model.next_auction =
+            text(content, "ui.strip_next_auction",
+                 {{"plot", plotLabel(next->id)}, {"day", std::to_string(nextDay)}});
+    }
 
     int operating = 0;
     int building = 0;
@@ -329,50 +351,46 @@ void fillStrip(const Session& session, UiModel& model) {
     model.mines_mothballed = mothballed > 0 ? std::format("{} mothballed", mothballed) : "";
     model.mines_depleted = depleted > 0 ? std::format("{} depleted", depleted) : "";
 
-    model.research_strip =
-        view.activeResearch ? text(content, "ui.strip_research",
-                                   {{"tech", content.techs[view.activeResearch->tech.index()].name},
-                                    {"day", std::to_string(view.activeResearch->completesDay)}})
-                            : text(content, "ui.strip_research_idle");
+    model.research_strip = text(content, "ui.strip_research_idle");
+    if (view.activeResearch) {
+        const sim::ResearchView& research = *view.activeResearch;
+        model.research_strip = text(content, "ui.strip_research",
+                                    {{"tech", content.techs[research.tech.index()].name},
+                                     {"day", std::to_string(research.completesDay)}});
+    }
     model.has_world = !view.events.empty();
     model.world_event.clear();
     model.world_sub.clear();
     if (model.has_world) {
         const sim::ActiveEventView& event = view.events.front();
         model.world_event = content.events[event.event.index()].name;
-        model.world_sub = text(
-            content, "ui.strip_world",
-            {{"days", std::to_string(event.endsDay > view.day ? event.endsDay - view.day : 0)}});
+        model.world_sub = text(content, "ui.strip_world",
+                               {{"days", std::to_string(daysLeft(event.endsDay, view.day))}});
     }
 }
 
-// ---- dashboard ----
+// ---- dashboard: needs you ----
 
-void fillNeeds(const Session& session, UiModel& model) {
-    const sim::Content& content = session.content();
-    const sim::CompanyView& view = session.view();
-    struct Pending {
-        sim::Day days;
-        int priority;  // lower first; warnings before dated items
-        NeedRow row;
-    };
-    std::vector<Pending> pending;
-    const auto add = [&](sim::Day days, int priority, NeedRow row) {
-        pending.push_back({days, priority, std::move(row)});
-    };
+struct PendingNeed {
+    sim::Day days = 0;
+    int priority = 0;  // lower first; warnings before dated items
+    NeedRow row;
+};
 
+constexpr int kWarningPriority = 0;
+constexpr int kDatedPriority = 10;
+
+// Standing problems: insolvency, storage above a tenth of cash, idle mines.
+void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
+                     std::vector<PendingNeed>& pending) {
     if (view.monthsInsolvent > 0) {
         NeedRow row;
-        row.title = text(
-            content, "ui.need_insolvent_title",
-            {{"months",
-              std::to_string(content.balance.bankruptcyGraceMonths + 1 > view.monthsInsolvent
-                                 ? content.balance.bankruptcyGraceMonths + 1 - view.monthsInsolvent
-                                 : 0)}});
+        row.title = text(content, "ui.need_insolvent_title",
+                         {{"months", monthsBeforeBankruptcy(content, view)}});
         row.sub = text(content, "ui.need_insolvent_sub");
         row.action = 4;
         row.act_label = "Finance";
-        add(0, 0, row);
+        pending.push_back({0, kWarningPriority, std::move(row)});
     }
     if (view.monthlyStorageCost > sim::Money::zero() &&
         (view.cash <= sim::Money::zero() ||
@@ -384,86 +402,114 @@ void fillNeeds(const Session& session, UiModel& model) {
             {{"amount", formatMoney(view.monthlyStorageCost)}, {"cash", formatMoney(view.cash)}});
         row.action = 3;
         row.act_label = "Sell";
-        add(0, 1, row);
+        pending.push_back({0, kWarningPriority + 1, std::move(row)});
     }
     for (const sim::MineView& mine : view.mines) {
-        if (mineIdle(mine, view.day)) {
-            NeedRow row;
-            row.title = text(content, "ui.need_idle_title", {{"plot", plotLabel(mine.plot)}});
-            row.sub = text(content, "ui.need_idle_sub");
-            row.action = 2;
-            row.target = static_cast<int>(mine.id.value());
-            row.act_label = "Mothball";
-            add(0, 2, row);
-        }
-    }
-    for (const sim::PlotView& plot : view.plots) {
-        if (plot.listing != sim::PlotListing::Listed || !plot.auction) {
+        if (!mineIdle(mine, view.day)) {
             continue;
         }
-        const bool mine = plot.auction->myBid > sim::Money::zero();
-        const bool surveyed = findSurvey(view, plot.id).latest != nullptr;
-        if (!mine && !surveyed) {
-            continue;
-        }
-        const std::uint32_t others = plot.auction->bidCount - (mine ? 1U : 0U);
         NeedRow row;
-        row.title = text(content, "ui.need_auction_title", {{"plot", plotLabel(plot.id)}});
-        const std::string bids = std::to_string(plot.auction->bidCount);
-        if (mine && others > 0) {
-            row.sub = text(content, "ui.need_auction_sub_contested",
-                           {{"bids", bids}, {"amount", formatMoney(plot.auction->myBid)}});
-        } else if (mine) {
-            row.sub = text(content, "ui.need_auction_sub_leading",
-                           {{"amount", formatMoney(plot.auction->myBid)}});
-        } else if (others > 0) {
-            row.sub = text(content, "ui.need_auction_sub_rival", {{"bids", bids}});
-        } else {
-            row.sub = text(content, "ui.need_auction_sub_open");
+        row.title = text(content, "ui.need_idle_title", {{"plot", plotLabel(mine.plot)}});
+        row.sub = text(content, "ui.need_idle_sub");
+        row.action = 2;
+        row.target = static_cast<int>(mine.id.value());
+        row.act_label = "Mothball";
+        pending.push_back({0, kWarningPriority + 2, std::move(row)});
+    }
+}
+
+// A closing auction matters when the player has a bid in or has surveyed
+// the plot.
+std::optional<PendingNeed> auctionNeed(const sim::Content& content, const sim::CompanyView& view,
+                                       const sim::PlotView& plot) {
+    if (plot.listing != sim::PlotListing::Listed || !plot.auction) {
+        return std::nullopt;
+    }
+    const sim::AuctionView& auction = *plot.auction;
+    const bool mine = auction.myBid > sim::Money::zero();
+    const bool surveyed = findSurvey(view, plot.id).latest != nullptr;
+    if (!mine && !surveyed) {
+        return std::nullopt;
+    }
+    const std::uint32_t others = rivalBids(auction);
+    const std::string bids = std::to_string(auction.bidCount);
+    NeedRow row;
+    row.title = text(content, "ui.need_auction_title", {{"plot", plotLabel(plot.id)}});
+    if (mine && others > 0) {
+        row.sub = text(content, "ui.need_auction_sub_contested",
+                       {{"bids", bids}, {"amount", formatMoney(auction.myBid)}});
+    } else if (mine) {
+        row.sub =
+            text(content, "ui.need_auction_sub_leading", {{"amount", formatMoney(auction.myBid)}});
+    } else if (others > 0) {
+        row.sub = text(content, "ui.need_auction_sub_rival", {{"bids", bids}});
+    } else {
+        row.sub = text(content, "ui.need_auction_sub_open");
+    }
+    row.days = daysUntil(content, auction.closesOnDay, view.day);
+    row.action = 1;
+    row.target = static_cast<int>(plot.id.value());
+    row.act_label = mine ? "Raise bid" : "Bid";
+    return PendingNeed{daysLeft(auction.closesOnDay, view.day), kDatedPriority, std::move(row)};
+}
+
+// Things with a date: auctions, mines opening, events ending, research.
+void addDatedNeeds(const sim::Content& content, const sim::CompanyView& view,
+                   std::vector<PendingNeed>& pending) {
+    for (const sim::PlotView& plot : view.plots) {
+        if (std::optional<PendingNeed> need = auctionNeed(content, view, plot)) {
+            pending.push_back(std::move(*need));
         }
-        row.days = daysUntil(content, plot.auction->closesOnDay, view.day);
-        row.action = 1;
-        row.target = static_cast<int>(plot.id.value());
-        row.act_label = mine ? "Raise bid" : "Bid";
-        add(plot.auction->closesOnDay - view.day, 10, row);
     }
     for (const sim::MineView& mine : view.mines) {
-        if (mine.state == sim::MineState::Building) {
-            NeedRow row;
-            row.title = text(content, "ui.need_mine_opens_title", {{"plot", plotLabel(mine.plot)}});
-            row.sub = text(content, "ui.need_mine_opens_sub");
-            row.days = daysUntil(content, mine.operationalDay, view.day);
-            add(mine.operationalDay > view.day ? mine.operationalDay - view.day : 0, 10, row);
+        if (mine.state != sim::MineState::Building) {
+            continue;
         }
+        NeedRow row;
+        row.title = text(content, "ui.need_mine_opens_title", {{"plot", plotLabel(mine.plot)}});
+        row.sub = text(content, "ui.need_mine_opens_sub");
+        row.days = daysUntil(content, mine.operationalDay, view.day);
+        pending.push_back(
+            {daysLeft(mine.operationalDay, view.day), kDatedPriority, std::move(row)});
     }
     for (const sim::ActiveEventView& event : view.events) {
-        NeedRow row;
         const sim::EventDef& def = content.events[event.event.index()];
+        NeedRow row;
         row.title = text(content, "ui.need_event_title", {{"event", def.name}});
         row.sub = def.description;
         row.days = daysUntil(content, event.endsDay, view.day);
-        add(event.endsDay > view.day ? event.endsDay - view.day : 0, 10, row);
+        pending.push_back({daysLeft(event.endsDay, view.day), kDatedPriority, std::move(row)});
     }
     if (view.activeResearch) {
+        const sim::ResearchView& research = *view.activeResearch;
         NeedRow row;
         row.title = text(content, "ui.need_research_title");
-        row.sub = content.techs[view.activeResearch->tech.index()].name;
-        row.days = daysUntil(content, view.activeResearch->completesDay, view.day);
-        add(view.activeResearch->completesDay > view.day
-                ? view.activeResearch->completesDay - view.day
-                : 0,
-            10, row);
+        row.sub = content.techs[research.tech.index()].name;
+        row.days = daysUntil(content, research.completesDay, view.day);
+        pending.push_back(
+            {daysLeft(research.completesDay, view.day), kDatedPriority, std::move(row)});
     }
-    std::stable_sort(pending.begin(), pending.end(), [](const Pending& a, const Pending& b) {
-        return a.priority != b.priority ? a.priority < b.priority : a.days < b.days;
-    });
+}
+
+void fillNeeds(const Session& session, UiModel& model) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    std::vector<PendingNeed> pending;
+    addWarningNeeds(content, view, pending);
+    addDatedNeeds(content, view, pending);
+    std::stable_sort(
+        pending.begin(), pending.end(), [](const PendingNeed& a, const PendingNeed& b) {
+            return a.priority != b.priority ? a.priority < b.priority : a.days < b.days;
+        });
     model.needs.clear();
-    for (Pending& item : pending) {
+    for (PendingNeed& item : pending) {
         item.row.number = static_cast<int>(model.needs.size()) + 1;
         model.needs.push_back(std::move(item.row));
     }
     model.needs_none = model.needs.empty() ? text(content, "ui.need_none") : "";
 }
+
+// ---- dashboard: what you own ----
 
 OwnedRow makeOwnedRow(const sim::Content& content, const sim::CompanyView& view,
                       const sim::PlotView& plot) {
@@ -492,6 +538,36 @@ OwnedRow makeOwnedRow(const sim::Content& content, const sim::CompanyView& view,
     return row;
 }
 
+// One line per rival: plots, mines, and the plots it is bidding on. Sealed
+// bids are anonymous; with a single rival, any bid that is not the player's
+// is that rival's.
+std::string rivalLine(const sim::Content& content, const sim::CompanyView& view,
+                      const sim::CompanyPublicView& rival) {
+    if (rival.bankrupt) {
+        return text(content, "ui.rival_bankrupt", {{"company", rival.name}});
+    }
+    int mines = 0;
+    std::string bidding;
+    for (const sim::PlotView& plot : view.plots) {
+        if (plot.mine && plot.mine->owner == rival.id) {
+            ++mines;
+        }
+        if (plot.listing == sim::PlotListing::Listed && plot.auction &&
+            rivalBids(*plot.auction) > 0 && view.companies.size() == 2) {
+            bidding += (bidding.empty() ? "" : ", ") + plotLabel(plot.id);
+        }
+    }
+    const std::string plots = std::to_string(rival.plotsOwned);
+    const std::string mineCount = std::to_string(mines);
+    if (bidding.empty()) {
+        return text(content, "ui.rival_line_quiet",
+                    {{"company", rival.name}, {"plots", plots}, {"mines", mineCount}});
+    }
+    return text(
+        content, "ui.rival_line",
+        {{"company", rival.name}, {"plots", plots}, {"mines", mineCount}, {"bidding", bidding}});
+}
+
 void fillOwned(const Session& session, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
@@ -501,42 +577,16 @@ void fillOwned(const Session& session, UiModel& model) {
             model.owned.push_back(makeOwnedRow(content, view, plot));
         }
     }
-    // Rivals in one line each: plots, mines, and the plot they are bidding on.
     model.rival_line.clear();
     for (std::uint32_t c = 1; c < view.companies.size(); ++c) {
-        const sim::CompanyPublicView& rival = view.companies[c];
         if (!model.rival_line.empty()) {
             model.rival_line += " ";
         }
-        if (rival.bankrupt) {
-            model.rival_line += text(content, "ui.rival_bankrupt", {{"company", rival.name}});
-            continue;
-        }
-        int mines = 0;
-        std::string bidding;
-        for (const sim::PlotView& plot : view.plots) {
-            if (plot.mine && plot.mine->owner == rival.id) {
-                ++mines;
-            }
-            // A sealed bid is anonymous; with one rival, any bid that is not
-            // the player's is the rival's.
-            if (plot.listing == sim::PlotListing::Listed && plot.auction &&
-                plot.auction->bidCount > (plot.auction->myBid > sim::Money::zero() ? 1U : 0U) &&
-                view.companies.size() == 2) {
-                bidding += (bidding.empty() ? "" : ", ") + plotLabel(plot.id);
-            }
-        }
-        model.rival_line += bidding.empty() ? text(content, "ui.rival_line_quiet",
-                                                   {{"company", rival.name},
-                                                    {"plots", std::to_string(rival.plotsOwned)},
-                                                    {"mines", std::to_string(mines)}})
-                                            : text(content, "ui.rival_line",
-                                                   {{"company", rival.name},
-                                                    {"plots", std::to_string(rival.plotsOwned)},
-                                                    {"mines", std::to_string(mines)},
-                                                    {"bidding", bidding}});
+        model.rival_line += rivalLine(content, view, view.companies[c]);
     }
 }
+
+// ---- dashboard: the money ----
 
 void fillFinanceRow(const Session& session, UiModel& model) {
     const sim::Content& content = session.content();
@@ -584,6 +634,46 @@ void fillFinanceRow(const Session& session, UiModel& model) {
 
 // ---- plots ----
 
+// The survey column of a for-sale row: estimate summary, error, and one flag
+// chip (bids, not surveyed, empty, locked ore).
+void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
+                    const sim::PlotView& plot, SaleRow& row) {
+    const SurveyLookup found = findSurvey(view, plot.id);
+    if (found.latest == nullptr) {
+        row.survey = found.pending
+                         ? text(content, "ui.survey_pending")
+                         : text(content, "ui.survey_blind", {{"odds", oddsText(content, plot)}});
+        row.flag = found.pending ? "" : "not surveyed";
+        row.flag_class = "danger";
+        return;
+    }
+    const std::vector<sim::SurveyEstimateView>& estimates = found.latest->estimates;
+    if (estimates.empty()) {
+        row.survey = text(content, "ui.survey_none");
+        row.flag = "empty";
+        row.flag_class = "";
+        return;
+    }
+    bool lockedOnly = true;
+    for (const sim::SurveyEstimateView& e : estimates) {
+        if (!row.survey.empty()) {
+            row.survey += " · ";
+        }
+        row.survey += std::format("{} ~{}", content.resources[e.resource.index()].name,
+                                  formatTonnes(e.tonnesEstimate));
+        lockedOnly = lockedOnly && resourceLocked(content, view, e.resource);
+    }
+    row.error = std::format("({})", formatRatio(estimates[0].relativeError));
+    if (lockedOnly) {
+        row.flag = "locked ore";
+        row.flag_class = "warn";
+    } else if (plot.auction && rivalBids(*plot.auction) > 0) {
+        row.flag =
+            text(content, "ui.flag_bids", {{"bids", std::to_string(plot.auction->bidCount)}});
+        row.flag_class = "warn";
+    }
+}
+
 void fillSale(const Session& session, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
@@ -600,43 +690,101 @@ void fillSale(const Session& session, UiModel& model) {
         row.ask = formatMoney(plot.askPrice);
         row.bids = std::to_string(plot.auction->bidCount);
         row.closes = dayLabel(plot.auction->closesOnDay);
-        const SurveyLookup found = findSurvey(view, plot.id);
-        const std::uint32_t others =
-            plot.auction->bidCount - (plot.auction->myBid > sim::Money::zero() ? 1U : 0U);
-        if (found.latest == nullptr) {
-            row.survey = found.pending ? text(content, "ui.survey_pending")
-                                       : text(content, "ui.survey_blind",
-                                              {{"odds", oddsText(content, plot)}});
-            row.flag = found.pending ? "" : "not surveyed";
-            row.flag_class = "danger";
-        } else {
-            bool lockedOnly = !found.latest->estimates.empty();
-            for (const sim::SurveyEstimateView& e : found.latest->estimates) {
-                if (!row.survey.empty()) {
-                    row.survey += " · ";
-                }
-                row.survey += std::format("{} ~{}", content.resources[e.resource.index()].name,
-                                          formatTonnes(e.tonnesEstimate));
-                lockedOnly = lockedOnly && resourceLocked(content, view, e.resource);
-            }
-            if (found.latest->estimates.empty()) {
-                row.survey = text(content, "ui.survey_none");
-                row.flag = "empty";
-                row.flag_class = "";
-            } else {
-                row.error =
-                    std::format("({})", formatRatio(found.latest->estimates[0].relativeError));
-                if (lockedOnly) {
-                    row.flag = "locked ore";
-                    row.flag_class = "warn";
-                } else if (others > 0) {
-                    row.flag = text(content, "ui.flag_bids", {{"bids", row.bids}});
-                    row.flag_class = "warn";
-                }
-            }
-        }
+        fillSurveyCell(content, view, plot, row);
         row.has_flag = !row.flag.empty();
         model.for_sale.push_back(row);
+    }
+}
+
+// The survey block of the selected plot. Returns whether anything found
+// there can be extracted today.
+bool fillPanelSurvey(const sim::Content& content, const sim::CompanyView& view,
+                     const SurveyLookup& found, PlotPanel& panel) {
+    if (found.latest == nullptr) {
+        panel.survey_title =
+            found.pending ? text(content, "ui.survey_pending") : text(content, "ui.survey_never");
+        return false;
+    }
+    if (found.latest->estimates.empty()) {
+        panel.survey_title = text(content, "ui.survey_none");
+        return false;
+    }
+    panel.survey_title =
+        text(content, "ui.survey_title", {{"day", std::to_string(found.latest->completesDay)}});
+    std::int64_t valueCents = 0;
+    bool anyExtractable = false;
+    for (const sim::SurveyEstimateView& e : found.latest->estimates) {
+        EstimateRow row;
+        row.resource = content.resources[e.resource.index()].name;
+        row.tonnes = std::format("~{}", formatTonnes(e.tonnesEstimate));
+        row.error = std::format("({})", formatRatio(e.relativeError));
+        row.locked = resourceLocked(content, view, e.resource);
+        row.needs = row.locked ? lockedNote(content, e.resource) : "";
+        anyExtractable = anyExtractable || !row.locked;
+        valueCents +=
+            sim::checkedMulDiv(view.markets[e.resource.index()].price.cents(), e.tonnesEstimate, 1)
+                .value_or(kMaxDisplayCents);
+        valueCents = std::min(valueCents, kMaxDisplayCents);
+        panel.estimates.push_back(row);
+    }
+    panel.value = "~" + formatMoney(sim::Money::fromCents(valueCents));
+    return anyExtractable;
+}
+
+// One notice at a time, the most consequential first: blind bet, empty plot,
+// locked ore only, contested auction.
+void fillPanelNotice(const sim::Content& content, const sim::PlotView& plot,
+                     const SurveyLookup& found, bool anyExtractable, PlotPanel& panel) {
+    if (plot.mine) {
+        return;
+    }
+    if (found.latest == nullptr) {
+        if (!found.pending) {
+            panel.notice = text(content, "ui.notice_unsurveyed",
+                                {{"amount", formatMoney(content.balance.surveyCost)}});
+            panel.notice_class = "danger";
+        }
+        return;
+    }
+    if (found.latest->estimates.empty()) {
+        panel.notice = text(content, "ui.notice_empty");
+        panel.notice_class = "warn";
+        return;
+    }
+    if (!anyExtractable) {
+        std::string techs;
+        for (const EstimateRow& row : panel.estimates) {
+            if (!row.needs.empty() && techs.find(row.needs) == std::string::npos) {
+                techs += (techs.empty() ? "" : ", ") + row.needs;
+            }
+        }
+        panel.notice = text(content, "ui.notice_locked_only", {{"needs", techs}});
+        panel.notice_class = "warn";
+        return;
+    }
+    if (panel.listed && plot.auction && rivalBids(*plot.auction) > 0) {
+        panel.notice = text(content, "ui.notice_contested");
+        panel.notice_class = "warn";
+    }
+}
+
+void fillPanelActions(const sim::Content& content, const sim::CompanyView& view,
+                      const sim::PlotView& plot, const SurveyLookup& found, PlotPanel& panel) {
+    panel.can_survey = !found.pending && (!plot.owner.valid() || panel.owned) && !view.bankrupt;
+    panel.survey_label =
+        text(content, found.latest != nullptr ? "ui.survey_again" : "ui.survey_first",
+             {{"amount", formatMoney(content.balance.surveyCost)}});
+    panel.can_build = panel.owned && !plot.mine && !view.bankrupt;
+    panel.can_afford_mine = plot.mineCapexQuote <= view.cash - view.reservedCash;
+    panel.build_label = text(content, "ui.build_label", {{"amount", panel.capex}});
+    panel.build_blocked = text(content, "ui.build_blocked", {{"amount", panel.capex}});
+    if (plot.mine) {
+        const sim::MinePublicView& mine = *plot.mine;
+        panel.mine_index = static_cast<int>(mine.id.value());
+        panel.mine_operating = mine.state == sim::MineState::Operating;
+        panel.can_toggle_mine =
+            panel.owned && !view.bankrupt &&
+            (mine.state == sim::MineState::Operating || mine.state == sim::MineState::Mothballed);
     }
 }
 
@@ -668,132 +816,72 @@ void fillPanel(const Session& session, UiModel& model) {
     panel.capex = formatMoney(plot.mineCapexQuote);
     panel.odds = oddsText(content, plot);
     const SurveyLookup found = findSurvey(view, plot.id);
-    std::int64_t valueCents = 0;
-    bool anyExtractable = false;
-    if (found.latest != nullptr) {
-        panel.survey_title =
-            text(content, "ui.survey_title", {{"day", std::to_string(found.latest->completesDay)}});
-        for (const sim::SurveyEstimateView& e : found.latest->estimates) {
-            EstimateRow row;
-            row.resource = content.resources[e.resource.index()].name;
-            row.tonnes = std::format("~{}", formatTonnes(e.tonnesEstimate));
-            row.error = std::format("({})", formatRatio(e.relativeError));
-            row.locked = resourceLocked(content, view, e.resource);
-            row.needs = row.locked ? lockedNote(content, e.resource) : "";
-            anyExtractable = anyExtractable || !row.locked;
-            valueCents += sim::checkedMulDiv(view.markets[e.resource.index()].price.cents(),
-                                             e.tonnesEstimate, 1)
-                              .value_or(kMaxDisplayCents);
-            valueCents = std::min(valueCents, kMaxDisplayCents);
-            panel.estimates.push_back(row);
-        }
-        if (found.latest->estimates.empty()) {
-            panel.survey_title = text(content, "ui.survey_none");
-        } else {
-            panel.value = "~" + formatMoney(sim::Money::fromCents(valueCents));
-        }
-    } else {
-        panel.survey_title =
-            found.pending ? text(content, "ui.survey_pending") : text(content, "ui.survey_never");
-    }
-    // One notice at a time, the most consequential first.
-    const std::uint32_t others =
-        plot.auction ? plot.auction->bidCount - (plot.auction->myBid > sim::Money::zero() ? 1U : 0U)
-                     : 0U;
-    if (found.latest == nullptr && !found.pending && !plot.mine) {
-        panel.notice = text(content, "ui.notice_unsurveyed",
-                            {{"amount", formatMoney(content.balance.surveyCost)}});
-        panel.notice_class = "danger";
-    } else if (found.latest != nullptr && !plot.mine && found.latest->estimates.empty()) {
-        panel.notice = text(content, "ui.notice_empty");
-        panel.notice_class = "warn";
-    } else if (found.latest != nullptr && !plot.mine && !anyExtractable) {
-        std::string techs;
-        for (const EstimateRow& row : panel.estimates) {
-            if (!row.needs.empty() && techs.find(row.needs) == std::string::npos) {
-                techs += (techs.empty() ? "" : ", ") + row.needs;
-            }
-        }
-        panel.notice = text(content, "ui.notice_locked_only", {{"needs", techs}});
-        panel.notice_class = "warn";
-    } else if (panel.listed && others > 0) {
-        panel.notice = text(content, "ui.notice_contested");
-        panel.notice_class = "warn";
-    }
-    panel.can_survey = !found.pending && (!plot.owner.valid() || panel.owned) && !view.bankrupt;
-    panel.survey_label =
-        text(content, found.latest != nullptr ? "ui.survey_again" : "ui.survey_first",
-             {{"amount", formatMoney(content.balance.surveyCost)}});
-    panel.can_build = panel.owned && !plot.mine && !view.bankrupt;
-    panel.can_afford_mine = plot.mineCapexQuote <= view.cash - view.reservedCash;
-    panel.build_label = text(content, "ui.build_label", {{"amount", panel.capex}});
-    panel.build_blocked = text(content, "ui.build_blocked", {{"amount", panel.capex}});
-    if (plot.mine) {
-        panel.mine_index = static_cast<int>(plot.mine->id.value());
-        panel.mine_operating = plot.mine->state == sim::MineState::Operating;
-        panel.can_toggle_mine = panel.owned && !view.bankrupt &&
-                                (plot.mine->state == sim::MineState::Operating ||
-                                 plot.mine->state == sim::MineState::Mothballed);
-    }
+    const bool anyExtractable = fillPanelSurvey(content, view, found, panel);
+    fillPanelNotice(content, plot, found, anyExtractable, panel);
+    fillPanelActions(content, view, plot, found, panel);
     model.panel = panel;
 }
 
 // ---- market ----
+
+std::string policySummary(const sim::Content& content, const sim::SellPolicy& policy) {
+    const bool keep = policy.reserveTonnes > 0;
+    const bool floor = policy.floorPrice > sim::Money::zero();
+    const char* key = "ui.policy_auto";
+    if (policy.enabled == 0) {
+        key = "ui.policy_manual";
+    } else if (keep && floor) {
+        key = "ui.policy_auto_keep_floor";
+    } else if (keep) {
+        key = "ui.policy_auto_keep";
+    } else if (floor) {
+        key = "ui.policy_auto_floor";
+    }
+    return text(content, key,
+                {{"reserve", formatTonnes(policy.reserveTonnes)},
+                 {"price", formatMoney(policy.floorPrice)}});
+}
+
+ResourceRow makeResourceRow(const sim::Content& content, const sim::CompanyView& view,
+                            std::uint32_t r, int selected) {
+    const sim::MarketView& market = view.markets[r];
+    ResourceRow row;
+    row.index = static_cast<int>(r);
+    row.name = content.resources[r].name;
+    row.price = formatMoney(market.price);
+    row.price_unit = row.price + "/t";
+    row.ratio = formatRatio(market.price.ratioTo(market.basePrice));
+    row.ratio_warn = market.price.ratioTo(market.basePrice) < sim::Fixed::fromRatio(7, 10);
+    row.base_line = text(content, "ui.market_base",
+                         {{"price", formatMoney(market.basePrice)}, {"ratio", row.ratio}});
+    row.market_sub = text(content, "ui.market_sub",
+                          {{"demand", formatTonnes(market.baseDemandTonnesPerDay)},
+                           {"supply", formatTonnes(market.recentSupplyTonnesPerDay)}});
+    const std::int64_t tonnes = view.inventoryTonnes[r];
+    row.stock = formatTonnes(tonnes);
+    row.stock_sub = text(content, "ui.stock_sub", {{"tonnes", row.stock}});
+    row.stock_value = moneyTimesTonnes(market.price, tonnes);
+    row.has_stock = tonnes > 0;
+    row.locked = resourceLocked(content, view, sim::ResourceId(r));
+    row.locked_note = row.locked ? lockedNote(content, sim::ResourceId(r)) : "";
+    row.selected = static_cast<int>(r) == selected;
+    const sim::SellPolicy& policy = view.sellPolicies[r];
+    row.policy_on = policy.enabled != 0;
+    row.policy = policySummary(content, policy);
+    row.auto_sold = view.autoSoldTonnes[r] > 0
+                        ? text(content, "ui.auto_sold",
+                               {{"tonnes", formatTonnes(view.autoSoldTonnes[r])},
+                                {"amount", formatMoney(view.autoSoldProceeds[r])}})
+                        : text(content, "ui.auto_sold_none");
+    return row;
+}
 
 void fillResources(const Session& session, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     model.resources.clear();
     for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
-        const sim::MarketView& market = view.markets[r];
-        ResourceRow row;
-        row.index = static_cast<int>(r);
-        row.name = content.resources[r].name;
-        row.price = formatMoney(market.price);
-        row.price_unit = row.price + "/t";
-        row.ratio = formatRatio(market.price.ratioTo(market.basePrice));
-        row.ratio_warn = market.price.ratioTo(market.basePrice) < sim::Fixed::fromRatio(7, 10);
-        row.base_line = text(content, "ui.market_base",
-                             {{"price", formatMoney(market.basePrice)}, {"ratio", row.ratio}});
-        row.market_sub = text(content, "ui.market_sub",
-                              {{"demand", formatTonnes(market.baseDemandTonnesPerDay)},
-                               {"supply", formatTonnes(market.recentSupplyTonnesPerDay)}});
-        const std::int64_t tonnes = view.inventoryTonnes[r];
-        row.stock = formatTonnes(tonnes);
-        row.stock_sub = text(content, "ui.stock_sub", {{"tonnes", row.stock}});
-        const std::int64_t valueCents =
-            sim::checkedMulDiv(market.price.cents(), tonnes, 1).value_or(kMaxDisplayCents);
-        row.stock_value =
-            formatMoney(sim::Money::fromCents(std::min(valueCents, kMaxDisplayCents)));
-        row.has_stock = tonnes > 0;
-        row.locked = resourceLocked(content, view, sim::ResourceId(r));
-        row.locked_note = row.locked ? lockedNote(content, sim::ResourceId(r)) : "";
-        row.selected = static_cast<int>(r) == model.selected_resource;
-        const sim::SellPolicy& policy = view.sellPolicies[r];
-        row.policy_on = policy.enabled != 0;
-        const bool keep = policy.reserveTonnes > 0;
-        const bool floor = policy.floorPrice > sim::Money::zero();
-        const char* policyKey = "ui.policy_auto";
-        if (policy.enabled == 0) {
-            policyKey = "ui.policy_manual";
-        } else if (keep && floor) {
-            policyKey = "ui.policy_auto_keep_floor";
-        } else if (keep) {
-            policyKey = "ui.policy_auto_keep";
-        } else if (floor) {
-            policyKey = "ui.policy_auto_floor";
-        }
-        row.policy = text(content, policyKey,
-                          {{"reserve", formatTonnes(policy.reserveTonnes)},
-                           {"price", formatMoney(policy.floorPrice)}});
-        if (view.autoSoldTonnes[r] > 0) {
-            row.auto_sold = text(content, "ui.auto_sold",
-                                 {{"tonnes", formatTonnes(view.autoSoldTonnes[r])},
-                                  {"amount", formatMoney(view.autoSoldProceeds[r])}});
-        } else {
-            row.auto_sold = text(content, "ui.auto_sold_none");
-        }
-        model.resources.push_back(row);
+        model.resources.push_back(makeResourceRow(content, view, r, model.selected_resource));
     }
     if (model.selected_resource >= 0 &&
         model.selected_resource < static_cast<int>(content.resources.size())) {
@@ -817,59 +905,68 @@ void fillResources(const Session& session, UiModel& model) {
 
 // ---- research ----
 
+TechRow makeTechRow(const sim::Content& content, const sim::CompanyView& view, std::uint32_t i,
+                    const std::string& busyUntil) {
+    const sim::TechDef& tech = content.techs[i];
+    TechRow row;
+    row.index = static_cast<int>(i);
+    row.name = tech.name;
+    row.cost = formatMoney(tech.cost);
+    row.days = std::to_string(tech.durationDays);
+    row.effects = effectsText(content, tech);
+    std::string needs;
+    for (const sim::TechId p : tech.prerequisites) {
+        needs += (needs.empty() ? "" : ", ") + content.techs[p.index()].name;
+    }
+    row.needs = needs.empty() ? "" : text(content, "ui.needs_tech", {{"tech", needs}});
+    const bool ready =
+        std::ranges::all_of(tech.prerequisites, [&](sim::TechId p) { return knowsTech(view, p); });
+    const bool researching = view.activeResearch && view.activeResearch->tech == sim::TechId(i);
+    if (knowsTech(view, sim::TechId(i))) {
+        row.chip = "done";
+        row.chip_class = "good";
+    } else if (researching) {
+        row.chip = "researching";
+        row.chip_class = "accent";
+        row.researching = true;
+        row.until = text(content, "ui.tech_until", {{"day", busyUntil}});
+    } else if (!ready) {
+        row.chip = "locked";
+        row.chip_class = "muted";
+    } else {
+        row.chip = "available";
+        row.chip_class = "muted";
+        if (view.activeResearch) {
+            row.blocked = text(content, "ui.tech_busy", {{"day", busyUntil}});
+        } else if (view.bankrupt) {
+            row.blocked = text(content, "ui.tech_bankrupt");
+        } else if (tech.cost > view.cash - view.reservedCash) {
+            row.blocked = text(content, "ui.tech_unaffordable", {{"amount", row.cost}});
+        } else {
+            row.can_start = true;
+        }
+    }
+    return row;
+}
+
 void fillTechs(const Session& session, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     model.techs.clear();
-    const std::string busyUntil =
-        view.activeResearch ? std::to_string(view.activeResearch->completesDay) : "";
+    std::string busyUntil;
+    std::string busyTech;
+    if (view.activeResearch) {
+        const sim::ResearchView& research = *view.activeResearch;
+        busyUntil = std::to_string(research.completesDay);
+        busyTech = content.techs[research.tech.index()].name;
+    }
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
-        const sim::TechDef& tech = content.techs[i];
-        TechRow row;
-        row.index = static_cast<int>(i);
-        row.name = tech.name;
-        row.cost = formatMoney(tech.cost);
-        row.days = std::to_string(tech.durationDays);
-        row.effects = effectsText(content, tech);
-        std::string needs;
-        for (const sim::TechId p : tech.prerequisites) {
-            needs += (needs.empty() ? "" : ", ") + content.techs[p.index()].name;
-        }
-        row.needs = needs.empty() ? "" : text(content, "ui.needs_tech", {{"tech", needs}});
-        const bool ready = std::ranges::all_of(tech.prerequisites,
-                                               [&](sim::TechId p) { return knowsTech(view, p); });
-        if (knowsTech(view, sim::TechId(i))) {
-            row.chip = "done";
-            row.chip_class = "good";
-        } else if (view.activeResearch && view.activeResearch->tech == sim::TechId(i)) {
-            row.chip = "researching";
-            row.chip_class = "accent";
-            row.researching = true;
-            row.until = text(content, "ui.tech_until", {{"day", busyUntil}});
-        } else if (!ready) {
-            row.chip = "locked";
-            row.chip_class = "muted";
-        } else {
-            row.chip = "available";
-            row.chip_class = "muted";
-            if (view.activeResearch) {
-                row.blocked = text(content, "ui.tech_busy", {{"day", busyUntil}});
-            } else if (view.bankrupt) {
-                row.blocked = text(content, "ui.tech_bankrupt");
-            } else if (tech.cost > view.cash - view.reservedCash) {
-                row.blocked = text(content, "ui.tech_unaffordable", {{"amount", row.cost}});
-            } else {
-                row.can_start = true;
-            }
-        }
-        model.techs.push_back(row);
+        model.techs.push_back(makeTechRow(content, view, i, busyUntil));
     }
     model.lab_line = text(content, "ui.lab_one");
-    model.lab_sub = view.activeResearch
-                        ? text(content, "ui.lab_busy",
-                               {{"day", busyUntil},
-                                {"tech", content.techs[view.activeResearch->tech.index()].name}})
-                        : text(content, "ui.lab_idle");
+    model.lab_sub = busyUntil.empty()
+                        ? text(content, "ui.lab_idle")
+                        : text(content, "ui.lab_busy", {{"day", busyUntil}, {"tech", busyTech}});
 }
 
 // ---- finance ----
@@ -918,6 +1015,20 @@ void fillFinance(const Session& session, UiModel& model) {
         text(content, "ui.solvency_rule", {{"count", std::to_string(b.bankruptcyGraceMonths + 1)}});
 }
 
+bool noticeIsWarning(sim::NoticeKind kind) {
+    switch (kind) {
+        case sim::NoticeKind::CommandRejected:
+        case sim::NoticeKind::InsolvencyWarning:
+        case sim::NoticeKind::Bankrupt:
+        case sim::NoticeKind::BidForfeited:
+        case sim::NoticeKind::IdleMineWarning:
+        case sim::NoticeKind::MineFoundNothing:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void fillLog(const Session& session, UiModel& model) {
     model.log.clear();
     model.recent.clear();
@@ -929,12 +1040,7 @@ void fillLog(const Session& session, UiModel& model) {
         LogRow row;
         row.day = formatDay(entry.day);
         row.text = entry.text;
-        row.warning = entry.notice.kind == sim::NoticeKind::CommandRejected ||
-                      entry.notice.kind == sim::NoticeKind::InsolvencyWarning ||
-                      entry.notice.kind == sim::NoticeKind::Bankrupt ||
-                      entry.notice.kind == sim::NoticeKind::BidForfeited ||
-                      entry.notice.kind == sim::NoticeKind::IdleMineWarning ||
-                      entry.notice.kind == sim::NoticeKind::MineFoundNothing;
+        row.warning = noticeIsWarning(entry.notice.kind);
         if (model.recent.size() < 3) {
             model.recent.push_back(row);
         }
@@ -963,7 +1069,7 @@ void refreshModel(const Session& session, UiModel& model) {
     // The header truncates the company name in code: RCSS has no ellipsis.
     model.company = view.companies[Session::kPlayer.index()].name;
     if (model.company.size() > kCompanyNameMax) {
-        model.company = model.company.substr(0, kCompanyNameMax - 1) + "\u2026";
+        model.company = model.company.substr(0, kCompanyNameMax - 1) + "…";
     }
     model.day = formatDay(session.day());
     model.cash = formatMoney(view.cash);

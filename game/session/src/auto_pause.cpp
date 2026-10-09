@@ -31,7 +31,7 @@ std::string_view trim(std::string_view text) {
 }  // namespace
 
 std::string_view pauseOnKey(PauseOn reason) {
-    return kKeys[static_cast<std::size_t>(reason)];
+    return kKeys.at(static_cast<std::size_t>(reason));
 }
 
 AutoPause AutoPause::defaults() {
@@ -76,8 +76,8 @@ bool AutoPause::shouldPause(const sim::Notice& notice, sim::CompanyId player) co
 std::string AutoPause::toText() const {
     std::string out;
     for (std::size_t i = 0; i < kPauseOnCount; ++i) {
-        out += kKeys[i];
-        out += enabled[i] ? "=1\n" : "=0\n";
+        out += kKeys.at(i);
+        out += enabled.at(i) ? "=1\n" : "=0\n";
     }
     return out;
 }
@@ -104,8 +104,8 @@ bool AutoPause::fromText(std::string_view text) {
             continue;
         }
         for (std::size_t i = 0; i < kPauseOnCount; ++i) {
-            if (kKeys[i] == key) {
-                enabled[i] = value == "1";
+            if (kKeys.at(i) == key) {
+                enabled.at(i) = value == "1";
             }
         }
     }

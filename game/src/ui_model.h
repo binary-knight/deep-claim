@@ -162,6 +162,8 @@ struct PauseRow {
     bool on = false;
 };
 
+// Grouped by screen rather than by size; the padding is a few dozen bytes.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct UiModel {
     // Header
     std::string company;

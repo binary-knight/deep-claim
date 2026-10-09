@@ -169,7 +169,7 @@ void App::newGame(std::uint64_t seed) {
 }
 
 void App::loadPauseRules() {
-    std::ifstream file(services_->saveDirectory() / kPauseFile);
+    const std::ifstream file(services_->saveDirectory() / kPauseFile);
     if (!file) {
         return;
     }
