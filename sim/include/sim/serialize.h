@@ -305,7 +305,7 @@ void serialize(Archive& ar, BalanceParams& balance) {
        balance.mineCapexPerHectare, balance.mineBuildDays, balance.mineOpexPerDay,
        balance.mineMothballOpexMult, balance.auctionWindowDays, balance.plotsListedAtStart,
        balance.plotsListedPerMonth, balance.openingMinMineable, balance.openingMaxLockedRegion,
-       balance.maxUnsoldRounds, balance.relistCooldownDays, balance.bankruptcyGraceMonths,
+       balance.openingMineablePresence, balance.maxUnsoldRounds, balance.relistCooldownDays, balance.bankruptcyGraceMonths,
        balance.marketSupplySmoothingDays, balance.marketPriceAdjustDays,
        balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
        balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear,
@@ -313,8 +313,17 @@ void serialize(Archive& ar, BalanceParams& balance) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, AiParams& ai) {
+    ar(ai.sellAboveBase, ai.dumpStorageShare, ai.recoverableShare, ai.requiredReturn,
+       ai.paybackHorizonDays, ai.bidPremium, ai.bidPremiumHigh, ai.maxOpenProspects,
+       ai.reopenMargin, ai.idleMineGraceDays, ai.opexReserveDays, ai.cashReserve,
+       ai.researchFloor, ai.loanFloor, ai.loanChunk, ai.bootstrapLoan);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Content& content) {
-    ar(content.resources, content.techs, content.regions, content.events, content.balance);
+    ar(content.resources, content.techs, content.regions, content.events, content.balance,
+       content.ai);
 }
 
 }  // namespace sim

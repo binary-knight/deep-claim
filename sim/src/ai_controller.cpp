@@ -19,25 +19,6 @@ namespace sim {
 
 namespace {
 
-// Tuning knobs for the heuristic competitor. These shape one opponent's
-// personality rather than the economy, so they live in code for now.
-const Fixed kSellAbove = Fixed::fromRatio(85, 100);      // sell when price >= 85% of base
-const Fixed kDumpAbove = Fixed::fromRatio(2, 100);       // ...or storage > 2% of stock value
-const Fixed kRecoverableShare = Fixed::fromRatio(1, 2);  // haircut on surveyed tonnage
-const Fixed kBidPremium = Fixed::fromRatio(11, 10);
-const Fixed kBidPremiumHigh = Fixed::fromRatio(5, 4);
-const Fixed kRequiredReturn = Fixed::fromRatio(6, 5);  // net value must cover outlay x1.2
-const Fixed kReopenMargin = Fixed::fromRatio(5, 4);    // reopen a mine at 125% of opex
-constexpr std::int64_t kOpexReserveDays = 60;          // two months of opex in hand when building
-constexpr std::int64_t kPaybackHorizonDays = 1800;     // value at most five years of output
-constexpr Day kIdleMineGraceDays = 30;
-constexpr std::size_t kMaxOpenProspects = 2;  // surveyed-but-unbought listed plots
-const Money kCashReserve = Money::fromUnits(500'000);
-const Money kResearchFloor = Money::fromUnits(2'500'000);
-const Money kLoanFloor = Money::fromUnits(750'000);
-const Money kLoanChunk = Money::fromUnits(2'000'000);
-const Money kBootstrapLoan = Money::fromUnits(4'000'000);
-
 // One projected cash position shared by every rule, so the commands issued
 // on a day are jointly affordable and no rule can starve another.
 struct Budget {
@@ -107,7 +88,7 @@ std::size_t openProspects(const Content& content, const CompanyView& view) {
             continue;
         }
         const Money outlay = plot.askPrice + plot.mineCapexQuote;
-        if (surveyedNetValue(content, view, survey) >= outlay.scaled(kRequiredReturn)) {
+        if (surveyedNetValue(content, view, survey) >= outlay.scaled(content.ai.requiredReturn)) {
             ++count;
         }
     }
@@ -129,9 +110,9 @@ Money surveyedNetValue(const Content& content, const CompanyView& view, const Su
         const ResourceDef& def = content.resources[estimate.resource.index()];
         const std::int64_t output = std::max<std::int64_t>(def.baseOutputTonnesPerDay, 1);
         const std::int64_t horizonTonnes =
-            checkedMulDiv(output, kPaybackHorizonDays, 1).value_or(kMaxDepositTonnes);
+            checkedMulDiv(output, content.ai.paybackHorizonDays, 1).value_or(kMaxDepositTonnes);
         const std::int64_t tonnes =
-            std::min(checkedMulDiv(estimate.tonnesEstimate, kRecoverableShare.raw(), Fixed::kScale)
+            std::min(checkedMulDiv(estimate.tonnesEstimate, content.ai.recoverableShare.raw(), Fixed::kScale)
                          .value_or(kMaxDepositTonnes),
                      horizonTonnes);
         const Money price = view.markets[estimate.resource.index()].price;
@@ -145,8 +126,8 @@ Money surveyedNetValue(const Content& content, const CompanyView& view, const Su
     return revenue - Money::fromCents(std::min(opexCents, kMaxCashCents));
 }
 
-Money constructionReserve(const CompanyView& view) {
-    return view.mineOpexQuote * kOpexReserveDays;
+Money constructionReserve(const Content& content, const CompanyView& view) {
+    return view.mineOpexQuote * content.ai.opexReserveDays;
 }
 
 // Cash the company could raise with one more loan right now.
@@ -155,7 +136,7 @@ Money borrowingRoom(const Content& content, const CompanyView& view) {
         view.loanCapacity < content.balance.loanMinPrincipal) {
         return Money::zero();
     }
-    return std::min(view.loanCapacity, kBootstrapLoan);
+    return std::min(view.loanCapacity, content.ai.bootstrapLoan);
 }
 
 // Sell stock when the price is good or holding it costs too much.
@@ -177,8 +158,8 @@ void decideSales(const Content& content, const CompanyView& view, Budget& budget
                 .value_or(kMaxCashCents);
         const Money storage =
             Money::fromCents(std::min(storageCents, kMaxCashCents)).scaled(storageMult);
-        const bool goodPrice = price >= market.basePrice.scaled(kSellAbove);
-        const bool costlyToHold = storage > Money::fromCents(valueCents).scaled(kDumpAbove);
+        const bool goodPrice = price >= market.basePrice.scaled(content.ai.sellAboveBase);
+        const bool costlyToHold = storage > Money::fromCents(valueCents).scaled(content.ai.dumpStorageShare);
         if (!goodPrice && !costlyToHold) {
             continue;
         }
@@ -210,19 +191,20 @@ Money dailyOutputValue(const CompanyView& view, const MineView& mine) {
 // Mothball mines that lose money on a day's output (after a grace period so a
 // new mine gets to produce); reopen when the output would clear opex with a
 // margin, so prices must recover before the mine restarts.
-void decideMothballing(const CompanyView& view, std::vector<Command>& out) {
+void decideMothballing(const Content& content, const CompanyView& view,
+                       std::vector<Command>& out) {
     for (const MineView& mine : view.mines) {
         if (mine.state != MineState::Operating && mine.state != MineState::Mothballed) {
             continue;
         }
-        if (view.day <= mine.operationalDay + kIdleMineGraceDays) {
+        if (view.day <= mine.operationalDay + content.ai.idleMineGraceDays) {
             continue;
         }
         const Money revenue = dailyOutputValue(view, mine);
         const Money opex = view.mineOpexQuote;
         if (mine.state == MineState::Operating && revenue < opex) {
             out.emplace_back(SetMineState{view.me, mine.id, 0});
-        } else if (mine.state == MineState::Mothballed && revenue >= opex.scaled(kReopenMargin)) {
+        } else if (mine.state == MineState::Mothballed && revenue >= opex.scaled(content.ai.reopenMargin)) {
             out.emplace_back(SetMineState{view.me, mine.id, 1});
         }
     }
@@ -244,11 +226,11 @@ void decideBuilding(const Content& content, const CompanyView& view, Budget& bud
             continue;
         }
         const Money capex = plot.mineCapexQuote;
-        if (surveyedNetValue(content, view, *survey) >= capex.scaled(kRequiredReturn) &&
-            budget.canSpend(capex + constructionReserve(view))) {
+        if (surveyedNetValue(content, view, *survey) >= capex.scaled(content.ai.requiredReturn) &&
+            budget.canSpend(capex + constructionReserve(content, view))) {
             out.emplace_back(BuildMine{view.me, plot.id});
             budget.spend(capex);
-            budget.commit(constructionReserve(view));
+            budget.commit(constructionReserve(content, view));
         }
     }
 }
@@ -260,7 +242,7 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
                  std::vector<Command>& out) {
     bool wantsLoan = false;
     const Money room = borrowingRoom(content, view);
-    bool surveyedToday = openProspects(content, view) >= kMaxOpenProspects;
+    bool surveyedToday = openProspects(content, view) >= content.ai.maxOpenProspects;
     for (const PlotView& plot : view.plots) {
         if (plot.listing != PlotListing::Listed || !plot.auction.has_value() ||
             plot.auction->myBid > Money::zero() ||
@@ -268,7 +250,7 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
             continue;
         }
         const Money capex = plot.mineCapexQuote;
-        const Money fullCost = plot.askPrice + capex + constructionReserve(view);
+        const Money fullCost = plot.askPrice + capex + constructionReserve(content, view);
         const SurveyView* survey = latestSurvey(view, plot.id);
         if (survey == nullptr) {
             // One new survey a day, only for plots the company could develop
@@ -286,7 +268,7 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
             continue;
         }
         const Money value = surveyedNetValue(content, view, *survey);
-        if (value < (plot.askPrice + capex).scaled(kRequiredReturn)) {
+        if (value < (plot.askPrice + capex).scaled(content.ai.requiredReturn)) {
             continue;  // not worth the land plus the mine
         }
         // Bids are sealed and ties go to the earlier bidder, so pay a premium
@@ -294,18 +276,18 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
         // identical competitors do not tie on every auction.
         Fixed premium = Fixed::one();
         if (value >= (plot.askPrice + capex) * 4) {
-            premium = kBidPremiumHigh;
+            premium = content.ai.bidPremiumHigh;
         } else if (plot.auction->bidCount > 0 || value >= (plot.askPrice + capex) * 2) {
-            premium = kBidPremium;
+            premium = content.ai.bidPremium;
         }
         const auto jitterPercent =
             static_cast<std::int64_t>((plot.id.value() * 7U + view.me.value() * 13U) % 7U);
         premium = premium + Fixed::fromRatio(jitterPercent, 100);
         const Money bid = plot.askPrice.scaled(premium);
-        if (value < (bid + capex).scaled(kRequiredReturn)) {
+        if (value < (bid + capex).scaled(content.ai.requiredReturn)) {
             continue;  // the premium would eat the return
         }
-        const Money development = capex + constructionReserve(view);
+        const Money development = capex + constructionReserve(content, view);
         if (budget.canSpend(bid + development)) {
             out.emplace_back(BidOnPlot{view.me, plot.id, bid});
             // The bid is reserved by the sim; the mine it implies is earmarked
@@ -324,7 +306,7 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
 void decideResearch(const Content& content, const CompanyView& view, bool producing, Budget& budget,
                     std::vector<Command>& out) {
     const Money netCash = budget.cash - view.outstandingPrincipal;
-    if (!producing || view.activeResearch.has_value() || netCash < kResearchFloor) {
+    if (!producing || view.activeResearch.has_value() || netCash < content.ai.researchFloor) {
         return;
     }
     const auto known = [&](TechId id) {
@@ -335,7 +317,7 @@ void decideResearch(const Content& content, const CompanyView& view, bool produc
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
         const TechId id(i);
         const bool ready = !known(id) && std::ranges::all_of(content.techs[i].prerequisites, known);
-        if (!ready || content.techs[i].cost + kResearchFloor / 2 > netCash) {
+        if (!ready || content.techs[i].cost + content.ai.researchFloor / 2 > netCash) {
             continue;
         }
         if (!best || content.techs[i].cost < content.techs[best->index()].cost) {
@@ -359,14 +341,14 @@ void decideLoans(const Content& content, const CompanyView& view, bool producing
     }
     const bool needsCapex = std::ranges::any_of(view.plots, [&](const PlotView& plot) {
         return plot.owner == view.me && !plot.mine.has_value() &&
-               !budget.canSpend(plot.mineCapexQuote + constructionReserve(view));
+               !budget.canSpend(plot.mineCapexQuote + constructionReserve(content, view));
     });
-    const bool shortWhileProducing = producing && view.cash < kLoanFloor;
+    const bool shortWhileProducing = producing && view.cash < content.ai.loanFloor;
     const bool bootstrap = !producing && view.mines.empty() && activeLoans == 0 && wantsLoan;
     if (!needsCapex && !shortWhileProducing && !bootstrap) {
         return;
     }
-    const Money chunk = std::min(bootstrap ? kBootstrapLoan : kLoanChunk, view.loanCapacity);
+    const Money chunk = std::min(bootstrap ? content.ai.bootstrapLoan : content.ai.loanChunk, view.loanCapacity);
     if (chunk >= content.balance.loanMinPrincipal && chunk.cents() <= budget.headroomCents()) {
         out.emplace_back(TakeLoan{view.me, chunk});
     }
@@ -375,7 +357,8 @@ void decideLoans(const Content& content, const CompanyView& view, bool producing
 // Repay the largest loan outright when cash comfortably exceeds it, or pay
 // down as much as possible when the company has nothing to spend on, so idle
 // money never sits next to 8% debt.
-void decideRepayment(const CompanyView& view, Budget& budget, std::vector<Command>& out) {
+void decideRepayment(const Content& content, const CompanyView& view, Budget& budget,
+                     std::vector<Command>& out) {
     const LoanView* largest = nullptr;
     for (const LoanView& loan : view.loans) {
         if (loan.active && (largest == nullptr || loan.remaining > largest->remaining)) {
@@ -387,7 +370,7 @@ void decideRepayment(const CompanyView& view, Budget& budget, std::vector<Comman
     }
     const bool idle = view.mines.empty() && view.companies[view.me.index()].plotsOwned == 0 &&
                       view.reservedCash == Money::zero();
-    const bool flush = budget.canSpend(largest->remaining * 2 + kResearchFloor);
+    const bool flush = budget.canSpend(largest->remaining * 2 + content.ai.researchFloor);
     const Money repay = flush ? largest->remaining : std::min(largest->remaining, budget.cash);
     if ((flush || idle) && repay > Money::zero()) {
         out.emplace_back(RepayLoan{view.me, largest->id, repay});
@@ -408,19 +391,19 @@ void HeuristicController::decide(const CompanyView& view, std::vector<Command>& 
     Money earmarked = Money::zero();
     for (const PlotView& plot : view.plots) {
         if (plot.auction.has_value() && plot.auction->myBid > Money::zero()) {
-            earmarked += plot.mineCapexQuote + constructionReserve(view);
+            earmarked += plot.mineCapexQuote + constructionReserve(*content_, view);
         }
     }
-    Budget budget{view.cash - view.reservedCash - earmarked - kCashReserve, view.cash};
+    Budget budget{view.cash - view.reservedCash - earmarked - content_->ai.cashReserve, view.cash};
     decideSales(*content_, view, budget, out);
-    decideMothballing(view, out);
+    decideMothballing(*content_, view, out);
     decideBuilding(*content_, view, budget, out);
     const bool wantsLoan = decidePlots(*content_, view, budget, out);
     decideResearch(*content_, view, producing, budget, out);
     if (wantsLoan) {
         decideLoans(*content_, view, producing, true, budget, out);
     } else {
-        decideRepayment(view, budget, out);
+        decideRepayment(*content_, view, budget, out);
         decideLoans(*content_, view, producing, false, budget, out);
     }
 }

@@ -25,9 +25,6 @@ const Fixed kMaxDepositSigma = Fixed::fromInt(3);
 // Land price noise around the area-based interpolation, as a fraction.
 const Fixed kPriceNoise = Fixed::fromRatio(1, 5);
 constexpr std::int64_t kMaxDepositTonnes = 1'000'000'000'000'000LL;
-// A region counts as mineable on day one when an ore that needs no research
-// turns up on at least this share of its plots (spec 005).
-const Fixed kOpeningPresenceMin = Fixed::fromRatio(1, 2);
 
 Money interpolatePrice(const RegionDef& region, std::int64_t area, Pcg32& rng) {
     // Linear in area between the region's min and max, then +/- up to 20%
@@ -230,7 +227,7 @@ RegionStart classifyRegionAtStart(const Content& content, const RegionDef& regio
             fatal("classifyRegionAtStart: a deposit names a resource that does not exist");
         }
         const bool lockedOre = content.resources[prior.resource.index()].unlockedBy.valid();
-        if (!lockedOre && prior.presenceProb >= kOpeningPresenceMin) {
+        if (!lockedOre && prior.presenceProb >= content.balance.openingMineablePresence) {
             return RegionStart::Mineable;
         }
         hasLocked = hasLocked || lockedOre;

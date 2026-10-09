@@ -121,6 +121,9 @@ struct BalanceParams {
     // promises about regions and odds, never about hidden deposits.
     std::uint32_t openingMinMineable = 0;
     std::uint32_t openingMaxLockedRegion = 0;
+    // A region counts as mineable on day one when an ore that needs no
+    // research turns up on at least this share of its plots.
+    Fixed openingMineablePresence;
     // Land nobody wants (spec 004): after this many auctions in a row
     // without a sale a plot is withdrawn, and may be listed again only after
     // the cooldown. Zero rounds means plots relist forever.
@@ -141,12 +144,41 @@ struct BalanceParams {
     bool defaultCoverCosts = false;
 };
 
+// The built-in competitor's tuning (data/ai.json, spec 006). The controller
+// runs inside the deterministic sim, so these are content like any price:
+// they are hashed into the content fingerprint, and a changed knob
+// invalidates saves and traces.
+struct AiParams {
+    // Selling stock by hand (the AI does not rely on its sell policy).
+    Fixed sellAboveBase;     // sell when the price is at least this share of base
+    Fixed dumpStorageShare;  // ...or a month's storage exceeds this share of the stock's value
+    // Valuing a surveyed plot.
+    Fixed recoverableShare;               // haircut on surveyed tonnage
+    Fixed requiredReturn;                 // net value must cover the outlay times this
+    std::int64_t paybackHorizonDays = 0;  // value at most this many days of output
+    // Bidding.
+    Fixed bidPremium;                    // over the ask, for contested or clearly good plots
+    Fixed bidPremiumHigh;                // over the ask, for plots worth four times their cost
+    std::uint32_t maxOpenProspects = 0;  // surveyed-but-unbought listed plots at once
+    // Running mines.
+    Fixed reopenMargin;                // reopen a mothballed mine at this multiple of opex
+    Day idleMineGraceDays = 0;         // a new mine is not mothballed before this
+    std::int64_t opexReserveDays = 0;  // opex kept in hand per mine being built
+    // Cash and debt.
+    Money cashReserve;    // never committed
+    Money researchFloor;  // net cash needed before any research
+    Money loanFloor;      // borrow when producing with less cash than this
+    Money loanChunk;      // size of an ordinary loan
+    Money bootstrapLoan;  // size of the one loan taken to buy a first plot
+};
+
 struct Content {
     std::vector<ResourceDef> resources;
     std::vector<TechDef> techs;
     std::vector<RegionDef> regions;
     std::vector<EventDef> events;
     BalanceParams balance;
+    AiParams ai;
     // Every sentence a player reads, keyed as in docs/specs/002-prose-catalogue.md
     // (data/strings.json). Prose only: it is not serialized and not part of
     // the content hash, so a wording fix never invalidates a save. The sim

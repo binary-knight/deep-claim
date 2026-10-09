@@ -17,6 +17,7 @@
   "plots_listed_per_month": 1,
   "opening_min_mineable": 2,
   "opening_max_locked_region": 1,
+  "opening_mineable_presence": 0.5,
   "max_unsold_rounds": 6,
   "relist_cooldown_days": 180,
   "bankruptcy_grace_months": 3,

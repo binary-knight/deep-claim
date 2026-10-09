@@ -68,6 +68,25 @@ TEST_CASE("The AI is deterministic and reproducible from a save", "[ai][determin
     CHECK(a.stateHash() == restored.stateHash());
 }
 
+TEST_CASE("A changed AI knob changes the content fingerprint", "[ai][content]") {
+    // The controller runs inside the sim: a save or trace made with one set
+    // of knobs must not open against another.
+    const sim::Content content = test::makeContent();
+    sim::Content tuned = content;
+    tuned.ai.requiredReturn = sim::Fixed::fromRatio(11, 10);
+    CHECK(sim::hashContent(tuned) != sim::hashContent(content));
+    sim::Content reserve = content;
+    reserve.ai.cashReserve = sim::Money::fromUnits(500'001);
+    CHECK(sim::hashContent(reserve) != sim::hashContent(content));
+    sim::Content threshold = content;
+    threshold.balance.openingMineablePresence = sim::Fixed::fromRatio(6, 10);
+    CHECK(sim::hashContent(threshold) != sim::hashContent(content));
+
+    const sim::Simulation original(content, 3, test::setup());
+    sim::Simulation other(tuned, 3, test::setup());
+    CHECK_FALSE(other.load(original.save()));
+}
+
 TEST_CASE("The AI stops acting once bankrupt", "[ai]") {
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 1, test::setup());

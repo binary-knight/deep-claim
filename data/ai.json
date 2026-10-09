@@ -1,0 +1,18 @@
+{
+  "sell_above_base": 0.85,
+  "dump_storage_share": 0.02,
+  "recoverable_share": 0.5,
+  "required_return": 1.2,
+  "payback_horizon_days": 1800,
+  "bid_premium": 1.1,
+  "bid_premium_high": 1.25,
+  "max_open_prospects": 2,
+  "reopen_margin": 1.25,
+  "idle_mine_grace_days": 30,
+  "opex_reserve_days": 60,
+  "cash_reserve": 500000,
+  "research_floor": 2500000,
+  "loan_floor": 750000,
+  "loan_chunk": 2000000,
+  "bootstrap_loan": 4000000
+}
