@@ -1,11 +1,27 @@
-/* Deep Claim interface. RmlUi has no default stylesheet, so everything is
-   explicit. Units in dp scale with the window's pixel ratio. */
+/* Deep Claim interface, plate C "Control Room" (docs/design/handoff.md).
+   RmlUi has no default stylesheet, so everything is explicit. Units in dp
+   scale with the window's pixel ratio. Colours and sizes are the literal
+   values of the design tokens (game/assets/ui/tokens.rcss lists them); RCSS
+   has no custom properties. Flex gaps are margins, chips are inline blocks,
+   selected rows use fills and borders instead of inset shadows. */
+
+@spritesheet icons {
+    src: icons.tga;
+    icon-dashboard: 0px 0px 24px 24px;
+    icon-plots: 24px 0px 24px 24px;
+    icon-market: 48px 0px 24px 24px;
+    icon-research: 72px 0px 24px 24px;
+    icon-finance: 96px 0px 24px 24px;
+    icon-log: 120px 0px 24px 24px;
+}
 
 body {
     font-family: "Barlow";
+    font-weight: 400;
     font-size: 14dp;
-    color: #e6e6e6;
-    background-color: #14181f;
+    line-height: 20dp;
+    color: #ffffff;
+    background-color: #0a0f17;
     width: 100%;
     height: 100%;
     display: flex;
@@ -14,112 +30,327 @@ body {
 
 div { display: block; }
 span { display: inline; }
-p { display: block; margin: 0 0 6dp 0; }
-h1 { display: block; font-size: 20dp; font-weight: bold; margin: 0 0 8dp 0; color: #ffffff; }
-h2 { display: block; font-size: 16dp; font-weight: bold; margin: 12dp 0 6dp 0; color: #cfd8e3; }
+p { display: block; margin: 0 0 8dp 0; }
+h1 { display: block; font-family: "Barlow Condensed"; font-weight: 600; font-size: 20dp; line-height: 24dp; letter-spacing: 0.4dp; margin: 0 0 12dp 0; color: #ffffff; }
+h2 {
+    display: block;
+    font-family: "Barlow Condensed";
+    font-weight: 700;
+    font-size: 17dp;
+    line-height: 22dp;
+    letter-spacing: 1dp;
+    text-transform: uppercase;
+    color: #ffffff;
+    border-bottom: 2dp #2f4160;
+    padding-bottom: 5dp;
+    margin: 0 0 8dp 0;
+}
+h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; color: #8fa0ba; letter-spacing: 0; margin-right: 10dp; }
 
-.muted { color: #8a94a3; }
-.warning { color: #f3b65a; }
-.danger { color: #ff6b6b; }
-.good { color: #7fd48a; }
-.right { text-align: right; }
-.row { display: flex; flex-direction: row; align-items: center; }
-.grow { flex: 1; }
+.num, .figure { font-family: "JetBrains Mono"; }
+.muted { color: #8fa0ba; }
+.text2 { color: #c9d4e6; }
+.warn { color: #f0b340; }
+.danger { color: #ff6e6e; }
+.good { color: #5fd98a; }
+.accent { color: #2f8cff; }
+.sub { display: block; font-size: 12dp; line-height: 16dp; color: #8fa0ba; }
+.nowrap { white-space: nowrap; }
+.hrow { display: flex; flex-direction: row; align-items: center; }
+.grow { flex: 1 1 0; width: 8dp; }
 .gap { margin-right: 10dp; }
 
-/* Header */
+/* ---- Header ---- */
 #header {
     display: flex;
     flex-direction: row;
     align-items: center;
-    padding: 8dp 14dp;
-    background-color: #1d232d;
-    border-bottom: 1dp #2d3542;
+    padding: 8dp 16dp;
+    min-height: 60dp;
+    background-color: #111826;
+    border-bottom: 1dp #243249;
+    position: relative;
 }
-#header .stat { margin-right: 22dp; }
-#header .label { color: #8a94a3; font-size: 12dp; display: block; }
-#header .value { font-size: 17dp; font-weight: bold; display: block; }
+#header .stat { display: block; margin-right: 16dp; }
+#header .label { display: block; font-size: 12dp; line-height: 16dp; color: #8fa0ba; letter-spacing: 0.25dp; white-space: nowrap; }
+#header .value { display: block; font-family: "JetBrains Mono"; font-size: 17dp; line-height: 22dp; font-weight: 500; white-space: nowrap; }
+#header .company .value { white-space: nowrap; font-family: "Barlow Condensed"; font-weight: 600; font-size: 19dp; max-width: 240dp; overflow: hidden; }
+#header price-chart.spark { display: block; width: 120dp; height: 24dp; }
+#header .speed button, #header .sys button { margin-right: 4dp; }
+#header .speed { display: flex; flex-direction: row; align-items: center; margin-right: 12dp; }
+#header .sys { display: flex; flex-direction: row; align-items: center; }
+#header .sys button:last-child { margin-right: 0; }
 
+/* Auto-pause popover under the header's right edge. */
+#pausemenu {
+    position: absolute;
+    top: 56dp;
+    right: 16dp;
+    width: 260dp;
+    padding: 12dp 16dp;
+    background-color: #111826;
+    border: 1dp #2f4160;
+    border-radius: 2dp;
+    z-index: 10;
+}
+#pausemenu .title { display: block; font-weight: 600; margin-bottom: 8dp; }
+#pausemenu .check { display: block; height: 28dp; line-height: 28dp; cursor: pointer; }
+
+/* ---- Status strip (dashboard only) ---- */
+#strip {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 4dp 16dp 0 16dp;
+    min-height: 32dp;
+    background-color: #172031;
+    border-bottom: 1dp #243249;
+    font-size: 13dp;
+    line-height: 18dp;
+    color: #c9d4e6;
+}
+#strip .item { display: block; white-space: nowrap; margin: 0 20dp 4dp 0; height: 24dp; line-height: 24dp; }
+#strip .k { color: #8fa0ba; margin-right: 6dp; }
+#strip .brk { display: none; }
+#strip .chip { margin-right: 4dp; }
+
+/* ---- Body: rail + content ---- */
+#body { display: flex; flex-direction: row; flex: 1 1 0; min-height: 0; }
+#rail {
+    width: 56dp;
+    padding: 8dp 6dp;
+    display: flex;
+    flex-direction: column;
+    background-color: #0a0f17;
+    border-right: 1dp #243249;
+    overflow: hidden;
+}
+#rail:hover { width: 160dp; }
+#rail .tab {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: 44dp;
+    margin: 0 0 2dp 0;
+    padding: 0 10dp;
+    border-radius: 2dp;
+    color: #c9d4e6;
+    border: 1dp transparent;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+}
+#rail .tab:hover { background-color: #111826; color: #ffffff; }
+#rail .tab.active { background-color: #2f8cff; color: #ffffff; border-color: #2f8cff; }
+#rail .ic { display: block; width: 22dp; height: 22dp; margin-right: 12dp; }
+#rail .ic.dashboard { decorator: image(icon-dashboard); }
+#rail .ic.plots { decorator: image(icon-plots); }
+#rail .ic.market { decorator: image(icon-market); }
+#rail .ic.research { decorator: image(icon-research); }
+#rail .ic.finance { decorator: image(icon-finance); }
+#rail .ic.log { decorator: image(icon-log); }
+#rail .tl { display: none; font-size: 14dp; }
+#rail:hover .tl { display: inline; }
+
+#content { flex: 1 1 0; width: 100dp; padding: 16dp; overflow-y: auto; min-height: 0; }
+
+/* ---- Status line ---- */
+#status {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-height: 36dp;
+    padding: 0 16dp;
+    background-color: #111826;
+    border-top: 1dp #243249;
+    color: #c9d4e6;
+    font-size: 13dp;
+    line-height: 18dp;
+}
+#status .lbl { color: #8fa0ba; text-transform: uppercase; letter-spacing: 0.7dp; font-size: 11dp; margin-right: 12dp; }
+#status.danger { color: #ff6e6e; }
+
+/* ---- Sheets and splits ---- */
+.sheet {
+    display: block;
+    background-color: #111826;
+    border: 1dp #243249;
+    border-radius: 2dp;
+    padding: 16dp;
+    margin-bottom: 16dp;
+}
+.split { display: flex; flex-direction: row; align-items: flex-start; }
+.split .main { flex: 1 1 0; width: 100dp; margin-right: 16dp; }
+.split .side { flex: 0 0 auto; width: 380dp; }
+.split .side.narrow { width: 340dp; }
+
+/* ---- Buttons ---- */
 button {
     display: inline-block;
-    padding: 5dp 12dp;
+    box-sizing: border-box;
+    height: 36dp;
+    line-height: 34dp;
+    padding: 0 12dp;
     margin: 0 4dp 0 0;
-    background-color: #2f3b4d;
+    background-color: #172031;
     color: #ffffff;
-    border-radius: 3dp;
+    border: 1dp #2f4160;
+    border-radius: 2dp;
+    font-size: 14dp;
+    font-weight: 500;
+    white-space: nowrap;
     cursor: pointer;
-    font-size: 13dp;
+    text-align: center;
 }
-button:hover { background-color: #3d4c63; }
-button:active { background-color: #243043; }
-button.primary { background-color: #2b6cb0; }
-button.primary:hover { background-color: #3b7dc4; }
-button.active { background-color: #d9a441; color: #1a1a1a; }
-button.small { padding: 3dp 8dp; font-size: 12dp; }
-button.disabled { background-color: #262c36; color: #6b7482; cursor: arrow; }
+button:hover { border-color: #c9d4e6; }
+button:active { background-color: #111826; }
+button.primary { background-color: #2f8cff; border-color: #2f8cff; color: #ffffff; }
+button.primary:hover { background-color: #4a9cff; border-color: #4a9cff; }
+button.active { background-color: #2f8cff; border-color: #2f8cff; color: #ffffff; }
+button.sm { padding: 0 10dp; }
+button.disabled { opacity: 0.55; cursor: arrow; }
+button.disabled:hover { border-color: #2f4160; }
+button .short { display: none; }
 
+/* ---- Inputs and checks ---- */
 input.text {
     display: inline-block;
-    width: 120dp;
-    padding: 4dp 6dp;
+    box-sizing: border-box;
+    width: 110dp;
+    height: 36dp;
+    padding: 7dp 10dp;
     margin-right: 6dp;
-    background-color: #0f1319;
+    background-color: #0a0f17;
     color: #ffffff;
-    border: 1dp #3a4452;
-    border-radius: 3dp;
-    font-size: 13dp;
+    border: 1dp #2f4160;
+    border-radius: 2dp;
+    font-family: "JetBrains Mono";
+    font-size: 14dp;
+    line-height: 20dp;
     cursor: text;
 }
-input.text:focus { border-color: #5b8fd6; }
+input.text:focus { border-color: #2f8cff; }
+.field { display: flex; flex-direction: row; align-items: center; margin-right: 8dp; }
+.field label { display: inline; color: #c9d4e6; font-size: 13dp; margin-right: 6dp; }
+.check { display: flex; flex-direction: row; align-items: center; height: 36dp; cursor: pointer; }
+.check .box { display: block; width: 18dp; height: 18dp; box-sizing: border-box; border: 1dp #2f4160; border-radius: 3dp; background-color: #0a0f17; margin-right: 8dp; }
+.check.on .box { background-color: #2f8cff; border-color: #2f8cff; }
+.actions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.actions button { margin: 0 8dp 8dp 0; }
+.actions .field { margin-bottom: 8dp; }
+.actions .check { margin: 0 12dp 8dp 0; }
+.actions .note { display: block; margin-bottom: 8dp; }
 
-/* Body: nav + content */
-#body { display: flex; flex-direction: row; flex: 1; min-height: 0; }
-#nav {
-    width: 150dp;
-    padding: 12dp 8dp;
-    background-color: #181d26;
-    border-right: 1dp #2d3542;
-}
-#nav button { display: block; width: 100%; margin: 0 0 6dp 0; text-align: left; }
-#content { flex: 1; padding: 14dp 18dp; overflow-y: auto; min-height: 0; }
-
-#status {
-    padding: 6dp 14dp;
-    background-color: #1d232d;
-    border-top: 1dp #2d3542;
-    color: #d9a441;
-    min-height: 18dp;
-}
-
-/* Tables */
+/* ---- Tables ---- */
 table { display: table; width: 100%; }
 tr { display: table-row; }
-th { display: table-cell; text-align: left; color: #8a94a3; font-size: 12dp; padding: 4dp 8dp; border-bottom: 1dp #2d3542; }
-td { display: table-cell; padding: 5dp 8dp; border-bottom: 1dp #222934; vertical-align: middle; }
-tr.selected td { background-color: #243043; }
-tr.clickable { cursor: pointer; }
-tr.clickable:hover td { background-color: #1f2733; }
+th { display: table-cell; text-align: left; font-size: 12dp; line-height: 16dp; font-weight: 600; color: #8fa0ba; letter-spacing: 0.5dp; text-transform: uppercase; padding: 8dp; border-bottom: 1dp #2f4160; white-space: nowrap; }
+td { display: table-cell; padding: 6dp 8dp; min-height: 36dp; border-bottom: 1dp #243249; vertical-align: middle; }
+th.n, td.n { text-align: right; }
+td.n, td.num, td.nw, td.name, td.act { white-space: nowrap; }
+td.n { font-family: "JetBrains Mono"; }
+td.act { text-align: right; }
+td.act button { margin: 0 0 0 4dp; }
+td button, td input.text { vertical-align: middle; }
+td .sub { display: block; }
+tr.row { cursor: pointer; }
+tr.row:hover td { background-color: #172031; }
+tr.sel td { background-color: #163058; }
+tr.sel:hover td { background-color: #163058; }
+.name { font-weight: 600; }
 
-.card {
-    display: block;
-    padding: 10dp 12dp;
-    margin: 0 0 10dp 0;
-    background-color: #1b212b;
-    border: 1dp #2d3542;
-    border-radius: 4dp;
+/* ---- Chips and pills ---- */
+.chip, .pill {
+    display: inline-block;
+    box-sizing: border-box;
+    min-width: 40dp;
+    height: 20dp;
+    line-height: 18dp;
+    padding: 0 8dp;
+    border-radius: 2dp;
+    font-size: 12dp;
+    font-weight: 600;
+    letter-spacing: 0.25dp;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: middle;
+    border: 1dp #2f4160;
+    color: #c9d4e6;
 }
-.cards { display: flex; flex-direction: row; flex-wrap: wrap; }
-.cards .card { width: 300dp; margin-right: 10dp; }
+.chip.accent, .pill.accent { color: #2f8cff; border-color: #2f8cff; }
+.chip.good, .pill.good { color: #5fd98a; border-color: #5fd98a; }
+.chip.warn, .pill.warn { color: #f0b340; border-color: #f0b340; }
+.chip.danger, .pill.danger { color: #ff6e6e; border-color: #ff6e6e; }
+.chip.muted { color: #8fa0ba; border-color: #8fa0ba; }
 
-price-chart {
-    display: block;
-    width: 100%;
-    height: 220dp;
-    background-color: #0f1319;
-    border: 1dp #2d3542;
-    margin: 8dp 0;
-}
+/* ---- Key/value rows ---- */
+.kv { display: flex; flex-direction: row; align-items: flex-start; min-height: 24dp; margin-bottom: 4dp; }
+.kv .k { display: block; flex: 0 0 auto; width: 104dp; margin-right: 12dp; color: #c9d4e6; line-height: 22dp; }
+.kv .k.wide { width: auto; }
+.kv .v { display: block; flex: 1 1 0; width: 50dp; text-align: right; font-weight: 500; line-height: 22dp; }
+.kv .v .line { display: block; white-space: nowrap; }
+.kv .v .line.wrapok { white-space: normal; }
+.kv .v .subline { display: block; font-size: 12dp; line-height: 16dp; color: #8fa0ba; font-weight: 400; white-space: nowrap; }
+.kv .v.num, .kv .v .num { font-family: "JetBrains Mono"; }
+.kv .v .err { color: #8fa0ba; font-weight: 400; }
+.kv.locked .v { color: #8fa0ba; }
 
+/* ---- Needs-you rows ---- */
+.needs { display: block; }
+.needs .nrow { display: flex; flex-direction: row; align-items: center; min-height: 44dp; padding: 4dp 0; border-top: 1dp #243249; }
+.needs .nrow:first-child { border-top-width: 0; }
+.needs .n { display: block; font-family: "JetBrains Mono"; color: #8fa0ba; font-size: 12dp; line-height: 16dp; width: 20dp; margin-right: 16dp; }
+.needs .t { display: block; flex: 1 1 0; width: 100dp; margin-right: 16dp; }
+.needs .t .title { display: block; }
+.needs .t .sub { font-size: 12dp; line-height: 16dp; }
+.needs .days { display: block; font-family: "JetBrains Mono"; white-space: nowrap; color: #c9d4e6; width: 92dp; text-align: right; margin-right: 16dp; }
+.needs .act { display: block; width: 110dp; text-align: right; }
+.needs .act button { margin: 0; }
+.needs .none { color: #8fa0ba; padding: 8dp 0; }
+
+/* ---- Finance stat row ---- */
+.finrow { display: flex; flex-direction: row; }
+.finrow .stat { flex: 1 1 0; width: 50dp; padding: 0 16dp; border-left: 1dp #243249; }
+.finrow .stat:first-child { padding-left: 0; border-left-width: 0; }
+.finrow .stat .label { display: block; font-size: 12dp; line-height: 16dp; color: #8fa0ba; }
+.finrow .stat .value { display: block; font-family: "JetBrains Mono"; font-size: 17dp; line-height: 22dp; font-weight: 500; white-space: nowrap; }
+.finrow .stat .sub { white-space: nowrap; font-family: "JetBrains Mono"; }
+.finrow .stat .chipline { display: block; height: 22dp; line-height: 22dp; }
+.rivalline { display: block; font-size: 13dp; line-height: 18dp; color: #c9d4e6; margin-top: 8dp; }
+
+/* ---- Prices panel ---- */
+.prices { display: block; }
+.prices .pr { display: flex; flex-direction: row; align-items: center; margin-bottom: 10dp; }
+.prices .pr .nm { display: block; flex: 1 1 0; width: 60dp; margin-right: 10dp; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.prices .pr .nm .sub { font-weight: 400; font-family: "JetBrains Mono"; }
+.prices .pr price-chart { display: block; width: 90dp; height: 26dp; margin-right: 10dp; }
+.prices .pr .num { display: block; width: 72dp; white-space: nowrap; text-align: right; }
+.prices .pr .num .sub { font-family: "JetBrains Mono"; }
+price-chart.table { display: block; width: 150dp; height: 34dp; }
+price-chart.big { display: block; width: 100%; height: 170dp; margin-bottom: 8dp; }
+
+/* ---- Log ---- */
+.log { display: block; }
+.log .line { display: flex; flex-direction: row; padding: 8dp 0; border-top: 1dp #243249; }
+.log .line:first-child { border-top-width: 0; }
+.log .d { display: block; flex: 0 0 auto; width: 96dp; margin-right: 16dp; color: #8fa0ba; font-family: "JetBrains Mono"; font-size: 13dp; line-height: 18dp; padding-top: 1dp; }
+.log .t { display: block; flex: 1 1 0; width: 100dp; }
+.log .line.warn .t { color: #f0b340; }
+
+/* ---- Notice and research tiles ---- */
+.notice { display: flex; flex-direction: row; align-items: flex-start; padding: 8dp 12dp; margin-bottom: 8dp; border: 1dp #f0b340; border-radius: 2dp; color: #ffffff; font-size: 13dp; line-height: 18dp; }
+.notice.danger { border-color: #ff6e6e; color: #ffffff; }
+.notice .ic { display: block; color: #f0b340; font-weight: 700; margin-right: 8dp; }
+.notice.danger .ic { color: #ff6e6e; }
+.notice .msg { display: block; flex: 1 1 0; width: 50dp; }
+.research { display: flex; flex-direction: row; flex-wrap: wrap; }
+.research .tile { display: block; border: 1dp #243249; border-radius: 2dp; padding: 4dp 8dp; margin: 0 8dp 8dp 0; font-size: 13dp; line-height: 18dp; color: #c9d4e6; white-space: nowrap; }
+.research .tile.done { color: #5fd98a; border-color: #5fd98a; }
+.research .tile.now { color: #2f8cff; border-color: #2f8cff; }
+
+/* ---- Game over ---- */
 #overlay {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -127,28 +358,43 @@ price-chart {
     display: flex;
     align-items: center;
     justify-content: center;
+    z-index: 20;
 }
-#overlay .panel {
-    padding: 30dp 40dp;
-    background-color: #1d232d;
-    border: 1dp #d9a441;
-    border-radius: 6dp;
-    text-align: center;
-}
-#overlay h1 { font-size: 26dp; }
-
-.log-row { display: flex; flex-direction: row; padding: 3dp 0; border-bottom: 1dp #222934; }
-.log-day { width: 110dp; color: #8a94a3; }
+#overlay .panel { padding: 30dp 40dp; background-color: #111826; border: 1dp #ff6e6e; border-radius: 2dp; text-align: center; width: 520dp; }
+#overlay h1 { font-size: 26dp; line-height: 30dp; }
 
 /* Scrollbars must be styled: an unstyled scrollbar element is as wide as its
    parent, which leaves no room for the content it scrolls (every block in
    the panel then lays out at zero width). */
 scrollbarvertical { width: 12dp; }
-scrollbarvertical slidertrack { background-color: #1b212b; }
-scrollbarvertical sliderbar { background-color: #3d4c63; border-radius: 6dp; min-height: 24dp; }
-scrollbarvertical sliderbar:hover { background-color: #4d5e78; }
+scrollbarvertical slidertrack { background-color: #111826; }
+scrollbarvertical sliderbar { background-color: #2f4160; border-radius: 6dp; min-height: 24dp; }
+scrollbarvertical sliderbar:hover { background-color: #3d5478; }
 scrollbarvertical sliderarrowdec, scrollbarvertical sliderarrowinc { width: 0; height: 0; }
 scrollbarhorizontal { height: 12dp; }
-scrollbarhorizontal slidertrack { background-color: #1b212b; }
-scrollbarhorizontal sliderbar { background-color: #3d4c63; border-radius: 6dp; min-width: 24dp; }
+scrollbarhorizontal slidertrack { background-color: #111826; }
+scrollbarhorizontal sliderbar { background-color: #2f4160; border-radius: 6dp; min-width: 24dp; }
 scrollbarhorizontal sliderarrowdec, scrollbarhorizontal sliderarrowinc { width: 0; height: 0; }
+
+/* ---- Steam Deck (body.deck: window below 1300dp wide, or --deck) ----
+   40dp controls, nothing below 14dp, short button labels, the research
+   strip item on its own line, tighter side column. */
+body.deck button { height: 40dp; line-height: 38dp; padding: 0 10dp; }
+body.deck button .long { display: none; }
+body.deck button .short { display: inline; }
+body.deck input.text { height: 40dp; padding: 9dp 10dp; }
+body.deck .check { height: 40dp; }
+body.deck .sub, body.deck .subline, body.deck #header .label, body.deck th, body.deck .chip, body.deck .pill,
+body.deck .log .d, body.deck #status, body.deck #status .lbl, body.deck #strip, body.deck .needs .n,
+body.deck .needs .t .sub, body.deck .finrow .stat .sub, body.deck .finrow .stat .label, body.deck .notice,
+body.deck .field label, body.deck .rivalline, body.deck .research .tile, body.deck h2 .idx,
+body.deck .kv .v .subline, body.deck .prices .pr .nm .sub, body.deck .prices .pr .num .sub,
+body.deck .needs .none, body.deck #pausemenu .check { font-size: 14dp; line-height: 20dp; }
+body.deck .chip, body.deck .pill { height: 24dp; line-height: 22dp; }
+body.deck #header .company .value { max-width: 190dp; }
+body.deck #header .stat { margin-right: 12dp; }
+body.deck #strip .brk { display: block; width: 100%; height: 0; margin: 0; }
+body.deck .split .side { width: 320dp; }
+body.deck .split .side.narrow { width: 300dp; }
+body.deck #content { padding: 16dp; }
+body.deck #strip .item { height: 28dp; line-height: 28dp; }

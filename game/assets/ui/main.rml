@@ -3,120 +3,195 @@
     <title>Deep Claim</title>
     <link type="text/rcss" href="main.rcss"/>
 </head>
-<!-- Every sentence here is bound from the prose catalogue (data/strings.json,
-     spec 002); only one- or two-word labels on buttons and columns are literal. -->
+<!-- Plate C "Control Room", dashboard H4 (docs/design/handoff.md). Every
+     sentence here is bound from the prose catalogue (data/strings.json, spec
+     002); only one- or two-word labels on buttons, columns and chips are
+     literal. Section indices restart at 01 on each screen. -->
 <body data-model="game">
     <div id="header">
-        <div class="stat"><span class="label">Company</span><span class="value">{{company}}</span></div>
+        <div class="stat company"><span class="label">Company</span><span class="value">{{company}}</span></div>
         <div class="stat"><span class="label">Date</span><span class="value">{{day}}</span></div>
         <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
         <div class="stat"><span class="label">Spendable</span><span class="value">{{spendable}}</span></div>
         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span></div>
-        <div class="stat"><span class="label">Speed</span><span class="value">{{speed_label}}</span></div>
+        <div class="stat"><span class="label">Cash, 90 days</span><price-chart class="spark" series="cash" days="90" mode="line"/></div>
         <div class="grow"></div>
-        <div class="row">
+        <div class="speed">
             <button data-class-active="speed == 0" data-event-click="set_speed(0)">Pause</button>
             <button data-class-active="speed == 1" data-event-click="set_speed(1)">1x</button>
             <button data-class-active="speed == 2" data-event-click="set_speed(2)">5x</button>
             <button data-class-active="speed == 3" data-event-click="set_speed(3)">20x</button>
-            <button data-event-click="step">Step day</button>
-            <span class="gap"></span>
-            <button class="small" data-event-click="save">Save (one slot)</button>
-            <button class="small" data-event-click="load">Load</button>
-            <button class="small" data-event-click="new_game">New game</button>
+            <button data-event-click="step"><span class="long">Step day</span><span class="short">Step</span></button>
+        </div>
+        <div class="sys">
+            <button data-class-active="show_pause_menu" data-event-click="toggle_pause_menu"><span class="long">Stops</span><span class="short">Stops</span></button>
+            <button data-event-click="save">Save</button>
+            <button data-event-click="load">Load</button>
+            <button data-event-click="new_game"><span class="long">New game</span><span class="short">New</span></button>
+        </div>
+        <div id="pausemenu" data-if="show_pause_menu">
+            <span class="title">{{ui_pause_menu_title}}</span>
+            <div data-for="p : pause_rows" class="check" data-class-on="p.on" data-event-click="toggle_pause(p.index)"><span class="box"></span>{{p.label}}</div>
         </div>
     </div>
 
+    <div id="strip" data-if="tab == 0">
+        <span class="item"><span class="k">Month</span><span class="num" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span></span>
+        <span class="item"><span class="k">Storage</span><span class="num">{{storage_month}}</span></span>
+        <span class="item"><span class="k">Solvency</span><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span> <span class="muted">{{solvency_sub}}</span></span>
+        <span class="item"><span class="k">Next auction</span><span class="num">{{next_auction}}</span></span>
+        <span class="item"><span class="k">Mines</span><span class="chip good" data-if="mines_operating != ''">{{mines_operating}}</span><span class="chip warn" data-if="mines_building != ''">{{mines_building}}</span><span class="chip muted" data-if="mines_mothballed != ''">{{mines_mothballed}}</span><span class="chip muted" data-if="mines_depleted != ''">{{mines_depleted}}</span><span class="muted" data-if="mines_operating == '' && mines_building == '' && mines_mothballed == '' && mines_depleted == ''">none</span></span>
+        <span class="brk"></span>
+        <span class="item"><span class="k">Research</span><span class="num">{{research_strip}}</span></span>
+        <span class="item" data-if="has_world"><span class="k">World</span><span class="chip warn">{{world_event}}</span> <span class="num">{{world_sub}}</span></span>
+    </div>
+
     <div id="body">
-        <div id="nav">
-            <button data-class-active="tab == 0" data-event-click="set_tab(0)">Dashboard</button>
-            <button data-class-active="tab == 1" data-event-click="set_tab(1)">Plots</button>
-            <button data-class-active="tab == 2" data-event-click="set_tab(2)">Market</button>
-            <button data-class-active="tab == 3" data-event-click="set_tab(3)">Research</button>
-            <button data-class-active="tab == 4" data-event-click="set_tab(4)">Finance</button>
-            <button data-class-active="tab == 5" data-event-click="set_tab(5)">Log</button>
-            <p class="muted" style="margin-top: 20dp; font-size: 12dp;">{{ui_shortcuts}}</p>
+        <div id="rail">
+            <div class="tab" data-class-active="tab == 0" data-event-click="set_tab(0)"><span class="ic dashboard"></span><span class="tl">Dashboard</span></div>
+            <div class="tab" data-class-active="tab == 1" data-event-click="set_tab(1)"><span class="ic plots"></span><span class="tl">Plots</span></div>
+            <div class="tab" data-class-active="tab == 2" data-event-click="set_tab(2)"><span class="ic market"></span><span class="tl">Market</span></div>
+            <div class="tab" data-class-active="tab == 3" data-event-click="set_tab(3)"><span class="ic research"></span><span class="tl">Research</span></div>
+            <div class="tab" data-class-active="tab == 4" data-event-click="set_tab(4)"><span class="ic finance"></span><span class="tl">Finance</span></div>
+            <div class="tab" data-class-active="tab == 5" data-event-click="set_tab(5)"><span class="ic log"></span><span class="tl">Log</span></div>
         </div>
 
         <div id="content">
-            <!-- Dashboard -->
+            <!-- Dashboard (H4): what needs you, then what you own, then the money -->
             <div data-if="tab == 0">
                 <h1>Dashboard</h1>
-                <div class="card" data-if="show_intro">
-                    <h2>How to play</h2>
-                    <p>{{ui_how_to_1}}</p>
-                    <p>{{ui_how_to_2}}</p>
-                    <p class="muted">{{ui_how_to_3}}</p>
-                    <button class="small" data-event-click="hide_intro">Hide</button>
-                </div>
-                <div class="cards">
-                    <div class="card">
-                        <h2>Company</h2>
-                        <p>{{plots_summary}}</p>
-                        <p>{{mines_summary}}</p>
-                        <p>{{research_summary}}</p>
-                        <p class="muted">{{ui_company_terms}}</p>
-                    </div>
-                    <div class="card">
-                        <h2>Finance</h2>
-                        <p>{{ui_finance_cash}}</p>
-                        <p>{{ui_finance_debt}}</p>
-                        <p>{{ui_finance_storage}}</p>
-                        <p class="warning" data-if="storage_warning != ''">{{storage_warning}}</p>
-                        <p class="danger" data-if="insolvency != ''">{{insolvency}}</p>
-                    </div>
-                    <div class="card">
-                        <h2>Competitors</h2>
-                        <p data-for="rival : rivals">{{rival}}</p>
-                    </div>
-                    <div class="card">
-                        <h2>World events</h2>
-                        <p data-for="event : events" class="warning">{{event}}</p>
-                        <p class="muted" data-if="events.size == 0">{{ui_no_events}}</p>
+                <div class="sheet">
+                    <h2><span class="idx">01</span>Needs you</h2>
+                    <div class="needs">
+                        <div data-for="n : needs" class="nrow">
+                            <span class="n">{{n.number}}</span>
+                            <span class="t"><span class="title">{{n.title}}</span><span class="sub">{{n.sub}}</span></span>
+                            <span class="days">{{n.days}}</span>
+                            <span class="act"><button class="sm" data-if="n.action > 0" data-class-primary="n.action == 1" data-event-click="need_action(n.action, n.target)">{{n.act_label}}</button></span>
+                        </div>
+                        <div class="none" data-if="needs_none != ''">{{needs_none}}</div>
                     </div>
                 </div>
-                <h2>Warehouse</h2>
-                <table>
-                    <tr><th>Resource</th><th>Stock</th><th>Price</th><th>Value</th><th></th></tr>
-                    <tr data-for="r : resources">
-                        <td>{{r.name}}</td><td>{{r.stock}}</td><td>{{r.price}}</td><td>{{r.stock_value}}</td>
-                        <td><button class="small" data-if="r.has_stock" data-event-click="sell_all(r.index)">Sell all</button></td>
-                    </tr>
-                </table>
-                <h2>Recent</h2>
-                <div data-for="entry : log" data-if="it_index < 8" class="log-row">
-                    <span class="log-day">{{entry.day}}</span><span data-class-warning="entry.warning">{{entry.text}}</span>
+                <div class="split">
+                    <div class="main">
+                        <div class="sheet">
+                            <h2><span class="idx">02</span>Plots and mines</h2>
+                            <table>
+                                <tr><th>Plot</th><th>Region</th><th>Mine</th><th>Output</th><th>Remaining</th><th class="act"></th></tr>
+                                <tr data-for="o : owned" class="row" data-event-click="select_plot(o.index)">
+                                    <td class="name num">{{o.name}}</td>
+                                    <td class="nw">{{o.region}} <span class="muted num">{{o.area}}</span></td>
+                                    <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
+                                    <td class="num">{{o.output}}</td>
+                                    <td class="figure">{{o.remaining}}</td>
+                                    <td class="act"><button class="sm" data-if="o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button></td>
+                                </tr>
+                            </table>
+                            <div class="rivalline">{{rival_line}}</div>
+                        </div>
+                    </div>
+                    <div class="side narrow">
+                        <div class="sheet">
+                            <h2><span class="idx">03</span>Prices</h2>
+                            <div class="prices">
+                                <div data-for="r : resources" class="pr">
+                                    <span class="nm" data-class-muted="r.locked">{{r.name}}<span class="sub"><span class="warn" data-if="r.locked">locked · </span>{{r.stock_sub}}</span></span>
+                                    <price-chart data-attr-resource="r.index" days="90" mode="line"/>
+                                    <span class="num">{{r.price}}<span class="sub" data-class-warn="r.ratio_warn">{{r.ratio}}</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="sheet">
+                    <h2><span class="idx">04</span>Finance</h2>
+                    <div class="finrow">
+                        <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
+                        <div class="stat"><span class="label">Spendable</span><span class="value">{{spendable}}</span></div>
+                        <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span><span class="sub">{{capacity_sub}}</span></div>
+                        <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub">{{storage_sub}}</span></div>
+                        <div class="stat"><span class="label">This month</span><span class="value" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span><span class="sub">{{instalment_sub}}</span></div>
+                        <div class="stat"><span class="label">Solvency</span><span class="chipline"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="sub">{{solvency_sub}}</span></div>
+                    </div>
+                </div>
+                <div class="sheet">
+                    <h2><span class="idx">05</span>Recent</h2>
+                    <div class="log">
+                        <div data-for="e : recent" class="line" data-class-warn="e.warning"><span class="d">{{e.day}}</span><span class="t">{{e.text}}</span></div>
+                    </div>
                 </div>
             </div>
 
             <!-- Plots -->
             <div data-if="tab == 1">
                 <h1>Plots</h1>
-                <p class="muted">{{ui_plots_intro}}</p>
-                <table>
-                    <tr><th>Plot</th><th>Region</th><th>Area</th><th>Status</th><th>Ask</th><th>Auction</th><th>Survey</th><th>Mine</th></tr>
-                    <tr data-for="p : plots" class="clickable" data-class-selected="p.index == selected_plot" data-event-click="select_plot(p.index)">
-                        <td>{{p.name}}</td><td>{{p.region}}</td><td>{{p.area}}</td><td>{{p.status}}</td>
-                        <td>{{p.ask}}</td><td>{{p.auction}}</td><td>{{p.survey}}</td><td>{{p.mine}}</td>
-                    </tr>
-                </table>
-                <div class="card" style="margin-top: 12dp;">
-                    <h2>{{selected_plot_title}}</h2>
-                    <div data-for="p : plots" data-if="p.index == selected_plot">
-                        <p>{{p.odds_line}}</p>
-                        <p>{{p.costs_line}}</p>
-                        <div class="row">
-                            <button data-if="p.can_survey" data-event-click="survey(p.index)">Survey</button>
-                            <button class="disabled" data-if="!p.can_survey">Survey</button>
-                            <span data-if="p.listed" class="row">
-                                <input class="text" type="text" data-value="bid_input"/>
-                                <button class="primary" data-event-click="bid(p.index)">Place bid</button>
-                            </span>
-                            <button class="primary" data-if="p.can_build && p.can_afford_mine" data-event-click="build(p.index)">Build mine ({{p.capex}})</button>
-                            <button class="disabled" data-if="p.can_build && !p.can_afford_mine">{{p.build_blocked}}</button>
-                            <button data-if="p.can_toggle_mine" data-event-click="toggle_mine(p.mine_index)">
-                                <span data-if="p.mine_operating">Mothball</span><span data-if="!p.mine_operating">Reopen</span>
-                            </button>
+                <div class="split">
+                    <div class="main">
+                        <div class="sheet">
+                            <h2><span class="idx">01</span>For sale</h2>
+                            <table>
+                                <tr><th>Plot</th><th>Region</th><th class="n">Area</th><th class="n">Ask</th><th class="n">Bids</th><th class="n">Closes</th><th>Survey</th></tr>
+                                <tr data-for="s : for_sale" class="row" data-class-sel="s.index == selected_plot" data-event-click="select_plot(s.index)">
+                                    <td class="name num">{{s.name}}</td>
+                                    <td class="nw">{{s.region}}</td>
+                                    <td class="n">{{s.area}}</td>
+                                    <td class="n">{{s.ask}}</td>
+                                    <td class="n">{{s.bids}}</td>
+                                    <td class="n">{{s.closes}}</td>
+                                    <td>{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'">{{s.flag}}</span></td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="sheet">
+                            <h2><span class="idx">02</span>Owned</h2>
+                            <table>
+                                <tr><th>Plot</th><th>Region</th><th class="n">Area</th><th>Mine</th><th>Output</th><th>Remaining</th><th class="act"></th></tr>
+                                <tr data-for="o : owned" class="row" data-class-sel="o.index == selected_plot" data-event-click="select_plot(o.index)">
+                                    <td class="name num">{{o.name}}</td>
+                                    <td class="nw">{{o.region}}</td>
+                                    <td class="n">{{o.area}}</td>
+                                    <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
+                                    <td class="num">{{o.output}}</td>
+                                    <td class="figure">{{o.remaining}}</td>
+                                    <td class="act"><button class="sm" data-if="o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="side">
+                        <div class="sheet">
+                            <h2><span class="idx">03</span>{{panel.title}}</h2>
+                            <div data-if="panel.any">
+                                <div class="kv"><span class="k">Area</span><span class="v num">{{panel.area}}</span></div>
+                                <div class="kv" data-if="panel.listed"><span class="k">Ask</span><span class="v num">{{panel.ask}}</span></div>
+                                <div class="kv" data-if="panel.auction != ''"><span class="k">Auction</span><span class="v num">{{panel.auction}}</span></div>
+                                <div class="kv" data-if="panel.owner != ''"><span class="k">Owner</span><span class="v">{{panel.owner}}</span></div>
+                                <div class="kv"><span class="k">Mine capex</span><span class="v num">{{panel.capex}}</span></div>
+                                <div class="kv"><span class="k">Region odds</span><span class="v num"><span class="line wrapok">{{panel.odds}}</span></span></div>
+                                <h2 style="margin-top: 4dp;"><span class="idx">04</span>{{panel.survey_title}}</h2>
+                                <div data-for="e : panel.estimates" class="kv" data-class-locked="e.locked">
+                                    <span class="k">{{e.resource}}</span>
+                                    <span class="v num"><span class="line">{{e.tonnes}} <span class="err">{{e.error}}</span></span><span class="subline" data-if="e.locked">{{e.needs}}</span></span>
+                                </div>
+                                <div class="kv" data-if="panel.value != ''"><span class="k wide">Value at today's prices</span><span class="v num">{{panel.value}}</span></div>
+                                <div class="notice" data-if="panel.notice != ''" data-class-danger="panel.notice_class == 'danger'"><span class="ic">!</span><span class="msg">{{panel.notice}}</span></div>
+                                <div class="actions">
+                                    <div class="field" data-if="panel.listed"><label>Bid</label><input class="text" type="text" data-value="bid_input"/></div>
+                                    <button class="primary" data-if="panel.listed" data-event-click="bid(panel.index)">Place bid</button>
+                                    <button data-if="panel.can_survey" data-event-click="survey(panel.index)">{{panel.survey_label}}</button>
+                                    <button class="disabled" data-if="!panel.can_survey">{{panel.survey_label}}</button>
+                                    <button class="primary" data-if="panel.can_build && panel.can_afford_mine" data-event-click="build(panel.index)">{{panel.build_label}}</button>
+                                    <button class="disabled" data-if="panel.can_build && !panel.can_afford_mine">{{panel.build_blocked}}</button>
+                                    <button data-if="panel.can_toggle_mine && panel.mine_operating" data-event-click="toggle_mine(panel.mine_index)">Mothball</button>
+                                    <button data-if="panel.can_toggle_mine && !panel.mine_operating" data-event-click="toggle_mine(panel.mine_index)">Reopen</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="sheet">
+                            <h2><span class="idx">05</span>Research</h2>
+                            <div class="research">
+                                <span data-for="t : techs" class="tile" data-class-done="t.chip == 'done'" data-class-now="t.researching">{{t.name}}<span class="num" data-if="t.researching"> · {{t.until}}</span></span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -125,110 +200,158 @@
             <!-- Market -->
             <div data-if="tab == 2">
                 <h1>Market</h1>
-                <table>
-                    <tr><th>Resource</th><th>Price</th><th>Base</th><th>vs base</th><th>Industry sales</th><th>Your stock</th><th>Value</th><th>Selling</th><th>Sell now</th></tr>
-                    <tr data-for="r : resources" class="clickable" data-class-selected="r.index == selected_resource" data-event-click="select_resource(r.index)">
-                        <td>{{r.name}}</td><td>{{r.price}}</td><td>{{r.base}}</td><td>{{r.ratio}}</td><td>{{r.supply}}</td><td>{{r.stock}}</td><td>{{r.stock_value}}</td>
-                        <td>{{r.policy}}<span class="muted" data-if="r.auto_sold != ''"><br/>{{r.auto_sold}}</span></td>
-                        <td>
-                            <span data-if="r.has_stock" class="row">
-                                <input class="text" type="text" data-value="sell_input" style="width: 80dp;"/>
-                                <button class="small" data-event-click="sell(r.index)">Sell</button>
-                                <button class="small" data-event-click="sell_all(r.index)">All</button>
-                            </span>
-                        </td>
-                    </tr>
-                </table>
-                <div class="card">
-                    <h2>Auto-sell policy</h2>
-                    <p>{{policy_summary}}</p>
-                    <div class="row">
-                        <span>{{ui_policy_form_keep}}</span>
-                        <input class="text" type="text" data-value="policy_reserve_input" style="width: 90dp;"/>
-                        <span>{{ui_policy_form_mid}}</span>
-                        <input class="text" type="text" data-value="policy_floor_input" style="width: 90dp;"/>
-                        <span>{{ui_policy_form_end}}</span>
-                        <button class="small primary" data-event-click="apply_policy">Apply</button>
-                        <button class="small" data-if="policy_enabled" data-event-click="toggle_policy">Turn off</button>
-                        <button class="small" data-if="!policy_enabled" data-event-click="toggle_policy">Turn on</button>
-                    </div>
-                    <p class="muted">{{ui_policy_hint}}</p>
+                <div class="sheet">
+                    <h2><span class="idx">01</span>Prices and standing orders</h2>
+                    <table>
+                        <tr><th>Resource</th><th>90 days</th><th class="n">Price</th><th class="n">Stock</th><th>Sell now</th><th>Standing order</th></tr>
+                        <tr data-for="r : resources" class="row" data-class-sel="r.index == selected_resource" data-event-click="select_resource(r.index)">
+                            <td class="name"><span class="nowrap">{{r.name}} <span class="pill warn" data-if="r.locked">locked</span></span><span class="sub num">{{r.market_sub}}</span></td>
+                            <td><price-chart class="table" data-attr-resource="r.index" days="90" mode="line"/></td>
+                            <td class="n"><span class="num">{{r.price_unit}}</span><span class="sub num" data-class-warn="r.ratio_warn">{{r.base_line}}</span></td>
+                            <td class="n"><span class="num">{{r.stock}}</span><span class="sub num">{{r.stock_value}}</span></td>
+                            <td class="nw">
+                                <span class="muted" data-if="r.locked">{{r.locked_note}}</span>
+                                <span class="hrow" data-if="!r.locked && r.has_stock"><input class="text" type="text" data-value="sell_input" style="width: 90dp;"/><button class="sm" data-event-click="sell(r.index)">Sell</button><button class="sm" data-event-click="sell_all(r.index)">Sell all</button></span>
+                                <span class="muted" data-if="!r.locked && !r.has_stock">no stock</span>
+                            </td>
+                            <td><span class="pill accent" data-if="r.policy_on">auto-sell</span><span class="pill" data-if="!r.policy_on">manual</span><span class="sub">{{r.policy}}</span><span class="sub">{{r.auto_sold}}</span></td>
+                        </tr>
+                    </table>
                 </div>
-                <h2>{{selected_resource_title}}</h2>
-                <price-chart data-attr-resource="selected_resource"/>
-                <p class="muted">{{ui_chart_hint}}</p>
+                <div class="sheet">
+                    <h2><span class="idx">02</span>{{standing_title}}</h2>
+                    <p class="text2">{{policy_summary}}</p>
+                    <div class="actions">
+                        <div class="check" data-class-on="policy_enabled" data-event-click="toggle_policy"><span class="box"></span>Auto-sell</div>
+                        <div class="field"><label>Reserve</label><input class="text" type="text" data-value="policy_reserve_input" style="width: 90dp;"/></div>
+                        <div class="field"><label>Floor</label><input class="text" type="text" data-value="policy_floor_input" style="width: 90dp;"/></div>
+                        <button class="sm primary" data-event-click="apply_policy">Apply</button>
+                    </div>
+                    <span class="sub">{{ui_policy_hint}}</span>
+                </div>
+                <div class="split">
+                    <div class="main">
+                        <div class="sheet">
+                            <h2><span class="idx">03</span>{{chart_title}}</h2>
+                            <price-chart class="big" data-attr-resource="selected_resource" days="360" mode="line"/>
+                            <span class="sub">{{chart_note}}</span>
+                        </div>
+                    </div>
+                    <div class="side">
+                        <div class="sheet">
+                            <h2><span class="idx">04</span>Storage</h2>
+                            <div class="kv"><span class="k">Warehouse</span><span class="v"><span class="line num">{{warehouse_value}}</span><span class="subline num">{{storage_tonnes}}</span></span></div>
+                            <div class="kv"><span class="k">Cost</span><span class="v"><span class="line num">{{storage_month_long}}</span><span class="subline">{{storage_rate}}</span></span></div>
+                            <span class="sub">{{storage_note}}</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Research -->
             <div data-if="tab == 3">
                 <h1>Research</h1>
-                <p>{{research_summary}}</p>
-                <table>
-                    <tr><th>Technology</th><th>Cost</th><th>Time</th><th>Effects</th><th>Status</th><th></th></tr>
-                    <tr data-for="t : techs">
-                        <td>{{t.name}}</td><td>{{t.cost}}</td><td>{{t.duration}}</td><td>{{t.effects}}</td><td>{{t.status}}</td>
-                        <td><button class="small primary" data-if="t.can_start" data-event-click="research(t.index)">Start</button></td>
-                    </tr>
-                </table>
+                <div class="sheet">
+                    <h2><span class="idx">01</span>Laboratory</h2>
+                    <div class="kv"><span class="k">Lab</span><span class="v"><span class="line">{{lab_line}}</span><span class="subline num">{{lab_sub}}</span></span></div>
+                </div>
+                <div class="sheet">
+                    <h2><span class="idx">02</span>Technologies</h2>
+                    <table>
+                        <tr><th>Technology</th><th>Status</th><th class="n">Cost</th><th class="n">Days</th><th>Effect</th><th class="act"></th></tr>
+                        <tr data-for="t : techs" class="row" data-class-sel="t.researching">
+                            <td class="name"><span class="nowrap">{{t.name}}</span><span class="sub" data-if="t.needs != ''">{{t.needs}}</span></td>
+                            <td class="nw"><span class="chip" data-class-good="t.chip_class == 'good'" data-class-accent="t.chip_class == 'accent'" data-class-muted="t.chip_class == 'muted'">{{t.chip}}</span></td>
+                            <td class="n">{{t.cost}}</td>
+                            <td class="n">{{t.days}}</td>
+                            <td>{{t.effects}}</td>
+                            <td class="act"><button class="sm primary" data-if="t.can_start" data-event-click="research(t.index)">Start</button><span class="muted num" data-if="t.researching">{{t.until}}</span><span class="sub" data-if="t.blocked != ''">{{t.blocked}}</span></td>
+                        </tr>
+                    </table>
+                </div>
             </div>
 
             <!-- Finance -->
             <div data-if="tab == 4">
                 <h1>Finance</h1>
-                <div class="cards">
-                    <div class="card">
-                        <h2>Borrow</h2>
-                        <p>{{ui_borrow_line}}</p>
-                        <div class="row">
-                            <input class="text" type="text" data-value="loan_input"/>
-                            <button class="primary" data-event-click="take_loan">Take loan</button>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <h2>Costs</h2>
-                        <p>{{ui_finance_storage}}</p>
-                        <p>{{ui_each_mine_opex}}</p>
-                        <p class="warning" data-if="storage_warning != ''">{{storage_warning}}</p>
-                    </div>
-                    <div class="card">
-                        <h2>Cover costs at month end</h2>
-                        <p>{{cover_costs_label}}</p>
-                        <button class="small" data-if="cover_costs" data-event-click="toggle_cover_costs">Turn off</button>
-                        <button class="small primary" data-if="!cover_costs" data-event-click="toggle_cover_costs">Turn on</button>
+                <div class="sheet">
+                    <h2><span class="idx">01</span>Finance</h2>
+                    <div class="finrow">
+                        <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
+                        <div class="stat"><span class="label">Spendable</span><span class="value">{{spendable}}</span></div>
+                        <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span><span class="sub">{{capacity_sub}}</span></div>
+                        <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub">{{storage_sub}}</span></div>
+                        <div class="stat"><span class="label">This month</span><span class="value" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span><span class="sub">{{instalment_sub}}</span></div>
+                        <div class="stat"><span class="label">Solvency</span><span class="chipline"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="sub">{{solvency_sub}}</span></div>
                     </div>
                 </div>
-                <h2>Loans</h2>
-                <table>
-                    <tr><th>Remaining</th><th>Instalment</th><th>Term</th><th>Repay early</th></tr>
-                    <tr data-for="l : loans" data-if="l.active">
-                        <td>{{l.remaining}}</td><td>{{l.instalment}}</td><td>{{l.months}}</td>
-                        <td>
-                            <div class="row">
-                                <input class="text" type="text" data-value="repay_input"/>
-                                <button class="small" data-event-click="repay(l.index)">Repay</button>
+                <div class="split">
+                    <div class="main">
+                        <div class="sheet">
+                            <h2><span class="idx">02</span>Loans</h2>
+                            <table>
+                                <tr><th>Loan</th><th class="n">Principal</th><th class="n">Remaining</th><th class="n">Instalment</th><th class="n">Months left</th><th class="act"></th></tr>
+                                <tr data-for="l : loans" class="row">
+                                    <td class="name num">{{l.name}}</td>
+                                    <td class="n">{{l.principal}}</td>
+                                    <td class="n">{{l.remaining}}</td>
+                                    <td class="n">{{l.instalment}}</td>
+                                    <td class="n">{{l.months}}</td>
+                                    <td class="act"><input class="text" type="text" data-value="repay_input"/><button class="sm" data-event-click="repay(l.index)">Repay</button></td>
+                                </tr>
+                            </table>
+                            <span class="sub" data-if="loans.size == 0">No loans outstanding.</span>
+                            <span class="sub">{{loan_rule}}</span>
+                        </div>
+                        <div class="sheet">
+                            <h2><span class="idx">03</span>Take a loan</h2>
+                            <div class="actions">
+                                <div class="field"><label>Amount</label><input class="text" type="text" data-value="loan_input"/></div>
+                                <button class="primary" data-event-click="take_loan">Take loan</button>
                             </div>
-                        </td>
-                    </tr>
-                </table>
+                            <span class="sub">{{loan_limits}}</span>
+                        </div>
+                    </div>
+                    <div class="side">
+                        <div class="sheet">
+                            <h2><span class="idx">04</span>Cover costs</h2>
+                            <div class="check" data-class-on="cover_costs" data-event-click="toggle_cover_costs"><span class="box"></span>{{cover_check}}</div>
+                            <span class="sub">{{cover_explain}}</span>
+                            <div class="kv" style="margin-top: 8dp;"><span class="k">Last month</span><span class="v"><span class="line wrapok">{{cover_last}}</span></span></div>
+                        </div>
+                        <div class="sheet">
+                            <h2><span class="idx">05</span>Solvency</h2>
+                            <div class="kv"><span class="k">Status</span><span class="v"><span class="line"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="subline">{{solvency_rule}}</span></span></div>
+                            <div class="kv"><span class="k">Storage</span><span class="v"><span class="line num">{{storage_month_long}}</span><span class="subline">{{storage_rate}}</span></span></div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Log -->
             <div data-if="tab == 5">
                 <h1>Log</h1>
-                <div data-for="entry : log" class="log-row">
-                    <span class="log-day">{{entry.day}}</span><span data-class-warning="entry.warning">{{entry.text}}</span>
+                <div class="sheet">
+                    <h2><span class="idx">01</span>Log</h2>
+                    <div class="log">
+                        <div data-for="e : log" class="line" data-class-warn="e.warning"><span class="d">{{e.day}}</span><span class="t">{{e.text}}</span></div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div id="status">{{status_line}}</div>
+    <div id="status" data-class-danger="status_danger">
+        <span class="lbl">Status</span>
+        <span data-if="status_line != ''">{{status_line}}</span>
+        <span class="muted" data-if="status_line == ''">{{ui_shortcuts}}</span>
+    </div>
 
     <div id="overlay" data-if="game_over">
         <div class="panel">
             <h1>Bankrupt</h1>
             <p>{{ui_game_over}}</p>
-            <p class="warning">{{status_line}}</p>
+            <p class="warn">{{status_line}}</p>
             <button class="primary" data-event-click="new_game">Start a new company</button>
             <button data-event-click="load">Load last save</button>
         </div>
