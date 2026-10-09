@@ -296,3 +296,8 @@ ui.loan_blocked_count	The bank allows {count} open loans and every one is in use
 ui.log_empty	Nothing of this kind in the log yet.
 ui.unlisted_plots.one	{count} plot not yet listed.
 ui.unlisted_plots.many	{count} plots not yet listed.
+ui.sale_over	{percent}% over the ask
+ui.sale_at_ask	at the ask
+ui.sale_buyer_you	You
+ui.no_sales	No land has sold yet.
+ui.panel_sale	day {day}, {paid}, {over}

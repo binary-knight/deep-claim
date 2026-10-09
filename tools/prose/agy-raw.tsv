@@ -197,3 +197,4 @@ ui.loan_blocked_count	The bank allows {count} open loans, and every one of them 
 ui.log_empty	Nothing logged under this heading yet.
 ui.unlisted_plots.one	{count} plot hasn't been listed yet.
 ui.unlisted_plots.many	{count} plots haven't been listed yet.
+ui.no_sales	No land sold yet. Nothing down in the ledger.

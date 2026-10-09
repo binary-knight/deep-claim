@@ -49,6 +49,18 @@ struct SaleRow {
     std::string flag;  // chip text: "2 bids", "surveyed", "not surveyed", "empty", "locked ore", ""
     std::string flag_class;  // chip class: "warn", "danger", "" (neutral)
     bool has_flag = false;
+    bool major = false;  // the survey reports a major deposit of ore the player can mine
+};
+
+// A settled auction in the record under the for-sale table (spec 006).
+struct SoldRow {
+    int index = 0;      // the plot, so a click selects it
+    std::string name;   // "#12"
+    std::string buyer;  // a company's name, or "You"
+    std::string paid;   // "$1.14M"
+    std::string over;   // "16% over the ask" or "at the ask"
+    std::string day;    // "day 45"
+    bool mine = false;  // the player bought it
 };
 
 // A plot the player owns, on the dashboard board and the Plots tab.
@@ -75,6 +87,7 @@ struct EstimateRow {
     // "needs Lithium Processing", "mineable in 40 days", "one project away" or ""
     std::string needs;
     bool locked = false;
+    bool major = false;  // more than twice the region's median deposit
 };
 
 // The selected plot's panel.
@@ -88,6 +101,7 @@ struct PlotPanel {
     std::string capex;
     std::string odds;          // "copper 70% · iron 60%"
     std::string owner;         // "Yours", rival name, or ""
+    std::string sale;          // "day 45, $1.14M, 16% over the ask" once sold, else ""
     std::string survey_title;  // "Survey, day 1136" or "No survey yet"
     std::vector<EstimateRow> estimates;
     std::string value;         // "~$133M" or ""
@@ -224,6 +238,10 @@ struct UiModel {
     // The land horizon under the for-sale table: "86 plots not yet listed."
     // while the queue has land, "No unlisted land remains." once it is empty.
     std::string no_unlisted;
+    // What land has sold for: the five most recent settled auctions, newest
+    // first, and the line shown while there are none.
+    std::vector<SoldRow> recent_sales;
+    std::string no_sales;
 
     // Market
     std::vector<ResourceRow> resources;

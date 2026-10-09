@@ -766,7 +766,9 @@ void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
         }
         row.survey += std::format("{} ~{}", content.resources[e.resource.index()].name,
                                   formatTonnes(e.tonnesEstimate));
-        lockedOnly = lockedOnly && resourceLocked(content, view, e.resource);
+        const bool locked = resourceLocked(content, view, e.resource);
+        lockedOnly = lockedOnly && locked;
+        row.major = row.major || (e.major && !locked);
     }
     row.error = std::format("({})", formatRatio(estimates[0].relativeError));
     if (lockedOnly) {
@@ -782,6 +784,38 @@ void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
         row.flag = "surveyed";
         row.flag_class = "good";
     }
+}
+
+// "16% over the ask", or "at the ask" for a sale within half a percent of
+// the minimum bid. Whole percent, to the nearest: the premium is a
+// truncated ratio, so a bid of exactly 16% over arrives as 15.9999.
+std::string overAskText(const sim::Content& content, const sim::SaleView& sale) {
+    const std::int64_t percent =
+        (sale.premium * 100 + sim::Fixed::fromRatio(1, 2)).truncToInt();
+    return percent <= 0 ? text(content, "ui.sale_at_ask")
+                        : text(content, "ui.sale_over", {{"percent", std::to_string(percent)}});
+}
+
+// The record of what land has sold for: the newest five settled auctions.
+void fillRecentSales(const sim::Content& content, const sim::CompanyView& view, UiModel& model) {
+    constexpr std::size_t kShown = 5;
+    model.recent_sales.clear();
+    for (const sim::SaleView& sale : view.recentSales) {
+        if (model.recent_sales.size() == kShown) {
+            break;
+        }
+        SoldRow row;
+        row.index = static_cast<int>(sale.plot.value());
+        row.name = plotLabel(sale.plot);
+        row.mine = sale.buyer == Session::kPlayer;
+        row.buyer =
+            row.mine ? text(content, "ui.sale_buyer_you") : view.companies[sale.buyer.index()].name;
+        row.paid = formatMoney(sale.paid);
+        row.over = overAskText(content, sale);
+        row.day = dayLabel(sale.day);
+        model.recent_sales.push_back(row);
+    }
+    model.no_sales = model.recent_sales.empty() ? text(content, "ui.no_sales") : "";
 }
 
 void fillSale(const Session& session, UiModel& model) {
@@ -813,6 +847,7 @@ void fillSale(const Session& session, UiModel& model) {
         model.no_unlisted = textPlural(content, "ui.no_unlisted_withdrawn", view.withdrawnPlots,
                                        {{"count", std::to_string(view.withdrawnPlots)}});
     }
+    fillRecentSales(content, view, model);
 }
 
 // The survey block of the selected plot. Returns whether anything found
@@ -838,6 +873,7 @@ bool fillPanelSurvey(const sim::Content& content, const sim::CompanyView& view,
         row.tonnes = std::format("~{}", formatTonnes(e.tonnesEstimate));
         row.error = std::format("({})", formatRatio(e.relativeError));
         row.locked = resourceLocked(content, view, e.resource);
+        row.major = e.major;
         row.needs = row.locked ? lockedNote(content, view, e.resource) : "";
         anyExtractable = anyExtractable || !row.locked;
         valueCents +=
@@ -973,6 +1009,12 @@ void fillPanel(const Session& session, UiModel& model) {
     panel.owned = plot.owner == Session::kPlayer;
     panel.owner = plot.listing == sim::PlotListing::Sold ? companyLabel(view, plot.owner) : "";
     panel.ask = panel.listed ? formatMoney(plot.askPrice) : "";
+    if (plot.sale) {
+        panel.sale = text(content, "ui.panel_sale",
+                          {{"day", std::to_string(plot.sale->day)},
+                           {"paid", formatMoney(plot.sale->paid)},
+                           {"over", overAskText(content, *plot.sale)}});
+    }
     if (panel.listed && plot.auction) {
         panel.auction = text(content, "ui.auction_closes",
                              {{"day", std::to_string(plot.auction->closesOnDay)},
