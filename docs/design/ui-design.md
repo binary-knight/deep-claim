@@ -81,6 +81,14 @@ data, same copy: H1 "Decision desk" (what needs you first), H2 "Ledger"
 warehouse, log), H3 "Operations board" (assets first: plots and mines
 with output and remaining, prices beside, log last).
 
+Round 1 outcome:
+- **H2 rejected: "cards make me hunt."** Four equal cards give no order of
+  importance. Codified: `[Constraint: the dashboard is ordered by what
+  needs a decision, never by category]`.
+- H1 and H3 go to round 2 with H4 "Decision desk over the mine board":
+  needs-you list, then plots and mines with prices beside, then finance,
+  then log.
+
 ## Tokens, components, states
 
 To be filled when the direction is locked (Sprint 1), then the hierarchy
