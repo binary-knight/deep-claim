@@ -304,11 +304,12 @@ void serialize(Archive& ar, BalanceParams& balance) {
        balance.surveyCost, balance.surveyDurationDays, balance.surveyBaseNoise,
        balance.mineCapexPerHectare, balance.mineBuildDays, balance.mineOpexPerDay,
        balance.mineMothballOpexMult, balance.auctionWindowDays, balance.plotsListedAtStart,
-       balance.plotsListedPerMonth, balance.maxUnsoldRounds, balance.relistCooldownDays,
-       balance.bankruptcyGraceMonths, balance.marketSupplySmoothingDays,
-       balance.marketPriceAdjustDays, balance.demandReversionRate, balance.demandMultMin,
-       balance.demandMultMax, balance.priceFloorMult, balance.priceCapMult,
-       balance.demandGrowthPerYear, balance.defaultSellPolicy, balance.defaultCoverCosts);
+       balance.plotsListedPerMonth, balance.openingMinMineable, balance.openingMaxLockedRegion,
+       balance.maxUnsoldRounds, balance.relistCooldownDays, balance.bankruptcyGraceMonths,
+       balance.marketSupplySmoothingDays, balance.marketPriceAdjustDays,
+       balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
+       balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear,
+       balance.defaultSellPolicy, balance.defaultCoverCosts);
 }
 
 template <class Archive>

@@ -292,6 +292,8 @@
   "ui.tech_needs": "Needs {tech} first.",
   "ui.tech_unaffordable": "Needs {amount} in cash on hand.",
   "ui.tech_until": "until day {day}",
+  "ui.unlisted_plots.many": "{count} plots not yet listed.",
+  "ui.unlisted_plots.one": "{count} plot not yet listed.",
   "ui.unlock_in_days.many": "mineable in {days} days",
   "ui.unlock_in_days.one": "mineable in {days} day",
   "ui.unlock_ready": "one project away"

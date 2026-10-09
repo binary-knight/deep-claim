@@ -788,6 +788,8 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "price_cap_mult",
                     "demand_growth_per_year",
                     "plots_listed_per_month",
+                    "opening_min_mineable",
+                    "opening_max_locked_region",
                     "max_unsold_rounds",
                     "relist_cooldown_days",
                     "bankruptcy_grace_months",
@@ -832,6 +834,16 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
         valueOr(node.integer("plots_listed_at_start", true, 0, 1000), 0LL));
     balance.plotsListedPerMonth = static_cast<std::uint32_t>(
         valueOr(node.integer("plots_listed_per_month", true, 0, 1000), 0LL));
+    // Spec 005: the opening hand. More mineable plots than the hand holds
+    // is a contradiction; world generation relaxes whatever the regions
+    // themselves cannot supply.
+    balance.openingMinMineable = static_cast<std::uint32_t>(
+        valueOr(node.integer("opening_min_mineable", true, 0, 1000), 0LL));
+    if (balance.openingMinMineable > balance.plotsListedAtStart) {
+        node.report("opening_min_mineable", "must not exceed plots_listed_at_start");
+    }
+    balance.openingMaxLockedRegion = static_cast<std::uint32_t>(
+        valueOr(node.integer("opening_max_locked_region", true, 0, 1000), 0LL));
     balance.maxUnsoldRounds =
         static_cast<std::uint32_t>(valueOr(node.integer("max_unsold_rounds", true, 0, 100), 0LL));
     balance.relistCooldownDays = static_cast<sim::Day>(valueOr(
@@ -1119,6 +1131,8 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.notice_locked_soon.one", "resource,days"},
     {"ui.notice_locked_soon.many", "resource,days"},
     {"ui.notice_locked_ready", "resource,tech"},
+    {"ui.unlisted_plots.one", "count"},
+    {"ui.unlisted_plots.many", "count"},
     {"ui.no_unlisted", ""},
     {"ui.no_unlisted_withdrawn.one", "count"},
     {"ui.no_unlisted_withdrawn.many", "count"},

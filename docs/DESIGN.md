@@ -758,3 +758,61 @@ Client (all presentation of view data):
 - Observation from the probe's fixed game, not acted on here: by year 3,
   23 of 30 plots had been withdrawn unsold. Land demand is spec 005/006
   territory.
+
+## World and opening (spec 005)
+
+- **Size and pace.** 40 plots per region (120), four listed at the start,
+  one a month: new land for 116 months, the last on day 3481. The first
+  draft of the spec said 30 per region; the runner showed that world out
+  of unlisted land on day 2581, short of its own year-8 goal.
+- **The listing queue is no longer a plain shuffle.** World generation
+  classifies each region for a company with no research
+  (`classifyRegionAtStart`): Mineable when an ore that needs no research
+  is present on at least half the plots, Locked when it is not Mineable
+  and holds an ore that does, Other otherwise. The queue is an opening
+  hand (`plots_listed_at_start` plots, at least `opening_min_mineable`
+  from Mineable regions, at most `opening_max_locked_region` from Locked
+  ones, shuffled) followed by every other plot in random order with no
+  third plot in a row from one region. Only the world RNG stream is used.
+- **Regions and odds, never the ground.** A plot from a mineable region
+  can still survey empty. Guaranteeing actual ore would leak hidden
+  deposits through the public queue and make surveys pointless.
+- **Rules give way, they do not abort.** A hand rule is dropped when no
+  remaining plot can meet it, and the run rule when every remaining plot
+  is in the blocked region, so any content generates. The in-code fixture
+  (20 mineable, 10 locked) ends its queue with a forced run of North; the
+  property test accepts a run of three only when nothing else was left.
+- **Golden hash.** `0x28adea3aad5623a7` to `0x118a72ce0f57d9f7`, once,
+  because the fixture's queue is drawn differently. No state was added.
+  The content fingerprint also changes (two balance fields, plot counts),
+  so saves and traces from before this spec do not load.
+- **Unsold land.** `max_unsold_rounds` 6 and `relist_cooldown_days` 180
+  (owner's choice after spec 004). Even so a median of 44 of 120 plots are
+  withdrawn at year 8: two companies do not absorb a plot a month.
+- **Runner sweep.** `sim_runner --sweep N` plays N seeds and prints, per
+  seed and as min/median/max, the opening hand, the queue's longest
+  region run, the land horizon and withdrawn land at years 2, 5 and 8,
+  company 0's first mine, and final cash, then the spec's goal checks.
+  The opening and year-8 checks gate the exit code and run in CI as
+  `runner_sweep` (ten seeds, eight years). The first-mine check is printed
+  with `"gated": false`: the AI opens its first mine on day 273 at the
+  median against a goal of 250, and changing the hand does not move it.
+  That, and the AI ending below zero in 5 of 50 seeds in the larger world,
+  are for spec 006.
+
+50 seeds, 10 years, one rival, release build:
+
+| Per seed | min | median | max |
+| --- | --- | --- | --- |
+| Opening plots in a mineable region (of 4) | 3 | 3 | 4 |
+| Opening plots in the locked region | 0 | 1 | 1 |
+| Longest same-region run, monthly listings | 2 | 2 | 3 |
+| Day the last unlisted plot was listed | 3481 | 3481 | 3481 |
+| Unlisted plots at year 2 / 5 / 8 | 93 / 57 / 21 | 93 / 57 / 21 | 93 / 57 / 21 |
+| Withdrawn plots at year 2 | 6 | 10 | 15 |
+| Withdrawn plots at year 5 | 23 | 28 | 37 |
+| Withdrawn plots at year 8 | 35 | 44 | 57 |
+| Day company 0 started its first mine | 47 | 93 | 423 |
+| Day company 0's first mine opened | 227 | 273 | 603 |
+| Final cash, company 0 | -$0.58M | $187M | $1,086M |
+| Final cash, company 1 | -$1.01M | $831M | $1,219M |

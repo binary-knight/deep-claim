@@ -294,3 +294,5 @@ ui.loan_credit	You can borrow up to {amount}.
 ui.loan_blocked_credit	Remaining credit is down to {amount}, below the bank's minimum loan of {min}.
 ui.loan_blocked_count	The bank allows {count} open loans, and every one of them is already drawn.
 ui.log_empty	Nothing logged under this heading yet.
+ui.unlisted_plots.one	{count} plot not yet listed.
+ui.unlisted_plots.many	{count} plots not yet listed.

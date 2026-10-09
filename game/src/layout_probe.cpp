@@ -343,9 +343,22 @@ bool playScenario(game::App& app, const sim::Content& content) {
         }
         return false;
     }
-    std::cout << std::format("\nscenario: {}, {} owned ({}; {}), {} loans, {} needs-you rows\n",
-                             model.day, model.owned.size(), model.owned[0].output,
-                             model.owned[0].remaining, model.loans.size(), model.needs.size());
+    // While land is still queued the Plots tab shows how much (spec 005).
+    const std::uint32_t unlisted = session.view().unlistedPlotsRemaining;
+    const std::string horizon = game::textPlural(content, "ui.unlisted_plots", unlisted,
+                                                 {{"count", std::to_string(unlisted)}});
+    if (unlisted == 0 || model.no_unlisted != horizon) {
+        std::cout << std::format(
+            "SCENARIO: the Plots tab does not show the land horizon "
+            "({} unlisted, \"{}\")\n",
+            unlisted, model.no_unlisted);
+        return false;
+    }
+    std::cout << std::format(
+        "\nscenario: {}, {} owned ({}; {}), {} loans, {} needs-you rows, "
+        "\"{}\"\n",
+        model.day, model.owned.size(), model.owned[0].output, model.owned[0].remaining,
+        model.loans.size(), model.needs.size(), model.no_unlisted);
     return true;
 }
 
@@ -363,7 +376,9 @@ bool checkFreshNeeds(const game::App& app, const sim::Content& content) {
     return false;
 }
 
-constexpr int kLateMaxDays = 1500;
+// Long enough for the shipped world's land queue to run dry (120 plots at
+// one a month, spec 005) with room to spare.
+constexpr int kLateMaxDays = 4500;
 
 // Plays the populated game on to the states spec 004 added. In order: a
 // survey report lands on a plot still at auction (needs-you row); the land
@@ -444,7 +459,13 @@ bool playEndgameScenario(game::App& app, const sim::Content& content) {
     app.refreshNow();
     app.selectPlot(static_cast<int>(late.value()));
     const game::UiModel& model = app.model();
-    if (model.no_unlisted.empty()) {
+    const sim::CompanyView& view = session.view();
+    const std::string ranOut =
+        view.withdrawnPlots == 0
+            ? game::text(content, "ui.no_unlisted")
+            : game::textPlural(content, "ui.no_unlisted_withdrawn", view.withdrawnPlots,
+                               {{"count", std::to_string(view.withdrawnPlots)}});
+    if (model.no_unlisted != ranOut) {
         return fail("the Plots tab does not say the land has run out");
     }
     if (model.can_take_loan || model.loan_blocked.empty()) {

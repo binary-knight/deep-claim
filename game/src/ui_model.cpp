@@ -804,13 +804,14 @@ void fillSale(const Session& session, UiModel& model) {
         row.has_flag = !row.flag.empty();
         model.for_sale.push_back(row);
     }
-    model.no_unlisted.clear();
-    if (view.unlistedPlotsRemaining == 0) {
-        model.no_unlisted =
-            view.withdrawnPlots == 0
-                ? text(content, "ui.no_unlisted")
-                : textPlural(content, "ui.no_unlisted_withdrawn", view.withdrawnPlots,
-                             {{"count", std::to_string(view.withdrawnPlots)}});
+    if (view.unlistedPlotsRemaining > 0) {
+        model.no_unlisted = textPlural(content, "ui.unlisted_plots", view.unlistedPlotsRemaining,
+                                       {{"count", std::to_string(view.unlistedPlotsRemaining)}});
+    } else if (view.withdrawnPlots == 0) {
+        model.no_unlisted = text(content, "ui.no_unlisted");
+    } else {
+        model.no_unlisted = textPlural(content, "ui.no_unlisted_withdrawn", view.withdrawnPlots,
+                                       {{"count", std::to_string(view.withdrawnPlots)}});
     }
 }
 

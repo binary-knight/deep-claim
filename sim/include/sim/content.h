@@ -115,6 +115,12 @@ struct BalanceParams {
     Day auctionWindowDays = 0;
     std::uint32_t plotsListedAtStart = 0;
     std::uint32_t plotsListedPerMonth = 0;
+    // The opening hand (spec 005): of the plots listed at the start, at
+    // least this many come from regions a new company can mine on day one,
+    // and at most this many from regions whose main ore is locked. Both are
+    // promises about regions and odds, never about hidden deposits.
+    std::uint32_t openingMinMineable = 0;
+    std::uint32_t openingMaxLockedRegion = 0;
     // Land nobody wants (spec 004): after this many auctions in a row
     // without a sale a plot is withdrawn, and may be listed again only after
     // the cooldown. Zero rounds means plots relist forever.

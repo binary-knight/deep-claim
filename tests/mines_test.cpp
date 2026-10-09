@@ -76,6 +76,10 @@ TEST_CASE("Building a mine charges capex by area and becomes operational later",
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 1, test::setup());
     const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    // Whatever the first listing cost and held, the build is affordable and
+    // there is ore to open on.
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(50'000'000));
+    setDeposit(simulation, content, plot, sim::ResourceId(0), 1'000'000);
     const sim::Plot& plotState = simulation.state().plots[plot.index()];
     const sim::Money cash = simulation.state().companies[0].cash;
     const sim::Money capex = content.balance.mineCapexPerHectare * plotState.areaHectares;
@@ -104,6 +108,7 @@ TEST_CASE("Mine commands are validated", "[mines]") {
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 1, test::setup());
     const sim::PlotId plot = buyFirstListed(simulation, kRival);
+    grantCash(simulation, content, kRival, sim::Money::fromUnits(50'000'000));
     simulation.submit(sim::BuildMine{kPlayer, plot});  // not the owner
     simulation.submit(sim::BuildMine{kRival, sim::PlotId(999)});
     simulation.submit(sim::SetMineState{kRival, sim::MineId(0), 0});  // no mine yet

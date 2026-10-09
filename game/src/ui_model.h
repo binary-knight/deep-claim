@@ -221,7 +221,9 @@ struct UiModel {
     std::vector<SaleRow> for_sale;
     PlotPanel panel;
     std::vector<TechRow> techs;  // also the research tiles on the Plots tab
-    std::string no_unlisted;     // "No unlisted land remains." once the queue is empty
+    // The land horizon under the for-sale table: "86 plots not yet listed."
+    // while the queue has land, "No unlisted land remains." once it is empty.
+    std::string no_unlisted;
 
     // Market
     std::vector<ResourceRow> resources;
