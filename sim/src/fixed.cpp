@@ -52,6 +52,22 @@ std::uint64_t udiv128(std::uint64_t high, std::uint64_t low, std::uint64_t divis
 
 }  // namespace
 
+int compareProducts(std::int64_t a1, std::int64_t b1, std::int64_t a2, std::int64_t b2) {
+    std::uint64_t high1 = 0;
+    std::uint64_t low1 = 0;
+    std::uint64_t high2 = 0;
+    std::uint64_t low2 = 0;
+    umul128(magnitude(a1), magnitude(b1), high1, low1);
+    umul128(magnitude(a2), magnitude(b2), high2, low2);
+    if (high1 != high2) {
+        return high1 < high2 ? -1 : 1;
+    }
+    if (low1 != low2) {
+        return low1 < low2 ? -1 : 1;
+    }
+    return 0;
+}
+
 std::optional<std::int64_t> checkedMulDiv(std::int64_t a, std::int64_t b, std::int64_t c) {
     if (c == 0) {
         return std::nullopt;

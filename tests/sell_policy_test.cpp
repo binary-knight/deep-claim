@@ -94,16 +94,15 @@ TEST_CASE("An enabled policy sells everything above the reserve each day", "[sel
     SECTION("sell everything") {
         simulation.submit(policy(kIron, true));
         const sim::Money before = player(simulation).cash;
-        const sim::TickReport& report = simulation.tick();
+        // The sale happens at the day's price, before the market update.
         const sim::Money price = simulation.state().markets[kIron.index()].price;
+        const sim::TickReport& report = simulation.tick();
         CHECK(player(simulation).inventoryTonnes[kIron.index()] == 0);
-        // The sale happened at the day's price before the market update.
-        CHECK(player(simulation).cash > before);
+        CHECK(player(simulation).cash == before + price * 1'000);
         CHECK(player(simulation).autoSoldTonnes[kIron.index()] == 1'000);
-        CHECK(player(simulation).autoSoldProceeds[kIron.index()] > sim::Money::zero());
+        CHECK(player(simulation).autoSoldProceeds[kIron.index()] == price * 1'000);
         CHECK_FALSE(hasNotice(report.notices, sim::NoticeKind::OreSold));
         CHECK(simulation.view(kPlayer).autoSoldTonnes[kIron.index()] == 1'000);
-        (void)price;
     }
     SECTION("keep a reserve") {
         simulation.submit(policy(kIron, true, 400));
@@ -140,6 +139,24 @@ TEST_CASE("An enabled policy sells everything above the reserve each day", "[sel
         // 500 sold by hand, then the policy leaves the 900 reserve: nothing more.
         CHECK(player(simulation).inventoryTonnes[kIron.index()] == 500);
     }
+}
+
+TEST_CASE("The AI keeps its own selling rule when the defaults are on", "[sell_policy]") {
+    sim::Content content = test::makeContent();
+    content.balance.defaultSellPolicy.enabled = 1;
+    content.balance.defaultCoverCosts = true;
+    sim::Simulation simulation(content, 11, test::setup());
+    const sim::CompanyId rival(1);
+    {
+        sim::WorldState edited = simulation.state();
+        edited.companies[rival.index()].inventoryTonnes[kIron.index()] = 5'000;
+        REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+    }
+    simulation.tick(3);  // no controller runs here, so nothing sells the rival's stock
+    const sim::Company& company = simulation.state().companies[rival.index()];
+    CHECK(company.inventoryTonnes[kIron.index()] == 5'000);
+    CHECK(company.autoSoldTonnes[kIron.index()] == 0);
+    CHECK(company.coverCosts == 0);
 }
 
 TEST_CASE("Policies never sell locked ore", "[sell_policy]") {
@@ -204,6 +221,11 @@ TEST_CASE("Cover costs sells just enough of the most valuable stock at month end
         CHECK(summary->tonnes == sale->tonnes);
         // Cash is within one tonne's price of zero.
         CHECK(player(simulation).cash < simulation.state().markets[kIron.index()].price);
+        // The sale happened after the market stage, so the day's supply
+        // counter is untouched and the state saves and loads cleanly.
+        CHECK(simulation.state().markets[kIron.index()].soldToday == 0);
+        sim::Simulation other(content, 50, test::setup());
+        CHECK(other.load(simulation.save()));
     }
     SECTION("with the flag off the company stays insolvent") {
         simulation.submit(sim::SetCoverCosts{kPlayer, 0});

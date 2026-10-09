@@ -64,16 +64,18 @@ std::optional<RejectReason> validateSell(const WorldState& state, const SellOre&
     return std::nullopt;
 }
 
-Money executeSale(WorldState& state, CompanyId companyId, ResourceId resource,
-                  std::int64_t tonnes) {
+Money executeSale(WorldState& state, CompanyId companyId, ResourceId resource, std::int64_t tonnes,
+                  bool countSupply) {
     Company& company = state.companies[companyId.index()];
     Market& market = state.markets[resource.index()];
     const Money proceeds = market.price * tonnes;
     company.inventoryTonnes[resource.index()] -= tonnes;
     company.cash += proceeds;
-    // Saturate: beyond this the day's supply no longer moves the average.
-    const std::int64_t counted = std::min(tonnes, kMaxSupplyPerDay);
-    market.soldToday = std::min(kMaxSupplyPerDay - counted, market.soldToday) + counted;
+    if (countSupply) {
+        // Saturate: beyond this the day's supply no longer moves the average.
+        const std::int64_t counted = std::min(tonnes, kMaxSupplyPerDay);
+        market.soldToday = std::min(kMaxSupplyPerDay - counted, market.soldToday) + counted;
+    }
     return proceeds;
 }
 
@@ -114,14 +116,14 @@ std::optional<RejectReason> validatePolicyCompany(const WorldState& state, Compa
     return std::nullopt;
 }
 
-void recordAutoSale(Company& company, std::uint32_t resource, std::int64_t tonnes, Money proceeds) {
-    company.autoSoldTonnes[resource] =
-        std::min(kMaxStockTonnes, company.autoSoldTonnes[resource] + tonnes);
-    company.autoSoldProceeds[resource] = Money::fromCents(
-        std::min(kMaxCashCents, company.autoSoldProceeds[resource].cents() + proceeds.cents()));
-}
-
 }  // namespace
+
+void recordAutoSale(Company& company, ResourceId resource, std::int64_t tonnes, Money proceeds) {
+    const std::size_t r = resource.index();
+    company.autoSoldTonnes[r] = std::min(kMaxStockTonnes, company.autoSoldTonnes[r] + tonnes);
+    company.autoSoldProceeds[r] = Money::fromCents(
+        std::min(kMaxCashCents, company.autoSoldProceeds[r].cents() + proceeds.cents()));
+}
 
 std::optional<RejectReason> validateSetSellPolicy(const WorldState& state,
                                                   const SetSellPolicy& command) {
@@ -176,7 +178,7 @@ void runSellPolicies(const Content& content, WorldState& state) {
                 continue;
             }
             const Money proceeds = executeSale(state, CompanyId(c), ResourceId(r), tonnes);
-            recordAutoSale(company, r, tonnes, proceeds);
+            recordAutoSale(company, ResourceId(r), tonnes, proceeds);
         }
     }
 }

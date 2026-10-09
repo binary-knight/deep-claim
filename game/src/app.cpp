@@ -522,8 +522,13 @@ void App::onSelectResource(int index) {
     if (index >= 0 && index < static_cast<int>(content_->resources.size())) {
         traceUi("select_resource", content_->resources[static_cast<std::size_t>(index)].id);
     }
+    // Prefill the policy inputs only on an actual change of selection so a
+    // draft is not lost by a click on the already selected row.
+    const bool changed = index != model_.selected_resource;
     model_.selected_resource = index;
-    syncPolicyInputs();
+    if (changed) {
+        syncPolicyInputs();
+    }
     refresh();
 }
 

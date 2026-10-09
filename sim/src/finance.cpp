@@ -70,12 +70,11 @@ void coverCosts(const Content& content, WorldState& state, CompanyId companyId,
             order.push_back(r);
         }
     }
-    const auto value = [&](std::uint32_t r) {
-        return checkedMulDiv(state.markets[r].price.cents(), company.inventoryTonnes[r], 1)
-            .value_or(kMaxCashCents);
-    };
-    std::stable_sort(order.begin(), order.end(),
-                     [&](std::uint32_t a, std::uint32_t b) { return value(a) > value(b); });
+    // Exact comparison: price times stock can exceed 64 bits.
+    std::stable_sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
+        return compareProducts(state.markets[a].price.cents(), company.inventoryTonnes[a],
+                               state.markets[b].price.cents(), company.inventoryTonnes[b]) > 0;
+    });
     for (const std::uint32_t r : order) {
         if (company.cash >= Money::zero()) {
             break;
@@ -90,10 +89,9 @@ void coverCosts(const Content& content, WorldState& state, CompanyId companyId,
         if (tonnes <= 0) {
             continue;
         }
-        const Money proceeds = executeSale(state, companyId, ResourceId(r), tonnes);
-        company.autoSoldTonnes[r] = std::min(kMaxStockTonnes, company.autoSoldTonnes[r] + tonnes);
-        company.autoSoldProceeds[r] = Money::fromCents(
-            std::min(kMaxCashCents, company.autoSoldProceeds[r].cents() + proceeds.cents()));
+        // After the market stage: the sale must not touch today's supply.
+        const Money proceeds = executeSale(state, companyId, ResourceId(r), tonnes, false);
+        recordAutoSale(company, ResourceId(r), tonnes, proceeds);
         report.notices.push_back(
             saleNotice(NoticeKind::CoverCostsSale, companyId, ResourceId(r), tonnes, proceeds));
     }

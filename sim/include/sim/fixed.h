@@ -9,6 +9,11 @@ namespace sim {
 
 // (a * b) / c with a 128-bit intermediate, truncating toward zero.
 // Returns nullopt when c is zero or the quotient does not fit in int64.
+// Compares a1*b1 with a2*b2 exactly (128-bit intermediates, magnitudes
+// only: all four inputs must be non-negative). Returns -1, 0 or 1.
+[[nodiscard]] int compareProducts(std::int64_t a1, std::int64_t b1, std::int64_t a2,
+                                  std::int64_t b2);
+
 [[nodiscard]] std::optional<std::int64_t> checkedMulDiv(std::int64_t a, std::int64_t b,
                                                         std::int64_t c);
 

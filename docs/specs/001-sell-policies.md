@@ -114,13 +114,19 @@ convenience should be on unless the player chooses to speculate.
 
 ## Client
 
-- Market tab controls and the month-to-date line, bound to the new view
-  fields; Apply sends `SetSellPolicy` with the parsed inputs (strict money
-  and tonnes parsers already exist). Invalid text is reported in the
-  status line without sending anything.
-- Finance tab cover-costs checkbox sends `SetCoverCosts`.
-- Dashboard finance card warning when `monthlyStorageCost * 10 > cash`
-  (also when cash is negative). This is presentation, not a rule.
+- Market tab: each resource row shows its policy ("Auto-sell, keep 500 t,
+  at $850/t or more" or "Manual") and the month-to-date line. One panel
+  below the table edits the policy of the selected resource: reserve and
+  floor inputs, Apply, and Turn on / Turn off. Apply sends `SetSellPolicy`
+  with the parsed inputs (strict money and tonnes parsers already exist);
+  invalid text is reported in the status line without sending anything.
+  The inputs are prefilled from the sim on a change of selection, on a
+  new game and on load, and never while the player is editing.
+- Finance tab: a Cover costs card with the current state explained and a
+  Turn on / Turn off button that sends `SetCoverCosts`.
+- Dashboard finance card and Finance tab warning when there is a storage
+  cost and either cash is at or below zero or the monthly storage cost
+  exceeds a tenth of cash. This is presentation, not a rule.
 - Log text for the two new notices and the new reject paths.
 
 ## Tests
@@ -156,3 +162,20 @@ convenience should be on unless the player chooses to speculate.
   combinations of these.
 - Daily sales run after mines and before markets, matching when a manual
   order submitted the same day would execute.
+- The selected-resource panel with buttons replaced the per-row checkbox
+  controls first sketched: two-way inputs inside an RmlUi `data-for` row
+  cannot be verified without a display, and one panel keeps the table
+  readable. Buttons rather than checkboxes because a checkbox's change
+  event and its data binding order is not something the headless probe
+  can check.
+- Month-to-date totals saturate at the state bounds (stock bound for
+  tonnes, cash bound for proceeds). Each addend is within the same bound,
+  so the addition cannot overflow; only a month of absurd turnover would
+  hit the cap. (Codex review flagged the saturation; accepted as is.)
+- Cover-costs ordering compares price times stock exactly with 128-bit
+  intermediates (Codex review: the earlier overflow fallback made large
+  stocks tie).
+- A cover-costs sale happens after the market stage has consumed and reset
+  the day's supply counter, so it does not register as supply (Codex
+  review finding: counting it left a state that failed save validation).
+  Month-end sales are rare and small, so the price effect is negligible.

@@ -360,7 +360,8 @@ void fillFinance(const Session& session, UiModel& model) {
     // games to storage charges nobody noticed.
     model.storage_warning.clear();
     if (view.monthlyStorageCost > sim::Money::zero() &&
-        (view.cash <= sim::Money::zero() || view.monthlyStorageCost * 10 > view.cash)) {
+        (view.cash <= sim::Money::zero() ||
+         view.monthlyStorageCost.cents() > view.cash.cents() / 10)) {
         model.storage_warning = std::format(
             "Storage is costing {} a month, a large share of your cash. Sell ore "
             "or set an auto-sell policy on the Market tab.",

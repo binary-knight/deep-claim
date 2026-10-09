@@ -2,6 +2,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+TEST_CASE("compareProducts is exact past 64 bits", "[fixed]") {
+    constexpr std::int64_t kBig = 4'000'000'000'000'000'000LL;  // 4e18
+    CHECK(sim::compareProducts(3, 4, 6, 2) == 0);
+    CHECK(sim::compareProducts(3, 5, 6, 2) == 1);
+    CHECK(sim::compareProducts(1, 1, 6, 2) == -1);
+    // Both products overflow int64; the larger one still wins.
+    CHECK(sim::compareProducts(kBig, 3, kBig, 2) == 1);
+    CHECK(sim::compareProducts(kBig, 2, kBig, 3) == -1);
+    CHECK(sim::compareProducts(kBig, 2, 2, kBig) == 0);
+    // A representable product never outranks one that overflows.
+    CHECK(sim::compareProducts(kBig, 1, kBig, 2) == -1);
+}
+
 #include <cstdint>
 #include <limits>
 
