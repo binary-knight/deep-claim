@@ -271,3 +271,6 @@ notice.mine_running_low	The survey crew reports {days} days of ore left on {plot
 ui.notice_survey_pending	The survey crew hasn't reported back yet. Sinking a shaft now is a blind bet.
 notice.plot_withdrawn	{plot} went unsold again and was withdrawn from sale at {amount}.
 notice.rival_unlocked_resource	{company} can now process {resource}.
+notice.auto_sale_month	Automatic sales this month: {list}.
+notice.auto_sale_item	{tonnes} of {resource} for {amount}
+ui.pause_on.research_complete	Research complete

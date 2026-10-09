@@ -27,6 +27,7 @@ enum class PauseOn : std::uint8_t {
     MineOperational,   // MineOperational
     MineFoundNothing,  // MineFoundNothing
     IdleMine,          // IdleMineWarning
+    ResearchComplete,  // ResearchComplete (the player's own lab)
     kCount,
 };
 
@@ -38,8 +39,9 @@ constexpr std::size_t kPauseOnCount = static_cast<std::size_t>(PauseOn::kCount);
 struct AutoPause {
     std::array<bool, kPauseOnCount> enabled{};
 
-    // The spec's defaults: everything on except survey complete and mine
-    // operational, which happen often and rarely need a decision.
+    // The defaults: everything on except mine operational. Survey and
+    // research complete joined the "on" set with spec 004: a report that
+    // lands unseen or a lab left idle costs the player more than a stop.
     [[nodiscard]] static AutoPause defaults();
 
     [[nodiscard]] bool isEnabled(PauseOn reason) const {
@@ -57,7 +59,9 @@ struct AutoPause {
     // Text form: one "key=0" or "key=1" line per reason, in enum order.
     [[nodiscard]] std::string toText() const;
     // Reads the text form. Unknown keys are ignored and missing keys keep
-    // their current value, so an old or edited file never breaks loading.
+    // their current value, so an old or edited file never breaks loading:
+    // read over defaults(), a file from before a reason existed gets that
+    // reason's default and keeps every toggle it does record.
     // Returns false only when a line is malformed.
     bool fromText(std::string_view text);
 };

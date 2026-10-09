@@ -4,16 +4,23 @@
 #include "sim/fixed.h"
 #include "sim/money.h"
 #include "sim/save.h"
+#include "sim/simulation.h"
 #include "sim/types.h"
 #include "sim/world_state.h"
 
 #include "game/format.h"
+#include "game/trace.h"
 #include "test_content.h"
 #include "test_strings.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
+#include <span>
+#include <sstream>
+#include <string>
+#include <vector>
 
 TEST_CASE("Money, day and tonnage formatting", "[session][format]") {
     CHECK(game::formatMoney(sim::Money::fromUnits(5'000'000)) == "$5.00M");
@@ -177,9 +184,8 @@ TEST_CASE("Auto-pause stops the clock on a configured notice and not on others",
     REQUIRE(listed.valid());
 
     SECTION("survey complete pauses when enabled") {
-        game::AutoPause rules = game::AutoPause::defaults();
-        CHECK_FALSE(rules.isEnabled(game::PauseOn::SurveyComplete));  // off by default
-        rules.set(game::PauseOn::SurveyComplete, true);
+        const game::AutoPause rules = game::AutoPause::defaults();
+        CHECK(rules.isEnabled(game::PauseOn::SurveyComplete));  // on by default since spec 004
         session.setAutoPause(rules);
         session.submit(sim::CommissionSurvey{{}, listed});
         session.setSpeed(game::Speed::Fastest);
@@ -200,7 +206,10 @@ TEST_CASE("Auto-pause stops the clock on a configured notice and not on others",
         session.setSpeed(game::Speed::Fastest);
         CHECK(session.advance(1.0) == 20);
     }
-    SECTION("survey complete does not pause under the defaults") {
+    SECTION("survey complete does not pause when switched off") {
+        game::AutoPause rules = game::AutoPause::defaults();
+        rules.set(game::PauseOn::SurveyComplete, false);
+        session.setAutoPause(rules);
         session.submit(sim::CommissionSurvey{{}, listed});
         session.setSpeed(game::Speed::Fastest);
         for (int i = 0; i < 3; ++i) {
@@ -228,7 +237,8 @@ TEST_CASE("Auto-pause rules round-trip through their text form", "[session]") {
     const std::string text = rules.toText();
     CHECK(text.find("insolvency=0\n") != std::string::npos);
     CHECK(text.find("mine_operational=1\n") != std::string::npos);
-    CHECK(text.find("survey_complete=0\n") != std::string::npos);
+    CHECK(text.find("survey_complete=1\n") != std::string::npos);
+    CHECK(text.find("research_complete=1\n") != std::string::npos);
 
     game::AutoPause restored = game::AutoPause::defaults();
     CHECK(restored.fromText(text));
@@ -273,4 +283,267 @@ TEST_CASE("Stepping a day onto a pausing notice stops a running clock", "[sessio
     const std::optional<sim::Notice> why = session.takePausedBy();
     REQUIRE(why.has_value());
     CHECK(why->kind == sim::NoticeKind::SurveyComplete);
+}
+
+namespace {
+
+sim::PlotId firstListedPlot(const game::Session& session) {
+    for (const sim::PlotView& plot : session.view().plots) {
+        if (plot.listing == sim::PlotListing::Listed) {
+            return plot.id;
+        }
+    }
+    return {};
+}
+
+int countKind(const game::Session& session, sim::NoticeKind kind) {
+    return static_cast<int>(
+        std::count_if(session.log().begin(), session.log().end(),
+                      [&](const game::LogEntry& e) { return e.notice.kind == kind; }));
+}
+
+game::AutoPause neverPause() {
+    game::AutoPause rules;
+    rules.enabled.fill(false);
+    return rules;
+}
+
+// A game with no rival, so an auction's outcome is the player's alone.
+sim::GameSetup soloSetup() {
+    sim::GameSetup setup = test::setup();
+    setup.aiNames.clear();
+    return setup;
+}
+
+// Edits the session's world through a save, as the sim tests do.
+template <typename Edit>
+void editWorld(game::Session& session, const sim::Content& content, const sim::GameSetup& setup,
+               Edit edit) {
+    sim::Simulation scratch(content, 1, setup);
+    REQUIRE(scratch.load(session.save()));
+    sim::WorldState edited = scratch.state();
+    edit(edited);
+    REQUIRE(session.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+}
+
+}  // namespace
+
+TEST_CASE("Auto-pause defaults: survey and research complete are on; old files keep their toggles",
+          "[session]") {
+    const game::AutoPause defaults = game::AutoPause::defaults();
+    CHECK(defaults.isEnabled(game::PauseOn::SurveyComplete));
+    CHECK(defaults.isEnabled(game::PauseOn::ResearchComplete));
+    CHECK_FALSE(defaults.isEnabled(game::PauseOn::MineOperational));
+    CHECK(game::pauseOnKey(game::PauseOn::ResearchComplete) == "research_complete");
+
+    // A file written before spec 004: eight keys, no research_complete. The
+    // toggles it records are respected; the reason it has never heard of
+    // takes the new default.
+    const std::string old =
+        "insolvency=1\nbankrupt=1\nauction_won=0\nauction_lost=1\n"
+        "survey_complete=0\nmine_operational=1\nmine_found_nothing=1\n"
+        "idle_mine=1\n";
+    game::AutoPause migrated = game::AutoPause::defaults();
+    CHECK(migrated.fromText(old));
+    CHECK(migrated.isEnabled(game::PauseOn::ResearchComplete));
+    CHECK_FALSE(migrated.isEnabled(game::PauseOn::SurveyComplete));
+    CHECK_FALSE(migrated.isEnabled(game::PauseOn::AuctionWon));
+    CHECK(migrated.isEnabled(game::PauseOn::MineOperational));
+
+    // A file that names neither gets both new defaults.
+    game::AutoPause sparse = game::AutoPause::defaults();
+    CHECK(sparse.fromText("insolvency=0\n"));
+    CHECK(sparse.isEnabled(game::PauseOn::SurveyComplete));
+    CHECK(sparse.isEnabled(game::PauseOn::ResearchComplete));
+
+    // Only the player's own research stops the clock.
+    sim::Notice done =
+        sim::makeNotice(sim::NoticeKind::ResearchComplete, sim::CompanyId(1), sim::PlotId());
+    CHECK_FALSE(defaults.shouldPause(done, game::Session::kPlayer));
+    done.company = game::Session::kPlayer;
+    CHECK(defaults.shouldPause(done, game::Session::kPlayer));
+}
+
+TEST_CASE("Finished research stops the clock under the defaults", "[session]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    session.submit(sim::StartResearch{{}, sim::TechId(0)});
+    session.setSpeed(game::Speed::Fastest);
+    for (int i = 0; i < 100 && session.speed() != game::Speed::Paused; ++i) {
+        session.advance(1.0);
+    }
+    CHECK(session.speed() == game::Speed::Paused);
+    CHECK(session.day() == content.techs[0].durationDays + 1);
+    const std::optional<sim::Notice> why = session.takePausedBy();
+    REQUIRE(why.has_value());
+    CHECK(why->kind == sim::NoticeKind::ResearchComplete);
+}
+
+TEST_CASE("Relists reach the log only for plots the player surveyed or bid on", "[session]") {
+    sim::Content content = test::makeContent();
+    test::addStrings(content);
+    const int days = static_cast<int>(content.balance.auctionWindowDays) + 5;
+
+    SECTION("no stake: the relist is dropped from the log and the trace") {
+        std::ostringstream out;
+        game::TraceWriter trace(out);
+        game::Session session(content, 1, test::setup());
+        session.setTrace(&trace);
+        session.setAutoPause(neverPause());
+        for (int i = 0; i < days; ++i) {
+            session.stepOneDay();
+        }
+        CHECK(countKind(session, sim::NoticeKind::PlotRelisted) == 0);
+        CHECK(countKind(session, sim::NoticeKind::PlotListed) > 0);  // new land is still news
+        CHECK(out.str().find("plot_relisted") == std::string::npos);
+        CHECK(out.str().find("plot_listed") != std::string::npos);
+    }
+    SECTION("a survey makes that plot's relist news") {
+        game::Session session(content, 1, test::setup());
+        session.setAutoPause(neverPause());
+        const sim::PlotId plot = firstListedPlot(session);
+        REQUIRE(plot.valid());
+        session.submit(sim::CommissionSurvey{{}, plot});
+        for (int i = 0; i < days; ++i) {
+            session.stepOneDay();
+        }
+        REQUIRE(countKind(session, sim::NoticeKind::PlotRelisted) == 1);
+        for (const game::LogEntry& entry : session.log()) {
+            if (entry.notice.kind == sim::NoticeKind::PlotRelisted) {
+                CHECK(entry.notice.plot == plot);
+                CHECK(entry.text.starts_with("Plot #"));  // capitalised
+            }
+        }
+    }
+    SECTION("a bid that cannot be paid makes that plot's relist news") {
+        game::Session session(content, 1, soloSetup());
+        session.setAutoPause(neverPause());
+        const sim::PlotId plot = firstListedPlot(session);
+        REQUIRE(plot.valid());
+        const sim::Money ask = session.view().plots[plot.index()].askPrice;
+        session.submit(sim::BidOnPlot{{}, plot, ask});
+        session.stepOneDay();
+        // Take the cash away before the close: the bid is forfeited and the
+        // plot relists. The player never surveyed it; the bid is the stake,
+        // and it is read from the view, so it survives the load.
+        editWorld(session, content, soloSetup(), [](sim::WorldState& world) {
+            world.companies[0].cash = sim::Money::fromUnits(1);
+        });
+        REQUIRE(session.view().surveys.empty());
+        for (int i = 0; i < days; ++i) {
+            session.stepOneDay();
+        }
+        CHECK(countKind(session, sim::NoticeKind::BidForfeited) == 1);
+        bool relisted = false;
+        for (const game::LogEntry& entry : session.log()) {
+            if (entry.notice.kind == sim::NoticeKind::PlotRelisted) {
+                CHECK(entry.notice.plot == plot);
+                relisted = true;
+            }
+        }
+        CHECK(relisted);
+    }
+}
+
+TEST_CASE("A rival's unlock is in the player's log; the player's own is not", "[session]") {
+    sim::Content content = test::makeContent();
+    test::addStrings(content);
+    game::Session session(content, 1, test::setup());
+    session.setAutoPause(neverPause());
+    session.submit(sim::StartResearch{{}, sim::TechId(0)});
+    for (sim::Day d = 0; d <= content.techs[0].durationDays + 1; ++d) {
+        session.stepOneDay();
+    }
+    session.submit(sim::StartResearch{{}, sim::TechId(1)});
+    for (sim::Day d = 0; d <= content.techs[1].durationDays + 1; ++d) {
+        session.stepOneDay();
+    }
+    REQUIRE(session.view().completedTechs.size() == 2);
+    for (const game::LogEntry& entry : session.log()) {
+        if (entry.notice.kind == sim::NoticeKind::RivalUnlockedResource) {
+            CHECK(entry.notice.company != game::Session::kPlayer);
+            CHECK(entry.text.find("Rival") != std::string::npos);
+        }
+    }
+    CHECK(countKind(session, sim::NoticeKind::ResearchComplete) == 2);
+}
+
+TEST_CASE("A month's automatic sales are one log line", "[session][format]") {
+    sim::Content content = test::makeContent();
+    test::addStrings(content);
+
+    // The line itself: one item per resource, joined with semicolons.
+    sim::Notice iron =
+        sim::makeNotice(sim::NoticeKind::AutoSaleSummary, game::Session::kPlayer, sim::PlotId());
+    iron.resource = sim::ResourceId(0);
+    iron.tonnes = 33'009;
+    iron.amount = sim::Money::fromUnits(1'790'000);
+    sim::Notice copper = iron;
+    copper.resource = sim::ResourceId(1);
+    copper.tonnes = 4'680;
+    copper.amount = sim::Money::fromUnits(2'690'000);
+    const std::vector<sim::Notice> both = {iron, copper};
+    const std::string line = game::describeAutoSales(content, both);
+    INFO(line);
+    CHECK(line.find(game::formatTonnes(33'009) + " of " + content.resources[0].name +
+                    " for $1.79M; " + game::formatTonnes(4'680) + " of " +
+                    content.resources[1].name + " for $2.69M.") != std::string::npos);
+    CHECK(line.find("..") == std::string::npos);
+    CHECK(line.front() != '[');
+    const std::string one = game::describeAutoSales(content, std::span(&iron, 1));
+    CHECK(one.find(';') == std::string::npos);
+
+    // In play: a mine selling two ores under standing orders logs one line a month.
+    game::Session session(content, 1, soloSetup());
+    session.setAutoPause(neverPause());
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    session.setTrace(&trace);
+    for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
+        sim::SetSellPolicy policy;
+        policy.resource = sim::ResourceId(r);
+        policy.enabled = 1;
+        session.submit(policy);
+    }
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    session.submit(sim::BidOnPlot{{}, plot, session.view().plots[plot.index()].askPrice});
+    for (sim::Day d = 0; d <= content.balance.auctionWindowDays + 1; ++d) {
+        session.stepOneDay();
+    }
+    REQUIRE(session.view().plots[plot.index()].owner == game::Session::kPlayer);
+    // Iron and copper in the ground and the cash to dig them.
+    editWorld(session, content, soloSetup(), [&](sim::WorldState& world) {
+        world.companies[0].cash = sim::Money::fromUnits(50'000'000);
+        auto& deposits = world.hidden.plotDeposits[plot.index()].deposits;
+        deposits.clear();
+        deposits.push_back({sim::ResourceId(0), 10'000'000'000, 10'000'000'000});
+        deposits.push_back({sim::ResourceId(1), 10'000'000'000, 10'000'000'000});
+    });
+    session.submit(sim::BuildMine{{}, plot});
+    for (sim::Day d = 0; d < content.balance.mineBuildDays + 4 * sim::kDaysPerMonth; ++d) {
+        session.stepOneDay();
+    }
+    int lines = 0;
+    int multi = 0;
+    sim::Day lastDay = 0;
+    for (const game::LogEntry& entry : session.log()) {
+        if (entry.notice.kind != sim::NoticeKind::AutoSaleSummary) {
+            continue;
+        }
+        ++lines;
+        CHECK(entry.day != lastDay);  // never two on one day
+        lastDay = entry.day;
+        CHECK(entry.text.starts_with("Automatic sales this month: "));
+        multi += entry.text.find(';') != std::string::npos ? 1 : 0;
+    }
+    CHECK(lines >= 3);
+    CHECK(multi >= 1);
+    // The trace records what the log shows: one notice line per summary.
+    std::size_t traced = 0;
+    for (std::size_t at = out.str().find("\"auto_sale_summary\""); at != std::string::npos;
+         at = out.str().find("\"auto_sale_summary\"", at + 1)) {
+        ++traced;
+    }
+    CHECK(traced == static_cast<std::size_t>(lines));
 }

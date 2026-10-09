@@ -10,6 +10,7 @@
 #include "game/format.h"
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -52,7 +53,7 @@ std::string plotName(sim::PlotId id) {
 
 std::string rejectionText(const sim::Content& content, const sim::Notice& n) {
     const bool hasAmount = n.amount != sim::Money::zero();
-    const std::string reason = rejectReasonText(content, n.reason);
+    const std::string reason = rejectReasonClause(content, n.reason);
     if (n.plot.valid()) {
         return hasAmount ? text(content, "notice.command_rejected.plot_amount",
                                 {{"plot", plotName(n.plot)},
@@ -135,25 +136,61 @@ std::string rejectReasonText(const sim::Content& content, sim::RejectReason reas
     return text(content, std::string("reject.") + sim::rejectReasonName(reason));
 }
 
+std::string rejectReasonClause(const sim::Content& content, sim::RejectReason reason) {
+    std::string clause = rejectReasonText(content, reason);
+    while (!clause.empty() && (clause.back() == '.' || clause.back() == ' ')) {
+        clause.pop_back();
+    }
+    // Lower the first letter unless the word is an acronym or a missing-key
+    // marker ("[reject.x]").
+    const bool upper = !clause.empty() && clause[0] >= 'A' && clause[0] <= 'Z';
+    const bool nextUpper = clause.size() > 1 && clause[1] >= 'A' && clause[1] <= 'Z';
+    if (upper && !nextUpper) {
+        clause[0] = static_cast<char>(clause[0] - 'A' + 'a');
+    }
+    return clause;
+}
+
+std::string capitalised(std::string text) {
+    if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') {
+        text[0] = static_cast<char>(text[0] - 'a' + 'A');
+    }
+    return text;
+}
+
 std::string describeNotice(const sim::Content& content, const sim::CompanyView& view,
                            const sim::Notice& n) {
     using K = sim::NoticeKind;
     if (n.kind == K::CommandRejected) {
-        return rejectionText(content, n);
+        return capitalised(rejectionText(content, n));
     }
     const std::string key = std::string("notice.") + sim::noticeKindName(n.kind);
     // Every placeholder a notice template may use; the loader limits each
     // key to the ones that make sense for it.
-    return text(content, key,
-                {{"plot", plotName(n.plot)},
-                 {"company", companyName(view, n.company)},
-                 {"resource", resourceName(content, n.resource)},
-                 {"tech", techName(content, n.tech)},
-                 {"event", eventName(content, n.event)},
-                 {"amount", formatMoney(n.amount)},
-                 {"tonnes", formatTonnes(n.tonnes)},
-                 {"months", std::to_string(n.tonnes)},
-                 {"days", std::to_string(n.tonnes)}});
+    return capitalised(text(content, key,
+                            {{"plot", plotName(n.plot)},
+                             {"company", companyName(view, n.company)},
+                             {"resource", resourceName(content, n.resource)},
+                             {"tech", techName(content, n.tech)},
+                             {"event", eventName(content, n.event)},
+                             {"amount", formatMoney(n.amount)},
+                             {"tonnes", formatTonnes(n.tonnes)},
+                             {"months", std::to_string(n.tonnes)},
+                             {"days", std::to_string(n.tonnes)}}));
+}
+
+std::string describeAutoSales(const sim::Content& content, std::span<const sim::Notice> sales) {
+    std::string list;
+    for (const sim::Notice& sale : sales) {
+        if (!list.empty()) {
+            list += "; ";
+        }
+        list += text(content, "notice.auto_sale_item",
+                     {{"tonnes", formatTonnes(sale.tonnes)},
+                      {"resource", resourceName(content, sale.resource)},
+                      {"amount", formatMoney(sale.amount)}});
+    }
+    return capitalised(text(content, "notice.auto_sale_month", {{"list", list}}));
 }
 
 }  // namespace game

@@ -12,7 +12,8 @@
 //   save       file
 //   command    the player's order, tagged with the day it was submitted
 //   day        day and state hash after each tick
-//   notice     a player-visible log entry, with its text
+//   notice     a line of the player's log, with its text (what the log
+//              shows: filtered and collapsed as the session does it)
 //   state      compact monthly summary of the player's finances and output
 //   ui         interface events: tab, select, speed, status
 //   marker     the player pressed the "look at this" key
@@ -45,7 +46,10 @@ public:
                  std::string_view build);
     void loaded(sim::Day day, std::string_view file, std::uint64_t stateHash);
     void saved(sim::Day day, std::string_view file);
-    void command(sim::Day day, const sim::Command& command);
+    // With `content`, a StartResearch record also carries "tech_id" (the
+    // content id string) so a trace reads without the data files open. The
+    // parser still keys on the index.
+    void command(sim::Day day, const sim::Command& command, const sim::Content* content = nullptr);
     void dayTicked(sim::Day day, std::uint64_t stateHash);
     void notice(sim::Day day, const sim::Notice& notice, std::string_view text);
     void state(const sim::Content& content, const sim::CompanyView& view);

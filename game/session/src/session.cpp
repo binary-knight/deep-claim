@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace game {
@@ -37,9 +38,7 @@ Session::Session(const sim::Content& content, sim::Seed seed, const sim::GameSet
     : content_(&content), simulation_(content, seed, setup), ai_(content) {
     refreshView();
     cashHistory_.push_back(view_.cash);
-    for (const sim::Notice& notice : simulation_.reportFor(kPlayer)) {
-        appendLog(0, notice);
-    }
+    logNotices(0, simulation_.reportFor(kPlayer), {});
 }
 
 void Session::setSpeed(Speed speed) {
@@ -102,7 +101,10 @@ std::optional<sim::Notice> Session::takePausedBy() {
 void Session::submit(sim::Command command) {
     sim::setCommandCompany(command, kPlayer);
     if (trace_ != nullptr) {
-        trace_->command(day(), command);
+        trace_->command(day(), command, content_);
+    }
+    if (const auto* bid = std::get_if<sim::BidOnPlot>(&command)) {
+        submittedBids_.push_back(bid->plot);
     }
     simulation_.submit(command);
 }
@@ -114,6 +116,7 @@ bool Session::load(std::span<const std::uint8_t> bytes) {
     refreshView();
     cashHistory_.assign(1, view_.cash);
     pausedBy_.reset();
+    submittedBids_.clear();
     log_.clear();
     sim::Notice marker;
     marker.kind = sim::NoticeKind::EventEnded;  // placeholder kind; text is what matters
@@ -135,18 +138,22 @@ void Session::tickOnce() {
         simulation_.collectCommands(sim::CompanyId(c), ai_);
     }
     const sim::Day processed = view_.day;
+    // The player's stake in each auction as the day starts: an auction that
+    // closes today is gone from the view by the time its notice arrives.
+    std::vector<sim::PlotId> bidPlots = std::move(submittedBids_);
+    submittedBids_.clear();
+    for (const sim::PlotView& plot : view_.plots) {
+        if (plot.auction.has_value() && plot.auction->myBid != sim::Money::zero()) {
+            bidPlots.push_back(plot.id);
+        }
+    }
     simulation_.tick();
     refreshView();
     cashHistory_.push_back(view_.cash);
     if (trace_ != nullptr) {
         trace_->dayTicked(view_.day, simulation_.stateHash());
     }
-    for (const sim::Notice& notice : simulation_.reportFor(kPlayer)) {
-        appendLog(processed, notice);
-        if (!pausedBy_.has_value() && autoPause_.shouldPause(notice, kPlayer)) {
-            pausedBy_ = notice;
-        }
-    }
+    logNotices(processed, simulation_.reportFor(kPlayer), bidPlots);
     if (trace_ != nullptr && view_.day % sim::kDaysPerMonth == 0) {
         trace_->state(*content_, view_);
     }
@@ -156,11 +163,75 @@ void Session::refreshView() {
     view_ = simulation_.view(kPlayer);
 }
 
+bool Session::showsInLog(const sim::Notice& notice, std::span<const sim::PlotId> bidPlots) const {
+    using K = sim::NoticeKind;
+    switch (notice.kind) {
+        case K::PlotRelisted:
+        case K::PlotWithdrawn: {
+            // Land going round the market again is news only to someone who
+            // paid to look at it or tried to buy it.
+            const bool surveyed =
+                std::any_of(view_.surveys.begin(), view_.surveys.end(),
+                            [&](const sim::SurveyView& s) { return s.plot == notice.plot; });
+            return surveyed ||
+                   std::find(bidPlots.begin(), bidPlots.end(), notice.plot) != bidPlots.end();
+        }
+        case K::RivalUnlockedResource:
+            // The player's own unlock is already told by ResearchComplete.
+            return notice.company != kPlayer;
+        default:
+            return true;
+    }
+}
+
+void Session::logNotices(sim::Day day, std::span<const sim::Notice> notices,
+                         std::span<const sim::PlotId> bidPlots) {
+    // The sim reports one AutoSaleSummary per resource at month end; the log
+    // gets one line for the lot, where the first of them stood.
+    std::vector<sim::Notice> autoSales;
+    const auto flushAutoSales = [&] {
+        if (autoSales.empty()) {
+            return;
+        }
+        sim::Notice merged = autoSales.front();
+        if (autoSales.size() > 1) {
+            merged.resource = sim::ResourceId();
+            merged.tonnes = 0;
+            merged.amount = sim::Money::zero();
+            for (const sim::Notice& sale : autoSales) {
+                merged.tonnes += sale.tonnes;
+                merged.amount += sale.amount;
+            }
+        }
+        appendLogText(day, merged, describeAutoSales(*content_, autoSales));
+        autoSales.clear();
+    };
+    for (const sim::Notice& notice : notices) {
+        if (!showsInLog(notice, bidPlots)) {
+            continue;
+        }
+        if (notice.kind == sim::NoticeKind::AutoSaleSummary) {
+            autoSales.push_back(notice);
+            continue;
+        }
+        flushAutoSales();
+        appendLog(day, notice);
+        if (!pausedBy_.has_value() && autoPause_.shouldPause(notice, kPlayer)) {
+            pausedBy_ = notice;
+        }
+    }
+    flushAutoSales();
+}
+
 void Session::appendLog(sim::Day day, const sim::Notice& notice) {
+    appendLogText(day, notice, describeNotice(*content_, view_, notice));
+}
+
+void Session::appendLogText(sim::Day day, const sim::Notice& notice, std::string text) {
     LogEntry entry;
     entry.day = day;
     entry.notice = notice;
-    entry.text = describeNotice(*content_, view_, notice);
+    entry.text = std::move(text);
     if (trace_ != nullptr) {
         trace_->notice(day, notice, entry.text);
     }

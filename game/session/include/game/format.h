@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <initializer_list>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -57,8 +58,22 @@ using TextArgs = std::initializer_list<TextArg>;
 // Plain-language reason for a rejected order (reject.<reason>).
 [[nodiscard]] std::string rejectReasonText(const sim::Content& content, sim::RejectReason reason);
 
+// The reason as it reads inside a sentence, after "...: ": no closing full
+// stop and no capital on the first word. The rejection templates end the
+// sentence themselves.
+[[nodiscard]] std::string rejectReasonClause(const sim::Content& content, sim::RejectReason reason);
+
+// `text` with its first letter capitalised (ASCII). Log lines are sentences
+// even when their template opens with a placeholder such as "{plot}".
+[[nodiscard]] std::string capitalised(std::string text);
+
 // One-line human description of a notice for the player's log (notice.<kind>).
 std::string describeNotice(const sim::Content& content, const sim::CompanyView& view,
                            const sim::Notice& notice);
+
+// One log line for a month's AutoSaleSummary notices, one item per resource
+// ("Automatic sales this month: 33,009 t of Iron ore for $1.79M; ...").
+[[nodiscard]] std::string describeAutoSales(const sim::Content& content,
+                                            std::span<const sim::Notice> sales);
 
 }  // namespace game

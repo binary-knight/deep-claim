@@ -271,3 +271,6 @@ notice.mine_running_low	By the last survey, the mine on {plot} has about {days} 
 ui.notice_survey_pending	The survey is not back yet. Until it is, a mine here is a blind bet.
 notice.plot_withdrawn	{plot} went unsold again and was withdrawn from sale at {amount}.
 notice.rival_unlocked_resource	{company} can now process {resource}.
+notice.auto_sale_month	Automatic sales this month: {list}.
+notice.auto_sale_item	{tonnes} of {resource} for {amount}
+ui.pause_on.research_complete	Research complete
