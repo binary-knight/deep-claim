@@ -3,12 +3,15 @@
 // Flat, string-formatted copies of the session's view for RmlUi data
 // binding. RmlUi binds plain members, so everything the interface shows is
 // prepared here each time the sim state changes; the RML never touches sim
-// types directly.
+// types directly. The layout follows docs/design/handoff.md: a status strip,
+// an icon rail, the H4 dashboard (what needs you, then what you own, then
+// the money) and the five tabs.
 
 #include "sim/content.h"
 #include "sim/ids.h"
 #include "sim/view.h"
 
+#include "game/auto_pause.h"
 #include "game/session.h"
 
 #include <RmlUi/Core/DataModelHandle.h>
@@ -18,28 +21,84 @@
 
 namespace game {
 
-struct PlotRow {
+// One row of the dashboard's "Needs you" list.
+struct NeedRow {
+    int number = 0;
+    std::string title;
+    std::string sub;
+    std::string days;  // "in 30 days" or ""
+    // What the action button does: 0 none, 1 open the plot (Plots tab),
+    // 2 mothball the mine, 3 open the Market tab, 4 open the Finance tab.
+    int action = 0;
+    int target = -1;  // plot index or mine index for actions 1 and 2
+    std::string act_label;
+};
+
+// A listed plot on the Plots tab's "For sale" table.
+struct SaleRow {
     int index = 0;
+    std::string name;  // "#18"
+    std::string region;
+    std::string area;  // "501 ha"
+    std::string ask;
+    std::string bids;        // "2"
+    std::string closes;      // "day 1380"
+    std::string survey;      // estimate summary or ""
+    std::string error;       // "(x0.28)" or ""
+    std::string flag;        // chip text: "2 bids", "not surveyed", "empty", "locked ore", ""
+    std::string flag_class;  // chip class: "warn", "danger", "" (neutral)
+    bool has_flag = false;
+};
+
+// A plot the player owns, on the dashboard board and the Plots tab.
+struct OwnedRow {
+    int index = 0;  // plot index
     std::string name;
     std::string region;
     std::string area;
-    std::string status;   // "For sale", "Yours", "Rival 1", "Not listed"
-    std::string ask;      // ask price while listed, else ""
-    std::string auction;  // "closes Y1 M2 D5, 2 bids, your bid $1.2M"
-    std::string survey;   // latest own survey summary or ""
-    std::string mine;     // mine state or ""
-    std::string capex;    // capex quote
-    std::string odds;     // the region's chance of each resource
-    // Prose for the selected-plot panel, filled from the catalogue.
-    std::string odds_line;      // "Copper Belt odds of holding each resource: ..."
-    std::string costs_line;     // "A mine here costs ... and takes ... days ..."
-    std::string build_blocked;  // the disabled Build button's label
-    bool can_afford_mine = false;
-    bool listed = false;
-    bool mine_here = false;
-    bool owned = false;  // by the player
-    bool can_survey = false;
+    std::string mine;        // chip text: "Operating", "Building", "No mine", ...
+    std::string mine_class;  // chip class: good, warn, muted, danger
+    std::string output;      // "60 t/day copper + 400 t/day iron" or "—"
+    std::string remaining;   // "~41,000 t · ~690 days", "exhausted", "173 days to open"
+    bool can_toggle = false;
+    bool mine_operating = false;
     bool can_build = false;
+    int mine_index = -1;
+};
+
+// A survey estimate line on the selected-plot panel.
+struct EstimateRow {
+    std::string resource;
+    std::string tonnes;  // "~185,330 t"
+    std::string error;   // "(x0.28)"
+    std::string needs;   // "needs Lithium Processing" or ""
+    bool locked = false;
+};
+
+// The selected plot's panel.
+struct PlotPanel {
+    bool any = false;
+    int index = -1;
+    std::string title;  // "Plot #18 · Copper Belt"
+    std::string area;
+    std::string ask;      // "" when not listed
+    std::string auction;  // "closes day 1380 · 2 bids" or ""
+    std::string capex;
+    std::string odds;          // "copper 70% · iron 60%"
+    std::string owner;         // "Yours", rival name, or ""
+    std::string survey_title;  // "Survey, day 1136" or "No survey yet"
+    std::vector<EstimateRow> estimates;
+    std::string value;         // "~$133M" or ""
+    std::string notice;        // contested / unsurveyed / locked-only / empty warning or ""
+    std::string notice_class;  // "warn" or "danger"
+    bool listed = false;
+    bool owned = false;
+    bool can_survey = false;
+    std::string survey_label;  // "Survey ($150k)" or "Survey again ($150k)"
+    bool can_build = false;
+    bool can_afford_mine = false;
+    std::string build_label;    // "Build mine ($2.00M)"
+    std::string build_blocked;  // the disabled button's text
     bool can_toggle_mine = false;
     bool mine_operating = false;
     int mine_index = -1;
@@ -48,30 +107,43 @@ struct PlotRow {
 struct ResourceRow {
     int index = 0;
     std::string name;
-    std::string price;
-    std::string base;
-    std::string ratio;   // price / base
-    std::string supply;  // recent company supply
-    std::string stock;   // player's tonnes
+    std::string price;       // "$37.41"
+    std::string price_unit;  // "$37.41/t"
+    std::string base_line;   // "base $60.00 · x0.62"
+    std::string market_sub;  // "demand 1,600 t/day · supply 1,704 t/day"
+    std::string stock;       // "3,633 t"
+    std::string stock_sub;   // "stock 3,633 t" (prices panel)
     std::string stock_value;
-    std::string policy;     // "Auto-sell: everything", "Auto-sell: keep 500 t", "Manual"
-    std::string auto_sold;  // "Sold 1,850 t this month for $1.6M." or ""
+    std::string ratio;        // "x0.62"
+    std::string policy;       // standing order summary
+    std::string auto_sold;    // "Sold 1,850 t this month for $1.6M." or ""
+    std::string locked_note;  // "needs Lithium Processing" or ""
+    bool locked = false;
+    bool ratio_warn = false;  // price below 0.7 of base
     bool has_stock = false;
+    bool policy_on = false;
     bool selected = false;
 };
 
 struct TechRow {
     int index = 0;
     std::string name;
+    std::string needs;  // "needs Seismic Survey I, Core Sampling" or ""
     std::string cost;
-    std::string duration;
+    std::string days;
     std::string effects;
-    std::string status;  // "Known", "In progress (12 days)", "Available", "Locked"
+    std::string chip;        // done, researching, available, locked
+    std::string chip_class;  // good, accent, muted
+    std::string until;       // "until day 1420" or ""
+    std::string blocked;     // why Start is disabled, or ""
     bool can_start = false;
+    bool researching = false;
 };
 
 struct LoanRow {
     int index = 0;
+    std::string name;  // "#1"
+    std::string principal;
     std::string remaining;
     std::string instalment;
     std::string months;
@@ -84,6 +156,12 @@ struct LogRow {
     bool warning = false;
 };
 
+struct PauseRow {
+    int index = 0;
+    std::string label;
+    bool on = false;
+};
+
 struct UiModel {
     // Header
     std::string company;
@@ -91,56 +169,80 @@ struct UiModel {
     std::string cash;
     std::string spendable;
     std::string debt;
-    std::string insolvency;  // empty while solvent
     std::string speed_label;
     int speed = 0;  // 0 paused, 1, 2, 3
     int tab = 0;    // 0 dashboard, 1 plots, 2 market, 3 research, 4 finance, 5 log
     bool game_over = false;
-    std::string status_line;  // transient feedback (saved, rejected, ...)
-    bool show_intro = true;
-    // Terms from content, for explanatory text
-    std::string survey_cost;
-    std::string survey_days;
-    std::string mine_build_days;
-    std::string grace_months;
-    std::string loan_terms;
-    // Prose from the catalogue (ui.*), bound into the document so no
-    // sentence a player reads is a literal in the RML.
-    std::string ui_shortcuts;
-    std::string ui_how_to_1;
-    std::string ui_how_to_2;
-    std::string ui_how_to_3;
-    std::string ui_company_terms;
-    std::string ui_finance_cash;
-    std::string ui_finance_debt;
-    std::string ui_finance_storage;
-    std::string ui_no_events;
-    std::string ui_plots_intro;
-    std::string ui_policy_form_keep;
-    std::string ui_policy_form_mid;
-    std::string ui_policy_form_end;
-    std::string ui_policy_hint;
-    std::string ui_chart_hint;
-    std::string ui_borrow_line;  // capacity sentence followed by the loan terms
-    std::string ui_each_mine_opex;
-    std::string ui_game_over;
+    bool deck = false;        // Steam Deck sizes (narrow window or --deck)
+    std::string status_line;  // transient feedback (saved, rejected, paused ...)
+    bool status_danger = false;
+    bool show_pause_menu = false;
+    std::vector<PauseRow> pause_rows;
+
+    // Status strip
+    std::string month_net;  // "+$1.9M"
+    bool month_good = false;
+    std::string storage_month;  // "$12k/mo"
+    std::string solvency;       // chip: "solvent" / "insolvent"
+    std::string solvency_sub;   // "3 months grace" / "2 months before bankruptcy"
+    bool solvent = true;
+    std::string next_auction;      // "#18 closes day 1380" / "none listed"
+    std::string mines_operating;   // "2 operating" or ""
+    std::string mines_building;    // "1 building" or ""
+    std::string mines_mothballed;  // "1 mothballed" or ""
+    std::string mines_depleted;    // "1 depleted" or ""
+    std::string research_strip;    // "High Throughput I · day 1420" / "lab idle"
+    std::string world_event;       // event name or ""
+    std::string world_sub;         // "40 days left"
+    bool has_world = false;
 
     // Dashboard
-    std::string loan_capacity;
-    std::string storage_cost;
-    std::string storage_warning;  // empty unless storage is a large share of cash
-    std::string mine_opex;
-    std::string survey_noise;
-    std::string mines_summary;
-    std::string plots_summary;
-    std::string research_summary;
-    std::vector<std::string> rivals;
-    std::vector<std::string> events;
+    std::vector<NeedRow> needs;
+    std::string needs_none;  // shown when the list is empty
+    std::vector<OwnedRow> owned;
+    std::string rival_line;
+    // Finance row (dashboard and Finance tab)
+    std::string capacity_sub;     // "can borrow $8.84M"
+    std::string warehouse_value;  // "$0.8M"
+    std::string storage_sub;      // "storage $12k/month"
+    std::string instalment_sub;   // "instalment $53k"
+    std::vector<LogRow> recent;   // last three log lines
 
-    std::vector<PlotRow> plots;
+    // Plots
+    std::vector<SaleRow> for_sale;
+    PlotPanel panel;
+    std::vector<TechRow> techs;  // also the research tiles on the Plots tab
+
+    // Market
     std::vector<ResourceRow> resources;
-    std::vector<TechRow> techs;
+    std::string chart_title;  // "Copper ore · 360 days"
+    std::string chart_note;
+    std::string storage_tonnes;  // "4,850 t across two ores"
+    std::string storage_rate;    // "5% of base price per tonne-month"
+    std::string storage_note;
+    std::string standing_title;  // "Standing order · Copper ore"
+    std::string policy_summary;
+    std::string policy_reserve_input;
+    std::string policy_floor_input;
+    bool policy_enabled = false;
+    std::string ui_policy_hint;
+
+    // Research
+    std::string lab_line;  // "One project at a time"
+    std::string lab_sub;   // "busy until day 1420 · High Throughput I" / "idle"
+
+    // Finance
     std::vector<LoanRow> loans;
+    std::string loan_rule;
+    std::string loan_limits;
+    bool cover_costs = false;
+    std::string cover_check;
+    std::string cover_explain;
+    std::string cover_last;  // "not needed" or what was sold last month
+    std::string solvency_rule;
+    std::string storage_month_long;  // "$12k/month"
+
+    // Log
     std::vector<LogRow> log;
 
     // Inputs bound to text fields
@@ -148,19 +250,13 @@ struct UiModel {
     std::string sell_input;
     std::string loan_input;
     std::string repay_input;
-    // Standing sell policy for the selected resource (spec 001). The inputs
-    // are prefilled from the sim when the selection changes and sent as one
-    // SetSellPolicy order by Apply.
-    std::string policy_reserve_input;
-    std::string policy_floor_input;
-    bool policy_enabled = false;
-    std::string policy_summary;
-    bool cover_costs = false;
-    std::string cover_costs_label;
     int selected_plot = -1;
     int selected_resource = 0;
-    std::string selected_plot_title;
-    std::string selected_resource_title;
+
+    // Prose from the catalogue
+    std::string ui_shortcuts;
+    std::string ui_game_over;
+    std::string ui_pause_menu_title;
 };
 
 // Rebuilds every field of `model` from the session.

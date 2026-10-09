@@ -5,6 +5,7 @@
 
 #include "sim/content.h"
 
+#include "game/auto_pause.h"
 #include "game/session.h"
 #include "game/trace.h"
 #include "platform/services.h"
@@ -53,6 +54,13 @@ public:
     void screenshotDone(const std::filesystem::path& file, bool ok);
     [[nodiscard]] const std::filesystem::path& tracePath() const { return tracePath_; }
 
+    // Steam Deck sizes (40dp controls, 14dp secondary text): forced on by
+    // the host's --deck flag, otherwise follows the window width.
+    void forceDeck(bool on);
+    // For the layout probe: switch tabs without a click.
+    void setTab(int tab);
+    [[nodiscard]] const UiModel& model() const { return model_; }
+
 private:
     void newGame(std::uint64_t seed);
     void openTrace();
@@ -62,7 +70,11 @@ private:
     void requestScreenshot();
     void bindModel();
     void refresh();
-    void setStatus(std::string text);
+    void setStatus(std::string text, bool danger = false);
+    void applyDeck(bool on);
+    // Auto-pause rules live in a small text file in the per-user directory.
+    void loadPauseRules();
+    void savePauseRules();
 
     // Event handlers wired to data-event-click in the RML.
     void onSetTab(int tab);
@@ -70,6 +82,8 @@ private:
     void onStep();
     void onSelectPlot(int index);
     void onSelectResource(int index);
+    void onNeedAction(int action, int target);
+    void onTogglePause(int index);
     void onSurvey(int plotIndex);
     void onBid(int plotIndex);
     void onBuild(int plotIndex);
@@ -97,6 +111,8 @@ private:
     double statusAge_ = 0.0;
     sim::Day lastRefreshedDay_ = 0;
     std::size_t seenLogEntries_ = 0;  // log entries already checked for rejections
+    AutoPause pauseRules_ = AutoPause::defaults();
+    bool deckForced_ = false;
 
     std::filesystem::path playtestDir_;
     std::string buildId_;

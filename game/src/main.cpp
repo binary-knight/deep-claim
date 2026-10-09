@@ -111,7 +111,15 @@ std::filesystem::path locate(const char* subdir, const char* devFallback) {
 
 }  // namespace
 
-int main(int /*argc*/, char** /*argv*/) {
+int main(int argc, char** argv) {
+    // --deck forces the Steam Deck sizes at any window width.
+    bool deck = false;
+    for (int i = 1; i < argc; ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        if (std::string_view(argv[i]) == "--deck") {
+            deck = true;
+        }
+    }
     // Load game data before touching the window so a data problem is
     // reported even where no display is available.
     const std::filesystem::path dataDir = locate("data", DC_DATA_DIR);
@@ -161,6 +169,7 @@ int main(int /*argc*/, char** /*argv*/) {
     {
         game::App app(*context, *services, *loaded.content, assetsDir, playtestDir, DC_BUILD_ID);
         gApp = &app;
+        app.forceDeck(deck);
         Backend::SetPreSwapCallback(&preSwap);
         if (!app.tracePath().empty()) {
             std::cout << std::format(
