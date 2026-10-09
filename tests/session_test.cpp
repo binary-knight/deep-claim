@@ -245,3 +245,32 @@ TEST_CASE("Auto-pause rules round-trip through their text form", "[session]") {
     CHECK_FALSE(partial.isEnabled(game::PauseOn::IdleMine));
     CHECK(game::pauseOnKey(game::PauseOn::IdleMine) == "idle_mine");
 }
+
+TEST_CASE("Stepping a day onto a pausing notice stops a running clock", "[session]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    sim::PlotId listed;
+    for (const sim::PlotView& plot : session.view().plots) {
+        if (plot.listing == sim::PlotListing::Listed) {
+            listed = plot.id;
+            break;
+        }
+    }
+    REQUIRE(listed.valid());
+    game::AutoPause rules;
+    rules.enabled.fill(false);
+    rules.set(game::PauseOn::SurveyComplete, true);
+    session.setAutoPause(rules);
+    session.submit(sim::CommissionSurvey{{}, listed});
+    session.setSpeed(game::Speed::Normal);
+    for (sim::Day i = 0; i < content.balance.surveyDurationDays; ++i) {
+        session.stepOneDay();
+        REQUIRE(session.speed() == game::Speed::Normal);
+    }
+    session.stepOneDay();  // the survey completes on this day
+    CHECK(session.speed() == game::Speed::Paused);
+    CHECK(session.advance(5.0) == 0);  // and the clock stays stopped
+    const std::optional<sim::Notice> why = session.takePausedBy();
+    REQUIRE(why.has_value());
+    CHECK(why->kind == sim::NoticeKind::SurveyComplete);
+}

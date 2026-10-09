@@ -193,6 +193,32 @@ void warnIdleMines(const Content& content, const WorldState& state, TickReport& 
     }
 }
 
+const Survey* latestOwnSurvey(const WorldState& state, const Mine& mine) {
+    // Surveys are appended in commission order: the last complete one of the
+    // owner for this plot is the latest.
+    const Survey* latest = nullptr;
+    for (const Survey& survey : state.surveys) {
+        if (survey.company == mine.owner && survey.plot == mine.plot && survey.complete != 0) {
+            latest = &survey;
+        }
+    }
+    return latest;
+}
+
+std::int64_t estimatedRemainingTonnes(const WorldState& state, const Mine& mine,
+                                      const Survey& survey, const SurveyEstimate& estimate) {
+    const std::size_t r = estimate.resource.index();
+    std::int64_t since = mine.extractedTonnes[r];
+    if (mine.state != MineState::Building && survey.completesDay >= mine.operationalDay) {
+        const std::int64_t days = state.day > survey.completesDay
+                                      ? static_cast<std::int64_t>(state.day) -
+                                            static_cast<std::int64_t>(survey.completesDay)
+                                      : 0;
+        since = std::min(since, checkedMulDiv(mine.lastOutputTonnes[r], days, 1).value_or(since));
+    }
+    return std::max<std::int64_t>(0, estimate.tonnesEstimate - since);
+}
+
 void warnRunningLow(const Content& /*content*/, const WorldState& state, TickReport& report) {
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         const Mine& mine = state.mines[i];
@@ -200,26 +226,17 @@ void warnRunningLow(const Content& /*content*/, const WorldState& state, TickRep
             state.companies[mine.owner.index()].bankrupt != 0) {
             continue;
         }
-        // Surveys are appended in commission order: the last complete one of
-        // the owner for this plot is the latest.
-        const Survey* latest = nullptr;
-        for (const Survey& survey : state.surveys) {
-            if (survey.company == mine.owner && survey.plot == mine.plot && survey.complete != 0) {
-                latest = &survey;
-            }
-        }
+        const Survey* latest = latestOwnSurvey(state, mine);
         if (latest == nullptr) {
             continue;
         }
         std::int64_t daysLeft = -1;
         for (const SurveyEstimate& estimate : latest->estimates) {
             const std::int64_t output = mine.lastOutputTonnes[estimate.resource.index()];
-            if (output <= 0) {
-                continue;
+            if (output > 0) {
+                daysLeft = std::max(
+                    daysLeft, estimatedRemainingTonnes(state, mine, *latest, estimate) / output);
             }
-            const std::int64_t left = std::max<std::int64_t>(
-                0, estimate.tonnesEstimate - mine.extractedTonnes[estimate.resource.index()]);
-            daysLeft = std::max(daysLeft, left / output);
         }
         if (daysLeft < 0 || daysLeft > kRunningLowDays) {
             continue;

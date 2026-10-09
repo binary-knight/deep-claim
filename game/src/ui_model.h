@@ -41,11 +41,11 @@ struct SaleRow {
     std::string region;
     std::string area;  // "501 ha"
     std::string ask;
-    std::string bids;        // "2"
-    std::string closes;      // "day 1380"
-    std::string survey;      // estimate summary or ""
-    std::string error;       // "(x0.28)" or ""
-    std::string flag;        // chip text: "2 bids", "not surveyed", "empty", "locked ore", ""
+    std::string bids;    // "2"
+    std::string closes;  // "day 1380"
+    std::string survey;  // estimate summary or ""
+    std::string error;   // "(x0.28)" or ""
+    std::string flag;  // chip text: "2 bids", "surveyed", "not surveyed", "empty", "locked ore", ""
     std::string flag_class;  // chip class: "warn", "danger", "" (neutral)
     bool has_flag = false;
 };
@@ -89,8 +89,9 @@ struct PlotPanel {
     std::string survey_title;  // "Survey, day 1136" or "No survey yet"
     std::vector<EstimateRow> estimates;
     std::string value;         // "~$133M" or ""
-    std::string notice;        // contested / unsurveyed / locked-only / empty warning or ""
+    std::string notice;        // build risk: unsurveyed / survey out / empty / locked only
     std::string notice_class;  // "warn" or "danger"
+    std::string contest;       // rival-bid warning with the repeat-bid note, or ""
     bool listed = false;
     bool owned = false;
     bool can_survey = false;

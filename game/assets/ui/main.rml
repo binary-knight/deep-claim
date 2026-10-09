@@ -35,7 +35,7 @@
         </div>
     </div>
 
-    <div id="strip" data-if="tab == 0">
+    <div id="strip">
         <span class="item"><span class="k">Month</span><span class="num" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span></span>
         <span class="item"><span class="k">Storage</span><span class="num">{{storage_month}}</span></span>
         <span class="item"><span class="k">Solvency</span><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span> <span class="muted">{{solvency_sub}}</span></span>
@@ -77,13 +77,13 @@
                         <div class="sheet">
                             <h2><span class="idx">02</span>Plots and mines</h2>
                             <table>
-                                <tr><th>Plot</th><th>Region</th><th>Mine</th><th>Output</th><th>Remaining</th><th class="act"></th></tr>
+                                <tr><th class="w-plot">Plot</th><th class="w-region2">Region</th><th class="w-mine">Mine</th><th>Output</th><th>Remaining</th><th class="act w-act"></th></tr>
                                 <tr data-for="o : owned" class="row" data-event-click="select_plot(o.index)">
                                     <td class="name num">{{o.name}}</td>
                                     <td class="nw">{{o.region}} <span class="muted num">{{o.area}}</span></td>
                                     <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
-                                    <td class="num">{{o.output}}</td>
-                                    <td class="figure">{{o.remaining}}</td>
+                                    <td class="figure wrap">{{o.output}}</td>
+                                    <td class="figure wrap">{{o.remaining}}</td>
                                     <td class="act"><button class="sm" data-if="o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button></td>
                                 </tr>
                             </table>
@@ -130,7 +130,7 @@
                         <div class="sheet">
                             <h2><span class="idx">01</span>For sale</h2>
                             <table>
-                                <tr><th>Plot</th><th>Region</th><th class="n">Area</th><th class="n">Ask</th><th class="n">Bids</th><th class="n">Closes</th><th>Survey</th></tr>
+                                <tr><th class="w-plot">Plot</th><th class="w-region">Region</th><th class="n w-area">Area</th><th class="n w-money">Ask</th><th class="n w-bids">Bids</th><th class="n w-day">Closes</th><th>Survey</th></tr>
                                 <tr data-for="s : for_sale" class="row" data-class-sel="s.index == selected_plot" data-event-click="select_plot(s.index)">
                                     <td class="name num">{{s.name}}</td>
                                     <td class="nw">{{s.region}}</td>
@@ -138,21 +138,20 @@
                                     <td class="n">{{s.ask}}</td>
                                     <td class="n">{{s.bids}}</td>
                                     <td class="n">{{s.closes}}</td>
-                                    <td>{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'">{{s.flag}}</span></td>
+                                    <td>{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'" data-class-good="s.flag_class == 'good'">{{s.flag}}</span></td>
                                 </tr>
                             </table>
                         </div>
                         <div class="sheet">
                             <h2><span class="idx">02</span>Owned</h2>
                             <table>
-                                <tr><th>Plot</th><th>Region</th><th class="n">Area</th><th>Mine</th><th>Output</th><th>Remaining</th><th class="act"></th></tr>
+                                <tr><th class="w-plot">Plot</th><th class="w-region">Region</th><th class="w-mine">Mine</th><th>Output</th><th>Remaining</th><th class="act w-act"></th></tr>
                                 <tr data-for="o : owned" class="row" data-class-sel="o.index == selected_plot" data-event-click="select_plot(o.index)">
                                     <td class="name num">{{o.name}}</td>
-                                    <td class="nw">{{o.region}}</td>
-                                    <td class="n">{{o.area}}</td>
+                                    <td class="nw">{{o.region}}<span class="sub num">{{o.area}}</span></td>
                                     <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
-                                    <td class="num">{{o.output}}</td>
-                                    <td class="figure">{{o.remaining}}</td>
+                                    <td class="figure wrap">{{o.output}}</td>
+                                    <td class="figure wrap">{{o.remaining}}</td>
                                     <td class="act"><button class="sm" data-if="o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button></td>
                                 </tr>
                             </table>
@@ -175,6 +174,7 @@
                                 </div>
                                 <div class="kv" data-if="panel.value != ''"><span class="k wide">Value at today's prices</span><span class="v num">{{panel.value}}</span></div>
                                 <div class="notice" data-if="panel.notice != ''" data-class-danger="panel.notice_class == 'danger'"><span class="ic">!</span><span class="msg">{{panel.notice}}</span></div>
+                                <div class="notice" data-if="panel.contest != ''"><span class="ic">!</span><span class="msg">{{panel.contest}}</span></div>
                                 <div class="actions">
                                     <div class="field" data-if="panel.listed"><label>Bid</label><input class="text" type="text" data-value="bid_input"/></div>
                                     <button class="primary" data-if="panel.listed" data-event-click="bid(panel.index)">Place bid</button>
@@ -203,9 +203,9 @@
                 <div class="sheet">
                     <h2><span class="idx">01</span>Prices and standing orders</h2>
                     <table>
-                        <tr><th>Resource</th><th>90 days</th><th class="n">Price</th><th class="n">Stock</th><th>Sell now</th><th>Standing order</th></tr>
+                        <tr><th class="w-res">Resource</th><th class="w-chart">90 days</th><th class="n w-price">Price</th><th class="n w-stock">Stock</th><th class="w-sell">Sell now</th><th>Standing order</th></tr>
                         <tr data-for="r : resources" class="row" data-class-sel="r.index == selected_resource" data-event-click="select_resource(r.index)">
-                            <td class="name"><span class="nowrap">{{r.name}} <span class="pill warn" data-if="r.locked">locked</span></span><span class="sub num">{{r.market_sub}}</span></td>
+                            <td class="name wrap"><span class="nowrap">{{r.name}} <span class="pill warn" data-if="r.locked">locked</span></span><span class="sub num">{{r.market_sub}}</span></td>
                             <td><price-chart class="table" data-attr-resource="r.index" days="90" mode="line"/></td>
                             <td class="n"><span class="num">{{r.price_unit}}</span><span class="sub num" data-class-warn="r.ratio_warn">{{r.base_line}}</span></td>
                             <td class="n"><span class="num">{{r.stock}}</span><span class="sub num">{{r.stock_value}}</span></td>
@@ -258,9 +258,9 @@
                 <div class="sheet">
                     <h2><span class="idx">02</span>Technologies</h2>
                     <table>
-                        <tr><th>Technology</th><th>Status</th><th class="n">Cost</th><th class="n">Days</th><th>Effect</th><th class="act"></th></tr>
+                        <tr><th class="w-tech">Technology</th><th class="w-mine">Status</th><th class="n w-money">Cost</th><th class="n w-bids">Days</th><th>Effect</th><th class="act w-start"></th></tr>
                         <tr data-for="t : techs" class="row" data-class-sel="t.researching">
-                            <td class="name"><span class="nowrap">{{t.name}}</span><span class="sub" data-if="t.needs != ''">{{t.needs}}</span></td>
+                            <td class="name wrap"><span class="nowrap">{{t.name}}</span><span class="sub" data-if="t.needs != ''">{{t.needs}}</span></td>
                             <td class="nw"><span class="chip" data-class-good="t.chip_class == 'good'" data-class-accent="t.chip_class == 'accent'" data-class-muted="t.chip_class == 'muted'">{{t.chip}}</span></td>
                             <td class="n">{{t.cost}}</td>
                             <td class="n">{{t.days}}</td>
@@ -290,7 +290,7 @@
                         <div class="sheet">
                             <h2><span class="idx">02</span>Loans</h2>
                             <table>
-                                <tr><th>Loan</th><th class="n">Principal</th><th class="n">Remaining</th><th class="n">Instalment</th><th class="n">Months left</th><th class="act"></th></tr>
+                                <tr><th class="w-plot">Loan</th><th class="n">Principal</th><th class="n">Remaining</th><th class="n w-inst">Instalment</th><th class="n w-months">Months left</th><th class="act w-repay"></th></tr>
                                 <tr data-for="l : loans" class="row">
                                     <td class="name num">{{l.name}}</td>
                                     <td class="n">{{l.principal}}</td>

@@ -60,6 +60,12 @@ public:
     // For the layout probe: switch tabs without a click.
     void setTab(int tab);
     [[nodiscard]] const UiModel& model() const { return model_; }
+    // For the layout probe, which plays a fixed game to fill every table.
+    void startGame(std::uint64_t seed);
+    void selectPlot(int index);
+    void showPauseMenu(bool on);
+    void refreshNow();
+    [[nodiscard]] Session& session() { return *session_; }
 
 private:
     void newGame(std::uint64_t seed);

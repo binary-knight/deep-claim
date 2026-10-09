@@ -165,7 +165,7 @@ animations.
   summary and the month-to-date line.
 - 2026-10-09: the status line shows the keyboard shortcuts when it has
   nothing else to say, since the rail has no room for the hint.
-- 2026-10-09: agy pass over the 86 new catalogue lines: 37 sentence-length
+- 2026-10-09: agy pass over the 87 new catalogue lines: 38 sentence-length
   lines take the polished text; 49 keep the draft because they fill strip
   items, table cells, chips, buttons or nowrap sub-lines where a sentence
   does not fit, or because the hand-off fixes their wording ("needs
@@ -177,3 +177,35 @@ animations.
 - 2026-10-09: auto-pause rules persist in `autopause.txt` (key=0/1 lines)
   in the per-user save directory; a malformed line keeps that rule's
   default.
+- 2026-10-09: the status strip shows on every tab, as this spec says; the
+  hand-off's "Dashboard only" note is superseded here.
+- 2026-10-09, Codex review (gpt-6.1-sol), all seven findings and the three
+  spec gaps applied:
+  - Table columns: RmlUi shares unspecified column widths equally and does
+    not size them from content, so mine output overran its cell. Every
+    fixed column now states its width on the header cell, output and
+    remaining wrap, and the owned table shows area as a sub-line of region.
+  - Step day now applies the auto-pause through the same path as the
+    running clock (`Session::stopIfPaused`).
+  - Remaining ore no longer subtracts lifetime extraction from a survey
+    taken after the mine opened. `sim::estimatedRemainingTonnes` is shared
+    by the view (`MineView::estimatedRemainingTonnes`) and the running-low
+    notice. For a survey that postdates the opening the state keeps no
+    extraction baseline, so extraction since is approximated as last daily
+    output times days since, capped at the lifetime total. An exact figure
+    needs the baseline stored on the survey, which is a save-format change
+    and is left for a later spec.
+  - The auto-pause popover rows are flex rows again and 40dp on the Deck.
+  - The plot panel carries two independent warnings, build risk and
+    contested auction; a survey still out counts as no survey
+    (`ui.notice_survey_pending`).
+  - `.sub.warn` and its siblings restore the state colour on sub-lines.
+  - The company name is cut on a UTF-8 character boundary.
+  - A surveyed listing with nothing else to flag gets a "surveyed" chip.
+  - The probe also plays a fixed-seed game to a working mine, a loan and a
+    research project, opens the auto-pause menu, and checks every tab
+    again in both frames; it fails when a no-wrap text is wider than the
+    block or cell that holds it. That check found six more overflows
+    (table heads squeezed to nothing, no-wrap sub-lines in the side
+    column), all fixed.
+  Declined: none.

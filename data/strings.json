@@ -191,6 +191,7 @@
   "ui.notice_contested": "Another outfit has a bid on the table. Contested plots have been clearing 10 to 30% over the ask, and placing another bid replaces your previous one.",
   "ui.notice_empty": "The survey crew found no ore here. Raising a headframe would open on an empty plot.",
   "ui.notice_locked_only": "The survey crew logged only locked ore here. A mine would pay full opex and extract nothing until the lab clears {needs}.",
+  "ui.notice_survey_pending": "The survey crew hasn't reported back yet. Sinking a shaft now is a blind bet.",
   "ui.notice_unsurveyed": "No crew has surveyed this plot. Sinking a mine here is a blind bet; a survey costs {amount}.",
   "ui.pause_menu_title": "Stop the clock when any of these happen.",
   "ui.pause_on.auction_lost": "Auction lost",

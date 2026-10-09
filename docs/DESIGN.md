@@ -614,7 +614,7 @@ architectural summary.
 
 - The client is laid out from `docs/design/handoff.md` (plate C "Control
   Room", dashboard H4): header with a 90-day cash sparkline, a status strip
-  on the dashboard, a 56dp icon rail that expands to 160dp on hover, title
+  on every tab, a 56dp icon rail that expands to 160dp on hover, title
   blocks with mono indices on every section, and the five tabs in the
   hand-off's block order. Colours and sizes are the literal token values;
   `tools/design/tokens_to_rcss.py` regenerates `game/assets/ui/tokens.rcss`
@@ -661,6 +661,18 @@ architectural summary.
   unbound `{{variable}}` or unknown property shows up there and nowhere
   else). The stub texture loader reports the icon sheet's size so sprites
   resolve.
+- Tables: RmlUi gives unspecified columns equal shares and never widens a
+  column for its content. Each table fixes every column but one or two on
+  the header cells (`th.w-*`), and the free columns wrap. The probe checks
+  this directly: a no-wrap text wider than its block or cell is a failure,
+  and each frame is probed on a fresh game and on a fixed-seed game played
+  to a working mine with a loan, research and the auto-pause menu open.
+- Remaining ore: `sim::estimatedRemainingTonnes` is the one definition,
+  used by the view and by the running-low notice. A survey estimates what
+  was in the ground when it completed, so only later extraction is
+  subtracted; with no stored baseline that is exact for surveys from
+  before the mine opened and approximate (last output times days since)
+  for later ones.
 - Rejected: per-row standing-order forms on Market (inputs are two-way
   bound to one model string each; one form for the selected resource
   instead), CSS ellipsis for the company name (truncated in code), SVG

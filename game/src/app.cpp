@@ -319,6 +319,7 @@ void App::bindModel() {
         h.RegisterMember("value", &PlotPanel::value);
         h.RegisterMember("notice", &PlotPanel::notice);
         h.RegisterMember("notice_class", &PlotPanel::notice_class);
+        h.RegisterMember("contest", &PlotPanel::contest);
         h.RegisterMember("listed", &PlotPanel::listed);
         h.RegisterMember("owned", &PlotPanel::owned);
         h.RegisterMember("can_survey", &PlotPanel::can_survey);
@@ -609,6 +610,26 @@ void App::forceDeck(bool on) {
 
 void App::setTab(int tab) {
     onSetTab(tab);
+}
+
+void App::startGame(std::uint64_t seed) {
+    newGame(seed);
+    refresh();
+}
+
+void App::selectPlot(int index) {
+    onSelectPlot(index);
+}
+
+void App::showPauseMenu(bool on) {
+    model_.show_pause_menu = on;
+    if (handle_) {
+        handle_.DirtyVariable("show_pause_menu");
+    }
+}
+
+void App::refreshNow() {
+    refresh();
 }
 
 void App::update(double seconds) {

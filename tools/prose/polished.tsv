@@ -268,3 +268,4 @@ ui.pause_on.idle_mine	Idle mine warning
 ui.pause_menu_title	Stop the clock when any of these happen.
 status.paused_by	Paused: {text}
 notice.mine_running_low	The survey crew reports {days} days of ore left on {plot}.
+ui.notice_survey_pending	The survey crew hasn't reported back yet. Sinking a shaft now is a blind bet.

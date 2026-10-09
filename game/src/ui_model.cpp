@@ -213,8 +213,8 @@ std::string outputText(const sim::Content& content, const sim::MineView& mine) {
     return out.empty() ? "—" : out;
 }
 
-// Remaining tonnes and days from the owner's best survey estimate less what
-// came out, at the current output. Presentation only.
+// Remaining tonnes and days from the sim's estimate of what the owner's
+// latest survey leaves, at the current output. Presentation only.
 std::string remainingText(const sim::Content& content, const sim::MineView& mine, sim::Day today) {
     switch (mine.state) {
         case sim::MineState::Building:
@@ -232,13 +232,12 @@ std::string remainingText(const sim::Content& content, const sim::MineView& mine
     std::int64_t days = 0;
     bool estimated = false;
     bool producing = false;
-    for (std::size_t r = 0; r < mine.bestEstimateTonnes.size(); ++r) {
-        if (mine.bestEstimateTonnes[r] <= 0) {
-            continue;
+    for (std::size_t r = 0; r < mine.estimatedRemainingTonnes.size(); ++r) {
+        const std::int64_t left = mine.estimatedRemainingTonnes[r];
+        if (left < 0) {
+            continue;  // not in the survey
         }
         estimated = true;
-        const std::int64_t left =
-            std::max<std::int64_t>(0, mine.bestEstimateTonnes[r] - mine.extractedTonnes[r]);
         tonnes += left;
         if (mine.lastOutputTonnes[r] > 0) {
             producing = true;
@@ -671,6 +670,9 @@ void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
         row.flag =
             text(content, "ui.flag_bids", {{"bids", std::to_string(plot.auction->bidCount)}});
         row.flag_class = "warn";
+    } else {
+        row.flag = "surveyed";
+        row.flag_class = "good";
     }
 }
 
@@ -731,19 +733,23 @@ bool fillPanelSurvey(const sim::Content& content, const sim::CompanyView& view,
     return anyExtractable;
 }
 
-// One notice at a time, the most consequential first: blind bet, empty plot,
-// locked ore only, contested auction.
+// Two independent warnings: the build risk (blind bet, survey still out,
+// empty plot, locked ore only) and competition on the auction. One does not
+// hide the other.
 void fillPanelNotice(const sim::Content& content, const sim::PlotView& plot,
                      const SurveyLookup& found, bool anyExtractable, PlotPanel& panel) {
+    if (panel.listed && plot.auction && rivalBids(*plot.auction) > 0) {
+        panel.contest = text(content, "ui.notice_contested");
+    }
     if (plot.mine) {
         return;
     }
     if (found.latest == nullptr) {
-        if (!found.pending) {
-            panel.notice = text(content, "ui.notice_unsurveyed",
-                                {{"amount", formatMoney(content.balance.surveyCost)}});
-            panel.notice_class = "danger";
-        }
+        // A survey still out is not knowledge yet.
+        panel.notice = found.pending ? text(content, "ui.notice_survey_pending")
+                                     : text(content, "ui.notice_unsurveyed",
+                                            {{"amount", formatMoney(content.balance.surveyCost)}});
+        panel.notice_class = found.pending ? "warn" : "danger";
         return;
     }
     if (found.latest->estimates.empty()) {
@@ -759,11 +765,6 @@ void fillPanelNotice(const sim::Content& content, const sim::PlotView& plot,
             }
         }
         panel.notice = text(content, "ui.notice_locked_only", {{"needs", techs}});
-        panel.notice_class = "warn";
-        return;
-    }
-    if (panel.listed && plot.auction && rivalBids(*plot.auction) > 0) {
-        panel.notice = text(content, "ui.notice_contested");
         panel.notice_class = "warn";
     }
 }
@@ -1070,7 +1071,12 @@ void refreshModel(const Session& session, UiModel& model) {
     // The header truncates the company name in code: RCSS has no ellipsis.
     model.company = view.companies[Session::kPlayer.index()].name;
     if (model.company.size() > kCompanyNameMax) {
-        model.company = model.company.substr(0, kCompanyNameMax - 1) + "…";
+        // Cut on a UTF-8 character boundary, never inside a sequence.
+        std::size_t cut = kCompanyNameMax - 1;
+        while (cut > 0 && (static_cast<unsigned char>(model.company[cut]) & 0xC0U) == 0x80U) {
+            --cut;
+        }
+        model.company = model.company.substr(0, cut) + "…";
     }
     model.day = formatDay(session.day());
     model.cash = formatMoney(view.cash);

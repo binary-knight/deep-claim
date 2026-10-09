@@ -55,6 +55,10 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
 .good { color: #5fd98a; }
 .accent { color: #2f8cff; }
 .sub { display: block; font-size: 12dp; line-height: 16dp; color: #8fa0ba; }
+/* State colours win over the muted sub-line colour. */
+.sub.warn { color: #f0b340; }
+.sub.danger { color: #ff6e6e; }
+.sub.good { color: #5fd98a; }
 .nowrap { white-space: nowrap; }
 .hrow { display: flex; flex-direction: row; align-items: center; }
 .grow { flex: 1 1 0; width: 8dp; }
@@ -94,7 +98,7 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
     z-index: 10;
 }
 #pausemenu .title { display: block; font-weight: 600; margin-bottom: 8dp; }
-#pausemenu .check { display: block; height: 28dp; line-height: 28dp; cursor: pointer; }
+#pausemenu .check { display: flex; flex-direction: row; align-items: center; height: 28dp; cursor: pointer; white-space: nowrap; }
 
 /* ---- Status strip (dashboard only) ---- */
 #strip {
@@ -252,6 +256,30 @@ th.n, td.n { text-align: right; }
 td.n, td.num, td.nw, td.name, td.act { white-space: nowrap; }
 td.n { font-family: "JetBrains Mono"; }
 td.act { text-align: right; }
+td.act .sub { white-space: normal; }
+td.wrap { white-space: normal; }
+/* RmlUi shares unspecified column widths equally and does not size columns
+   from their contents: every fixed column states its width on the header
+   cell, and the one free column takes the rest and wraps. */
+th.w-plot { width: 56dp; }
+th.w-region { width: 130dp; }
+th.w-region2 { width: 170dp; }
+th.w-area { width: 80dp; }
+th.w-money { width: 90dp; }
+th.w-bids { width: 56dp; }
+th.w-day { width: 90dp; }
+th.w-mine { width: 104dp; }
+th.w-act { width: 104dp; }
+th.w-res { width: 230dp; }
+th.w-chart { width: 150dp; }
+th.w-price { width: 170dp; }
+th.w-stock { width: 110dp; }
+th.w-sell { width: 250dp; }
+th.w-tech { width: 260dp; }
+th.w-start { width: 200dp; }
+th.w-inst { width: 150dp; }
+th.w-months { width: 100dp; }
+th.w-repay { width: 200dp; }
 td.act button { margin: 0 0 0 4dp; }
 td button, td input.text { vertical-align: middle; }
 td .sub { display: block; }
@@ -292,7 +320,7 @@ tr.sel:hover td { background-color: #163058; }
 .kv .v { display: block; flex: 1 1 0; width: 50dp; text-align: right; font-weight: 500; line-height: 22dp; }
 .kv .v .line { display: block; white-space: nowrap; }
 .kv .v .line.wrapok { white-space: normal; }
-.kv .v .subline { display: block; font-size: 12dp; line-height: 16dp; color: #8fa0ba; font-weight: 400; white-space: nowrap; }
+.kv .v .subline { display: block; font-size: 12dp; line-height: 16dp; color: #8fa0ba; font-weight: 400; white-space: normal; }
 .kv .v.num, .kv .v .num { font-family: "JetBrains Mono"; }
 .kv .v .err { color: #8fa0ba; font-weight: 400; }
 .kv.locked .v { color: #8fa0ba; }
@@ -384,6 +412,12 @@ body.deck button .long { display: none; }
 body.deck button .short { display: inline; }
 body.deck input.text { height: 40dp; padding: 9dp 10dp; }
 body.deck .check { height: 40dp; }
+body.deck #pausemenu .check { height: 40dp; }
+body.deck #pausemenu { width: 300dp; }
+body.deck th.w-res { width: 200dp; }
+body.deck th.w-chart { width: 120dp; }
+body.deck price-chart.table { width: 120dp; }
+body.deck th.w-mine { width: 116dp; }
 body.deck .sub, body.deck .subline, body.deck #header .label, body.deck th, body.deck .chip, body.deck .pill,
 body.deck .log .d, body.deck #status, body.deck #status .lbl, body.deck #strip, body.deck .needs .n,
 body.deck .needs .t .sub, body.deck .finrow .stat .sub, body.deck .finrow .stat .label, body.deck .notice,

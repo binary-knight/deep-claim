@@ -93,6 +93,8 @@ public:
 
 private:
     void tickOnce();
+    // Pauses the clock when the last tick raised a pausing notice.
+    bool stopIfPaused();
     void refreshView();
     void appendLog(sim::Day day, const sim::Notice& notice);
 

@@ -66,10 +66,7 @@ int Session::advance(double seconds) {
         tickOnce();
         accumulator_ -= 1.0;
         ++ticked;
-        if (pausedBy_.has_value()) {
-            // Something the player wants to see: stop here, on this day.
-            setSpeed(Speed::Paused);
-            accumulator_ = 0.0;
+        if (stopIfPaused()) {
             break;
         }
     }
@@ -82,7 +79,18 @@ int Session::advance(double seconds) {
 void Session::stepOneDay() {
     if (!gameOver()) {
         tickOnce();
+        stopIfPaused();
     }
+}
+
+bool Session::stopIfPaused() {
+    if (!pausedBy_.has_value()) {
+        return false;
+    }
+    // Something the player wants to see: stop here, on this day.
+    setSpeed(Speed::Paused);
+    accumulator_ = 0.0;
+    return true;
 }
 
 std::optional<sim::Notice> Session::takePausedBy() {

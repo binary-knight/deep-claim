@@ -3,12 +3,22 @@
 // frame (1280x800), so layout problems can be diagnosed without a display.
 // Also a regression test (spec 003): exits non-zero when the content pane
 // collapses, anything overflows its scroll pane horizontally, text in the
-// deck frame falls below 14dp, RmlUi logs a warning or error (unknown RCSS
-// property, unbound data variable ...), or the playtest trace has no header.
+// deck frame falls below 14dp, a no-wrap text is wider than the block that
+// holds it, RmlUi logs a warning or error (unknown RCSS property, unbound
+// data variable ...), or the playtest trace has no header. Each frame is
+// probed twice: on a fresh game, and on a fixed-seed game played forward
+// until the player owns a plot with a working mine, a loan and a research
+// project, with a plot selected and the auto-pause menu open, so every
+// table has rows.
 // Not part of the shipped game.
+#include "sim/commands.h"
+#include "sim/view.h"
+
 #include "app.h"
 #include "chart_element.h"
 #include "content/loader.h"
+#include "game/auto_pause.h"
+#include "game/session.h"
 #include "platform/services.h"
 
 #include <RmlUi/Core.h>
@@ -16,6 +26,7 @@
 #include <array>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <format>
@@ -110,6 +121,29 @@ void noteText(Rml::Element* parent, Rml::ElementText* text, TabReport& report) {
     if (content.empty()) {
         return;
     }
+    // Text that may not wrap must fit the block or cell that holds it; RmlUi
+    // does not grow a table column or a fixed-width flex child to fit.
+    if (parent->GetComputedValues().white_space() == Rml::Style::WhiteSpace::Nowrap) {
+        Rml::Element* block = parent;
+        while (block->GetParentNode() != nullptr &&
+               block->GetComputedValues().display() == Rml::Style::Display::Inline) {
+            block = block->GetParentNode();
+        }
+        std::string line = text->GetText();
+        const std::size_t first = line.find_first_not_of(" \t\r\n");
+        const std::size_t last = line.find_last_not_of(" \t\r\n");
+        line = line.substr(first, last - first + 1);
+        const auto width = static_cast<float>(Rml::ElementUtilities::GetStringWidth(parent, line));
+        const float room = block->GetBox().GetSize(Rml::BoxArea::Content).x;
+        if (width > room + 1.0F) {
+            ++report.overflows;
+            if (report.notes.size() < 12) {
+                report.notes.push_back(
+                    std::format("text overflow: \"{}\" is {:.0f}dp in {} of {:.0f}dp",
+                                line.substr(0, 40), width, describe(block), room));
+            }
+        }
+    }
     const float fontSize = parent->GetComputedValues().font_size();
     if (fontSize < report.minText) {
         report.minText = fontSize;
@@ -195,9 +229,10 @@ bool checkTrace(const game::App& app) {
 // Lays out one tab in the current frame and reports on it. Returns false on
 // a failure, after dumping the content tree for diagnosis.
 bool probeTab(Rml::Context& context, game::App& app, LoggingSystem& system, const Frame& frame,
-              std::size_t tab) {
+              std::size_t tab, bool pauseMenu) {
     const bool deck = static_cast<float>(frame.width) < kDeckWidth;
     app.setTab(static_cast<int>(tab));
+    app.showPauseMenu(pauseMenu);  // changing tab closes it
     context.Update();
     context.Update();  // data bindings settle on the second pass
     Rml::ElementDocument* doc = context.GetDocument(0);
@@ -245,6 +280,89 @@ bool probeTab(Rml::Context& context, game::App& app, LoggingSystem& system, cons
     return !failed;
 }
 
+constexpr std::uint64_t kScenarioSeed = 20261009;
+constexpr int kScenarioMaxDays = 900;
+
+// Plays a fixed game until every table has rows: a loan, a survey, a won
+// auction, a mine that has opened and produced, a research project. Returns
+// false (with a reason) when the fixed seed no longer gets there, which
+// means the scenario needs retuning, not that the layout is wrong.
+bool playScenario(game::App& app, const sim::Content& content) {
+    app.startGame(kScenarioSeed);
+    game::Session& session = app.session();
+    game::AutoPause never;
+    never.enabled.fill(false);
+    session.setAutoPause(never);
+    session.submit(sim::TakeLoan{{}, content.balance.loanMinPrincipal * 4});
+    session.submit(sim::StartResearch{{}, sim::TechId(0)});
+    // The cheapest listed plot, at half again its ask so the rival loses.
+    sim::PlotId target;
+    sim::Money ask;
+    for (const sim::PlotView& plot : session.view().plots) {
+        if (plot.listing == sim::PlotListing::Listed && plot.auction &&
+            (!target.valid() || plot.askPrice < ask)) {
+            target = plot.id;
+            ask = plot.askPrice;
+        }
+    }
+    if (target.valid()) {
+        session.submit(sim::CommissionSurvey{{}, target});
+        session.submit(sim::BidOnPlot{{}, target, ask + ask / 2});
+    }
+    if (!target.valid()) {
+        std::cout << "SCENARIO: no plot is listed on day 0\n";
+        return false;
+    }
+    bool building = false;
+    bool produced = false;
+    for (int day = 0; day < kScenarioMaxDays && !produced; ++day) {
+        session.stepOneDay();
+        const sim::CompanyView& view = session.view();
+        if (!building && view.plots[target.index()].owner == game::Session::kPlayer) {
+            session.submit(sim::BuildMine{{}, target});
+            building = true;
+        }
+        for (const sim::MineView& mine : view.mines) {
+            produced = produced || (mine.state == sim::MineState::Operating &&
+                                    mine.operationalDay + 5 < view.day);
+        }
+    }
+    app.refreshNow();
+    app.selectPlot(static_cast<int>(target.value()));
+    const game::UiModel& model = app.model();
+    if (!produced || model.owned.empty() || model.loans.empty() || model.needs.empty()) {
+        std::cout << std::format(
+            "SCENARIO: seed {} did not reach a working mine ({} owned, {} loans, {} needs, {})\n",
+            kScenarioSeed, model.owned.size(), model.loans.size(), model.needs.size(), model.day);
+        for (std::size_t i = model.log.size(); i > 0 && i + 12 > model.log.size(); --i) {
+            std::cout << "    " << model.log[i - 1].day << "  " << model.log[i - 1].text << '\n';
+        }
+        return false;
+    }
+    std::cout << std::format("\nscenario: {}, {} owned ({}; {}), {} loans, {} needs-you rows\n",
+                             model.day, model.owned.size(), model.owned[0].output,
+                             model.owned[0].remaining, model.loans.size(), model.needs.size());
+    return true;
+}
+
+// Every tab in both frames. Returns false when any tab fails.
+bool probeFrames(Rml::Context& context, game::App& app, LoggingSystem& system, const char* label,
+                 bool pauseMenu) {
+    bool ok = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== {} game, frame {}x{}{} ==\n", label, frame.width,
+                                 frame.height, deck ? " (deck)" : "");
+        for (std::size_t tab = 0; tab < kTabs.size(); ++tab) {
+            const bool passed = probeTab(context, app, system, frame, tab, pauseMenu);
+            ok = ok && passed;
+        }
+    }
+    return ok;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -283,17 +401,13 @@ int main(int argc, char** argv) {
             exitCode = 4;
         }
         app.update(0.0);
-        for (const Frame& frame : kFrames) {
-            const bool deck = static_cast<float>(frame.width) < kDeckWidth;
-            context->SetDimensions(Rml::Vector2i(frame.width, frame.height));
-            app.forceDeck(deck);
-            std::cout << std::format("\n== frame {}x{}{} ==\n", frame.width, frame.height,
-                                     deck ? " (deck)" : "");
-            for (std::size_t tab = 0; tab < kTabs.size(); ++tab) {
-                if (!probeTab(*context, app, system, frame, tab)) {
-                    exitCode = 3;
-                }
-            }
+        if (!probeFrames(*context, app, system, "fresh", false)) {
+            exitCode = 3;
+        }
+        if (!playScenario(app, *loaded.content)) {
+            exitCode = 5;
+        } else if (!probeFrames(*context, app, system, "populated", true)) {
+            exitCode = 3;
         }
         std::cout << (exitCode == 0 ? "\nLAYOUT OK\n" : "\nLAYOUT FAILURE\n");
     }

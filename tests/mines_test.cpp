@@ -431,8 +431,9 @@ TEST_CASE("A mine warns at month end when the survey estimate is nearly spent", 
     CHECK_FALSE(hasNotice(tickToMonthEnd(simulation).notices, sim::NoticeKind::MineRunningLow));
 
     // The latest survey says about twenty days: warn, with the days in the notice.
-    const std::int64_t extractedNow = simulation.view(kPlayer).mines.at(0).extractedTonnes.at(0);
-    injectSurvey(simulation, content, plot, extractedNow + output * (sim::kRunningLowDays - 10));
+    // The survey is fresh (it measures what is in the ground now), so only
+    // extraction after it counts.
+    injectSurvey(simulation, content, plot, output * (sim::kRunningLowDays - 10));
     const sim::TickReport& monthEnd = tickToMonthEnd(simulation);
     REQUIRE(hasNotice(monthEnd.notices, sim::NoticeKind::MineRunningLow));
     for (const sim::Notice& notice : monthEnd.notices) {
@@ -444,4 +445,42 @@ TEST_CASE("A mine warns at month end when the survey estimate is nearly spent", 
     }
     // The rival never sees it.
     CHECK(simulation.view(kRival).mines.empty());
+}
+
+TEST_CASE("A fresh survey of a working mine is not charged for earlier extraction",
+          "[mines][view]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(50'000'000));
+    setDeposit(simulation, content, plot, sim::ResourceId(0), 10'000'000'000);
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    simulation.tick(content.balance.mineBuildDays + 60);
+    const sim::CompanyView before = simulation.view(kPlayer);
+    const std::int64_t output = before.mines.at(0).lastOutputTonnes.at(0);
+    const std::int64_t lifetime = before.mines.at(0).extractedTonnes.at(0);
+    REQUIRE(output > 0);
+    CHECK(before.mines.at(0).estimatedRemainingTonnes.at(0) == -1);  // never surveyed
+
+    // A survey completed yesterday that found less than the mine has
+    // already taken: nearly all of it is still there.
+    const std::int64_t estimate = lifetime / 2;
+    REQUIRE(estimate > output * 5);
+    injectSurvey(simulation, content, plot, estimate);
+    const sim::CompanyView after = simulation.view(kPlayer);
+    const std::int64_t remaining = after.mines.at(0).estimatedRemainingTonnes.at(0);
+    CHECK(remaining <= estimate);
+    CHECK(remaining >= estimate - 2 * output);
+    CHECK(after.mines.at(0).bestEstimateTonnes.at(0) == estimate);
+
+    // A survey from before the mine opened predates every tonne extracted.
+    sim::WorldState edited = simulation.state();
+    edited.surveys.back().completesDay = edited.mines[0].operationalDay - 1;
+    edited.surveys.back().commissionedDay =
+        edited.surveys.back().completesDay - content.balance.surveyDurationDays;
+    edited.surveys.back().estimates[0].tonnesEstimate = lifetime * 3;
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+    const sim::CompanyView old = simulation.view(kPlayer);
+    CHECK(old.mines.at(0).estimatedRemainingTonnes.at(0) ==
+          lifetime * 3 - old.mines.at(0).extractedTonnes.at(0));
 }

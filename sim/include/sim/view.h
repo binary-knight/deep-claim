@@ -108,6 +108,9 @@ struct MineView {
     // plot, zero where never surveyed; the interface shows remaining tonnes
     // and days from it. Indexed by ResourceId.
     std::vector<std::int64_t> bestEstimateTonnes;
+    // What that survey implies is left today (sim::estimatedRemainingTonnes),
+    // -1 for a resource the survey did not report or with no survey at all.
+    std::vector<std::int64_t> estimatedRemainingTonnes;
     Money dailyOpex;
 };
 
