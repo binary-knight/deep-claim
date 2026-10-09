@@ -28,8 +28,12 @@ Company makeCompany(const Content& content, std::string name, CompanyKind kind) 
     company.kind = kind;
     company.cash = content.balance.startingCapital;
     company.inventoryTonnes.assign(content.resources.size(), 0);
-    company.sellPolicies.assign(content.resources.size(), content.balance.defaultSellPolicy);
-    company.coverCosts = content.balance.defaultCoverCosts ? 1 : 0;
+    // Spec 001: the defaults are for the player; the AI keeps its own daily
+    // selling rule until the AI tuning step moves it onto policies.
+    const bool usesDefaults = kind == CompanyKind::Player;
+    company.sellPolicies.assign(content.resources.size(),
+                                usesDefaults ? content.balance.defaultSellPolicy : SellPolicy{});
+    company.coverCosts = usesDefaults && content.balance.defaultCoverCosts ? 1 : 0;
     company.autoSoldTonnes.assign(content.resources.size(), 0);
     company.autoSoldProceeds.assign(content.resources.size(), Money::zero());
     return company;

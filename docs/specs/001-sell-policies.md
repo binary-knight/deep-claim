@@ -96,10 +96,11 @@ check:
 "default_cover_costs": true
 ```
 
-Applied to every company at world generation. Reasoning: three games out
-of three were lost or nearly lost to unsold ore; the convenience should
-be on unless the player chooses to speculate. The AI ignores these
-defaults for now (see out of scope).
+Applied to the player company at world generation; AI companies start
+with policies off and no cover-costs rule, because the AI keeps its own
+selling rule this step (see out of scope). Reasoning for the default:
+three games out of three were lost or nearly lost to unsold ore; the
+convenience should be on unless the player chooses to speculate.
 
 ### Notices
 

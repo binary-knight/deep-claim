@@ -69,13 +69,17 @@ TEST_CASE("Companies start with the balance file's default policy", "[sell_polic
     content.balance.defaultSellPolicy.reserveTonnes = 25;
     content.balance.defaultCoverCosts = true;
     const sim::Simulation simulation(content, 1, test::setup());
-    for (const sim::Company& company : simulation.state().companies) {
-        REQUIRE(company.sellPolicies.size() == content.resources.size());
-        CHECK(company.sellPolicies[0].enabled == 1);
-        CHECK(company.sellPolicies[0].reserveTonnes == 25);
-        CHECK(company.coverCosts == 1);
-        CHECK(company.autoSoldTonnes.size() == content.resources.size());
-    }
+    const sim::Company& me = simulation.state().companies[kPlayer.index()];
+    REQUIRE(me.sellPolicies.size() == content.resources.size());
+    CHECK(me.sellPolicies[0].enabled == 1);
+    CHECK(me.sellPolicies[0].reserveTonnes == 25);
+    CHECK(me.coverCosts == 1);
+    CHECK(me.autoSoldTonnes.size() == content.resources.size());
+    // The AI keeps its own selling rule: no policy, no cover-costs rule.
+    const sim::Company& rival = simulation.state().companies[1];
+    REQUIRE(rival.sellPolicies.size() == content.resources.size());
+    CHECK(rival.sellPolicies[0].enabled == 0);
+    CHECK(rival.coverCosts == 0);
     const sim::CompanyView view = simulation.view(kPlayer);
     CHECK(view.sellPolicies.size() == content.resources.size());
     CHECK(view.coverCosts);
