@@ -109,6 +109,10 @@ struct Auction {
     std::uint8_t open = 1;
     CompanyId winner;  // valid once closed with a sale
     Money winningAmount;
+    // The minimum bid this auction opened with. Kept so the record of what
+    // land sold for, and how far over the ask, survives later changes to the
+    // plot (spec 006). Auctions are never erased, so this is the history.
+    Money askPrice;
 };
 
 // A survey's noisy reading of one deposit. relativeError is the log-normal

@@ -3,6 +3,7 @@
 
 #include "sim/content.h"
 #include "sim/finance.h"
+#include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/mines.h"
 #include "sim/money.h"
@@ -56,7 +57,60 @@ PlotView makePlotView(const Content& content, const WorldState& state, std::uint
     return plotView;
 }
 
-void addOwnSurveys(const WorldState& state, CompanyId viewer, CompanyView& view) {
+const Fixed kMaxSalePremium = Fixed::fromInt(1000);
+
+SaleView makeSaleView(const Auction& auction) {
+    SaleView sale;
+    sale.plot = auction.plot;
+    sale.buyer = auction.winner;
+    sale.ask = auction.askPrice;
+    sale.paid = auction.winningAmount;
+    sale.day = auction.closesOnDay;
+    // A bid of thousands of times the ask does not fit a Fixed; the premium
+    // saturates there, far past anything the interface needs to tell apart.
+    const std::int64_t over = (auction.winningAmount - auction.askPrice).cents();
+    if (auction.askPrice > Money::zero() && over > 0) {
+        sale.premium = Fixed::fromRaw(
+            std::min(checkedMulDiv(over, Fixed::kScale, auction.askPrice.cents())
+                         .value_or(kMaxSalePremium.raw()),
+                     kMaxSalePremium.raw()));
+    }
+    return sale;
+}
+
+// Settled auctions, newest first: the last kRecentSales for the market's
+// record, and each sold plot's own sale. Auctions are stored in the order
+// they opened and all run the same window, so that is also closing order.
+void addSales(const WorldState& state, CompanyView& view) {
+    for (std::size_t i = state.auctions.size(); i-- > 0;) {
+        const Auction& auction = state.auctions[i];
+        if (auction.open != 0 || !auction.winner.valid()) {
+            continue;
+        }
+        const SaleView sale = makeSaleView(auction);
+        if (view.recentSales.size() < kRecentSales) {
+            view.recentSales.push_back(sale);
+        }
+        PlotView& plot = view.plots[auction.plot.index()];
+        if (!plot.sale.has_value()) {
+            plot.sale = sale;
+        }
+    }
+}
+
+// The median deposit of `resource` in `region`, zero when the region's
+// priors do not list it.
+std::int64_t regionalMedianTonnes(const Content& content, RegionId region, ResourceId resource) {
+    for (const DepositPrior& prior : content.regions[region.index()].deposits) {
+        if (prior.resource == resource) {
+            return prior.tonnesMedian;
+        }
+    }
+    return 0;
+}
+
+void addOwnSurveys(const Content& content, const WorldState& state, CompanyId viewer,
+                   CompanyView& view) {
     for (std::uint32_t i = 0; i < state.surveys.size(); ++i) {
         const Survey& survey = state.surveys[i];
         if (survey.company != viewer) {
@@ -68,9 +122,13 @@ void addOwnSurveys(const WorldState& state, CompanyId viewer, CompanyView& view)
         surveyView.commissionedDay = survey.commissionedDay;
         surveyView.completesDay = survey.completesDay;
         surveyView.complete = survey.complete != 0;
+        const RegionId region = state.plots[survey.plot.index()].region;
         for (const SurveyEstimate& estimate : survey.estimates) {
+            const std::int64_t median = regionalMedianTonnes(content, region, estimate.resource);
+            // Dividing keeps the comparison inside 64 bits for any estimate.
+            const bool major = median > 0 && estimate.tonnesEstimate / kMajorDepositMult > median;
             surveyView.estimates.push_back(
-                {estimate.resource, estimate.tonnesEstimate, estimate.relativeError});
+                {estimate.resource, estimate.tonnesEstimate, estimate.relativeError, major});
         }
         view.surveys.push_back(surveyView);
     }
@@ -236,7 +294,8 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     for (std::uint32_t i = 0; i < state.plots.size(); ++i) {
         view.plots.push_back(makePlotView(content, state, i, company));
     }
-    addOwnSurveys(state, company, view);
+    addSales(state, view);
+    addOwnSurveys(content, state, company, view);
     addOwnMines(content, state, company, view);
     addMarkets(content, state, view);
     addOwnLoans(state, company, view);

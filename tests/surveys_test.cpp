@@ -159,6 +159,46 @@ TEST_CASE("Survey estimates are noisy but unbiased in log space", "[surveys]") {
     CHECK(sd < 0.6);
 }
 
+TEST_CASE("A survey marks an estimate above twice the regional median as major", "[surveys][view]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    // A listed plot that holds something, so its survey reports an estimate.
+    sim::PlotId plot;
+    for (std::uint32_t i = 0; i < simulation.state().plots.size(); ++i) {
+        if (simulation.state().plots[i].listing == sim::PlotListing::Listed &&
+            !simulation.state().hidden.plotDeposits[i].deposits.empty()) {
+            plot = sim::PlotId(i);
+            break;
+        }
+    }
+    REQUIRE(plot.valid());
+    simulation.submit(sim::CommissionSurvey{kPlayer, plot});
+    simulation.tick(content.balance.surveyDurationDays + 2);
+
+    sim::WorldState edited = simulation.state();
+    REQUIRE(edited.surveys.size() == 1);
+    REQUIRE_FALSE(edited.surveys[0].estimates.empty());
+    sim::SurveyEstimate& estimate = edited.surveys[0].estimates[0];
+    std::int64_t median = 0;
+    for (const sim::DepositPrior& prior :
+         content.regions[edited.plots[plot.index()].region.index()].deposits) {
+        if (prior.resource == estimate.resource) {
+            median = prior.tonnesMedian;
+        }
+    }
+    REQUIRE(median > 0);
+
+    // Just over twice the median of its region is major; exactly twice is not.
+    estimate.tonnesEstimate = median * 2 + 2;
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+    REQUIRE(simulation.view(kPlayer).surveys.size() == 1);
+    CHECK(simulation.view(kPlayer).surveys[0].estimates[0].major);
+
+    estimate.tonnesEstimate = median * 2;
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+    CHECK_FALSE(simulation.view(kPlayer).surveys[0].estimates[0].major);
+}
+
 TEST_CASE("Saves with inconsistent surveys are rejected", "[surveys][save]") {
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 2, test::setup());

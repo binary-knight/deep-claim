@@ -42,8 +42,9 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // constant in the same commit and say so in the commit message.
     // Moved once for spec 001 (standing sell policies added company state),
     // spec 004 (plot and mine state) and spec 005 (the listing queue is built
-    // as an opening hand plus a region-interleaved remainder).
-    constexpr std::uint64_t kGolden = 0x118a72ce0f57d9f7ULL;
+    // as an opening hand plus a region-interleaved remainder) and spec 006
+    // (an auction keeps the ask it opened with).
+    constexpr std::uint64_t kGolden = 0x2a5da3177ab7c69dULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
     simulation.tick(sim::kDaysPerYear);

@@ -31,6 +31,19 @@ struct MinePublicView {
     MineState state = MineState::Building;
 };
 
+// A settled auction: public, like the purchase notice it repeats.
+struct SaleView {
+    PlotId plot;
+    CompanyId buyer;
+    Money ask;      // the minimum bid the auction opened with
+    Money paid;     // the winning bid
+    Day day = 0;    // the day the auction closed
+    Fixed premium;  // paid over the ask, less one: 0.16 is 16% over
+};
+
+// How many settled auctions CompanyView::recentSales keeps.
+constexpr std::size_t kRecentSales = 16;
+
 struct PlotView {
     PlotId id;
     RegionId region;
@@ -40,14 +53,20 @@ struct PlotView {
     CompanyId owner;
     std::optional<AuctionView> auction;
     std::optional<MinePublicView> mine;
-    Money mineCapexQuote;  // what the viewer would pay to build here today
+    Money mineCapexQuote;          // what the viewer would pay to build here today
+    std::optional<SaleView> sale;  // the auction this plot was sold at, once sold
 };
 
 struct SurveyEstimateView {
     ResourceId resource;
     std::int64_t tonnesEstimate = 0;
     Fixed relativeError;
+    // The estimate is more than kMajorDepositMult times the median deposit
+    // of this ore in the plot's region: a find that will outlast most.
+    bool major = false;
 };
+
+constexpr std::int64_t kMajorDepositMult = 2;
 
 // One of the viewer's own surveys, pending or complete.
 struct SurveyView {
@@ -154,6 +173,8 @@ struct CompanyView {
     // going unsold that will return to sale.
     std::uint32_t unlistedPlotsRemaining = 0;
     std::uint32_t withdrawnPlots = 0;
+    // The most recent settled auctions, newest first, at most kRecentSales.
+    std::vector<SaleView> recentSales;
     std::vector<PlotView> plots;
     std::vector<SurveyView> surveys;
     std::vector<MineView> mines;

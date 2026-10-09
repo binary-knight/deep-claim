@@ -135,7 +135,7 @@ void serialize(Archive& ar, Bid& bid) {
 template <class Archive>
 void serialize(Archive& ar, Auction& auction) {
     ar(auction.plot, auction.opensOnDay, auction.closesOnDay, auction.bids, auction.open,
-       auction.winner, auction.winningAmount);
+       auction.winner, auction.winningAmount, auction.askPrice);
 }
 
 template <class Archive>

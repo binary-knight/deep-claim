@@ -204,8 +204,13 @@ bool validateAuctions(const WorldState& state) {
             return false;
         }
         if (auction.winner.valid() &&
-            (auction.open != 0 || auction.winner.index() >= state.companies.size())) {
-            return false;
+            (auction.open != 0 || auction.winner.index() >= state.companies.size() ||
+             auction.winningAmount < auction.askPrice)) {
+            return false;  // a sale is a closed auction won at or above its ask
+        }
+        if (auction.askPrice < Money::zero() || auction.askPrice.cents() > kMaxCashCents ||
+            (auction.open != 0 && auction.askPrice != plot.askPrice)) {
+            return false;  // an open auction stands at its plot's ask
         }
     }
     return true;

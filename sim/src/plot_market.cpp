@@ -36,6 +36,7 @@ AuctionId openAuction(const Content& content, WorldState& state, PlotId plotId) 
     auction.plot = plotId;
     auction.opensOnDay = state.day;
     auction.closesOnDay = state.day + content.balance.auctionWindowDays;
+    auction.askPrice = state.plots[plotId.index()].askPrice;
     state.auctions.push_back(auction);
 
     const AuctionId id(static_cast<std::uint32_t>(state.auctions.size() - 1));
