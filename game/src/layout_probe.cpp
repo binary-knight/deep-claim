@@ -513,6 +513,33 @@ bool probeFrames(Rml::Context& context, game::App& app, LoggingSystem& system, c
     return ok;
 }
 
+constexpr int kLayoutFailure = 3;
+constexpr int kScenarioFailure = 5;
+
+// The played game, stage by stage, each laid out before the next is played.
+// Returns 0, or the exit code of the first stage that failed.
+int probeScenarios(Rml::Context& context, game::App& app, LoggingSystem& system,
+                   const sim::Content& content) {
+    if (!playScenario(app, content)) {
+        return kScenarioFailure;
+    }
+    if (!probeFrames(context, app, system, "populated", true)) {
+        return kLayoutFailure;
+    }
+    if (!playLateScenario(app, content)) {
+        return kScenarioFailure;
+    }
+    if (!probeFrames(context, app, system, "survey in", false)) {
+        return kLayoutFailure;
+    }
+    if (!playEndgameScenario(app, content)) {
+        return kScenarioFailure;
+    }
+    const bool laidOut = probeFrames(context, app, system, "endgame", false);
+    const bool filtered = probeLogFilters(context, app, system);
+    return laidOut && filtered ? 0 : kLayoutFailure;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -559,19 +586,8 @@ int main(int argc, char** argv) {
             !probeLogFilters(*context, app, system)) {
             exitCode = 3;
         }
-        if (!playScenario(app, *loaded.content)) {
-            exitCode = 5;
-        } else if (!probeFrames(*context, app, system, "populated", true)) {
-            exitCode = 3;
-        } else if (!playLateScenario(app, *loaded.content)) {
-            exitCode = 5;
-        } else if (!probeFrames(*context, app, system, "survey in", false)) {
-            exitCode = 3;
-        } else if (!playEndgameScenario(app, *loaded.content)) {
-            exitCode = 5;
-        } else if (!probeFrames(*context, app, system, "endgame", false) ||
-                   !probeLogFilters(*context, app, system)) {
-            exitCode = 3;
+        if (const int code = probeScenarios(*context, app, system, *loaded.content); code != 0) {
+            exitCode = code;
         }
         std::cout << (exitCode == 0 ? "\nLAYOUT OK\n" : "\nLAYOUT FAILURE\n");
     }

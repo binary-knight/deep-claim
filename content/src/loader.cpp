@@ -834,8 +834,8 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
         valueOr(node.integer("plots_listed_per_month", true, 0, 1000), 0LL));
     balance.maxUnsoldRounds =
         static_cast<std::uint32_t>(valueOr(node.integer("max_unsold_rounds", true, 0, 100), 0LL));
-    balance.relistCooldownDays = static_cast<sim::Day>(
-        valueOr(node.integer("relist_cooldown_days", true, 0, sim::kDaysPerYear * 100), 0LL));
+    balance.relistCooldownDays = static_cast<sim::Day>(valueOr(
+        node.integer("relist_cooldown_days", true, 0, std::int64_t{sim::kDaysPerYear} * 100), 0LL));
     balance.bankruptcyGraceMonths = static_cast<std::uint32_t>(
         valueOr(node.integer("bankruptcy_grace_months", true, 0, 120), 0LL));
     balance.marketSupplySmoothingDays = static_cast<std::uint32_t>(

@@ -711,6 +711,34 @@ void fillFinanceRow(const Session& session, UiModel& model) {
 
 // ---- plots ----
 
+// Among a survey's locked ores, the one whose unlock is nearest in the lab
+// and one the lab could start on today.
+struct NearestUnlock {
+    sim::ResourceId soon;  // being researched; `days` until it is mineable
+    sim::Day days = 0;
+    sim::ResourceId ready;  // one project away
+
+    [[nodiscard]] sim::ResourceId closest() const { return soon.valid() ? soon : ready; }
+};
+
+NearestUnlock nearestUnlock(const sim::Content& content, const sim::CompanyView& view,
+                            const sim::SurveyView& survey) {
+    NearestUnlock nearest;
+    for (const sim::SurveyEstimateView& e : survey.estimates) {
+        if (!resourceLocked(content, view, e.resource)) {
+            continue;
+        }
+        const UnlockOutlook outlook = unlockOutlook(view, e.resource);
+        if (outlook.days > 0 && (!nearest.soon.valid() || outlook.days < nearest.days)) {
+            nearest.soon = e.resource;
+            nearest.days = outlook.days;
+        } else if (outlook.ready && !nearest.ready.valid()) {
+            nearest.ready = e.resource;
+        }
+    }
+    return nearest;
+}
+
 // The survey column of a for-sale row: estimate summary, error, and one flag
 // chip (bids, not surveyed, empty, locked ore).
 void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
@@ -732,32 +760,19 @@ void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
         return;
     }
     bool lockedOnly = true;
-    // The nearest unlock among the locked ores, if the player is close to one.
-    std::string soonest;
-    sim::Day soonestDays = 0;
-    std::string readyNote;
     for (const sim::SurveyEstimateView& e : estimates) {
         if (!row.survey.empty()) {
             row.survey += " · ";
         }
         row.survey += std::format("{} ~{}", content.resources[e.resource.index()].name,
                                   formatTonnes(e.tonnesEstimate));
-        const bool locked = resourceLocked(content, view, e.resource);
-        lockedOnly = lockedOnly && locked;
-        if (!locked) {
-            continue;
-        }
-        const UnlockOutlook outlook = unlockOutlook(view, e.resource);
-        if (outlook.days > 0 && (soonestDays == 0 || outlook.days < soonestDays)) {
-            soonestDays = outlook.days;
-            soonest = lockedNote(content, view, e.resource);
-        } else if (outlook.ready && readyNote.empty()) {
-            readyNote = lockedNote(content, view, e.resource);
-        }
+        lockedOnly = lockedOnly && resourceLocked(content, view, e.resource);
     }
     row.error = std::format("({})", formatRatio(estimates[0].relativeError));
     if (lockedOnly) {
-        row.flag = !soonest.empty() ? soonest : !readyNote.empty() ? readyNote : "locked ore";
+        // "mineable in N days" or "one project away" once the player is close.
+        const sim::ResourceId close = nearestUnlock(content, view, *found.latest).closest();
+        row.flag = close.valid() ? lockedNote(content, view, close) : "locked ore";
         row.flag_class = "warn";
     } else if (plot.auction && rivalBids(*plot.auction) > 0) {
         row.flag =
@@ -842,21 +857,10 @@ bool fillPanelSurvey(const sim::Content& content, const sim::CompanyView& view,
 // when the player is not close to any of it.
 std::string lockedAdvice(const sim::Content& content, const sim::CompanyView& view,
                          const sim::SurveyView& survey) {
-    sim::ResourceId soon;
-    sim::Day soonDays = 0;
-    sim::ResourceId ready;
-    for (const sim::SurveyEstimateView& e : survey.estimates) {
-        if (!resourceLocked(content, view, e.resource)) {
-            continue;
-        }
-        const UnlockOutlook outlook = unlockOutlook(view, e.resource);
-        if (outlook.days > 0 && (!soon.valid() || outlook.days < soonDays)) {
-            soon = e.resource;
-            soonDays = outlook.days;
-        } else if (outlook.ready && !ready.valid()) {
-            ready = e.resource;
-        }
-    }
+    const NearestUnlock nearest = nearestUnlock(content, view, survey);
+    const sim::ResourceId soon = nearest.soon;
+    const sim::Day soonDays = nearest.days;
+    const sim::ResourceId ready = nearest.ready;
     if (soon.valid()) {
         return textPlural(content, "ui.notice_locked_soon", soonDays,
                           {{"resource", content.resources[soon.index()].name},

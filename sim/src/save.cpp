@@ -108,6 +108,16 @@ bool validateCompanies(const Content& content, const WorldState& state) {
         state.companies, [&](const Company& company) { return validateCompany(content, company); });
 }
 
+// Unsold rounds only accumulate while listed and never reach the withdrawal
+// threshold; a cooldown exists only on unlisted plots (validateListingQueue
+// ties it to the withdrawn queue).
+bool withdrawalFieldsValid(const Plot& plot, std::uint32_t maxRounds) {
+    return plot.relistNotBefore <= kMaxDeadline &&
+           (plot.listing == PlotListing::Listed || plot.unsoldCount == 0) &&
+           (plot.listing == PlotListing::Unlisted || plot.relistNotBefore == 0) &&
+           (maxRounds == 0 || plot.unsoldCount < maxRounds);
+}
+
 bool validatePlots(const Content& content, const WorldState& state) {
     const std::uint32_t maxRounds = content.balance.maxUnsoldRounds;
     for (std::uint32_t i = 0; i < state.plots.size(); ++i) {
@@ -115,17 +125,8 @@ bool validatePlots(const Content& content, const WorldState& state) {
         if (!plot.region.valid() || plot.region.index() >= content.regions.size()) {
             return false;
         }
-        // Unsold rounds only accumulate while listed and never reach the
-        // withdrawal threshold; a cooldown exists only on unlisted plots
-        // (validateListingQueue ties it to the withdrawn queue).
-        if (plot.relistNotBefore > kMaxDeadline ||
-            (plot.listing != PlotListing::Listed && plot.unsoldCount != 0) ||
-            (plot.listing != PlotListing::Unlisted && plot.relistNotBefore != 0) ||
-            (maxRounds != 0 && plot.unsoldCount >= maxRounds)) {
-            return false;
-        }
         if (plot.areaHectares < 1 || plot.askPrice < Money::zero() ||
-            plot.basePrice < Money::zero()) {
+            plot.basePrice < Money::zero() || !withdrawalFieldsValid(plot, maxRounds)) {
             return false;
         }
         switch (plot.listing) {

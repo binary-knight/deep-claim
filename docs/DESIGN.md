@@ -715,3 +715,40 @@ Sim:
   limit, cooldowns only on withdrawn plots, the withdrawn queue distinct,
   unlisted and in nondecreasing cooldown order, and every offered plot
   that is unlisted and unowned accounted for by that queue.
+
+Session:
+- **The log is the player's, not the world's.** `Session::logNotices` drops
+  `PlotRelisted` and `PlotWithdrawn` for plots the player has neither
+  surveyed nor bid on, drops the player's own `RivalUnlockedResource`, and
+  folds a tick's `AutoSaleSummary` notices into one line built from
+  `notice.auto_sale_month` and `notice.auto_sale_item`. The trace's notice
+  records are written from the same place, so they are what the log shows;
+  day and hash records are untouched and replay is unaffected.
+- **Auto-pause** gains `research_complete`. Survey and research complete
+  default to on. The toggles file is read over the defaults, so a reason the
+  file has never heard of takes its default and every recorded toggle stays.
+- **Text.** Rejection templates embed `rejectReasonClause` (no full stop,
+  lower-case opening); `describeNotice` capitalises its result.
+- **Trace.** `StartResearch` command records carry `tech_id`; decoding still
+  uses the index. `deep_claim_replay` prints "building, opens day N" and a
+  bare "depleted".
+
+Client (all presentation of view data):
+- Finance: Repay all per loan; the loan form shows and prefills remaining
+  credit and disables Take loan with the reason.
+- Needs you: "The lab is idle" (when a project could start now) and "Survey
+  report on plot #N is in" (15 days, while the plot is listed).
+- Plots: a warning when a survey would report on or after the auction's
+  closing day; no survey on a worked-out mine; locked ore reads "mineable in
+  N days" or "one project away" with buy-ahead advice once
+  `unlockDaysRemaining` or `unlockReady` says so; a line when no unlisted
+  land remains.
+- Log: All / Mine / Market / Rivals, classified in `ui_model.cpp` from the
+  notice kind and company.
+- The layout probe plays its fixed game on through a landed survey report,
+  the end of the land queue, exhausted credit and a late survey, lays out
+  every tab at each stage, and lays out the Log tab under every filter on
+  both a fresh and a long game.
+- Observation from the probe's fixed game, not acted on here: by year 3,
+  23 of 30 plots had been withdrawn unsold. Land demand is spec 005/006
+  territory.

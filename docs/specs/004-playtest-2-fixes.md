@@ -72,6 +72,68 @@ World size and listing pace (spec 005), balance (spec 006), save slots.
 
 ## Decisions
 - 2026-10-09: drafted from playtest 2.
+- 2026-10-09, build. Choices made beyond the text above:
+  - Withdrawn plots wait in their own queue (`WorldState::withdrawnQueue`)
+    rather than at the tail of the listing queue. "Behind never-listed
+    plots" is then structural, and only the front needs a cooldown check.
+  - A withdrawn plot keeps its reduced ask when it returns and starts a new
+    count of unsold rounds.
+  - New public notice `PlotWithdrawn`, so the log can say land left the
+    market. The session filters it exactly like a relist.
+  - `max_unsold_rounds` 0 means "relist forever". The in-code test fixture
+    uses it, so older sim tests keep their meaning; shipped data uses 3.
+  - `MineRunningLow` is said once per survey: in the month the low-end
+    figure first comes within 30 days, or at the survey's first month end
+    if it is already lower. The old rule repeated monthly; on the low end it
+    would have repeated for the whole second half of a mine's life.
+  - The view also carries `withdrawnPlots`, so the Plots tab can say that
+    withdrawn land will return when nothing unlisted remains.
+  - `unlockDaysRemaining` counts to the day the ore is mineable, the day
+    after the research completes. `unlockReady` is false while the
+    unlocking tech is in the lab (the countdown says more).
+  - The player's own `RivalUnlockedResource` is dropped from their log;
+    `ResearchComplete` already says it.
+  - "Has a bid on that plot" is read from the view at the start of the day
+    plus bids ordered that day, because the auction is gone from the view by
+    the time the relist notice arrives.
+  - The collapsed auto-sale line stands where the first summary stood. Its
+    log entry keeps the `AutoSaleSummary` kind with the month's totals.
+  - Auto-pause migration: a toggles file is read over the new defaults. A
+    file from before this spec names `survey_complete` (the client always
+    wrote every key), so that toggle is respected as written, which for a
+    file nobody edited by intent means it stays off; `research_complete` is
+    absent from old files and takes the new default, on. The alternative,
+    a version line that overrides an old `survey_complete=0`, would discard
+    a choice the file cannot distinguish from a default.
+  - Rejection lines: the reason is embedded as a clause (closing full stop
+    removed, first letter lowered unless the word is an acronym). The
+    `reject.*` strings are unchanged and still read as sentences alone.
+  - Capitals: `describeNotice` capitalises its result, so templates that
+    open with `{plot}` need no edit.
+  - The late-survey warning fires when report day >= close day, not only >:
+    auctions settle earlier in the day than survey reports arrive, so a
+    report on the closing day is already too late.
+  - Repay all is disabled when spendable cash does not cover the balance,
+    and Take loan also when all loan slots are in use, each a rejection the
+    interface can foresee.
+  - The loan field follows the remaining credit until the player types
+    something else.
+  - Log filters classify in the client from the notice kind and company:
+    Rivals is another company's purchase, mine start, bankruptcy or unlock;
+    Market is listings, relists, withdrawals, ore sales (manual, automatic,
+    cover-costs) and events; Mine is everything else.
+  - The Loans table header "Months left" became "Months" to make room for
+    the second button in the Steam Deck frame.
+  - RmlUi logs an out-of-bounds index when a list shrinks under a class
+    binding placed on the repeated element itself. The survey-estimate rows
+    and the log lines now carry that binding one level down. Found by the
+    probe once it selected a second plot and filtered the log.
+  - Kept as drafts (chips, buttons, cells, sub-lines, and sentences this
+    spec or its brief quotes word for word): the auto-sale line and its
+    item, the two needs-you titles, the late-survey line, the unlock chips,
+    "No unlisted land remains.", "You can borrow up to X." and the
+    auto-pause label. Fifteen sentences went through agy; none were
+    rejected by the invariant check.
 
 ## Plan
 State (sim, all serialized and hashed):
