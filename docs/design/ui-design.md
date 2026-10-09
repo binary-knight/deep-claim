@@ -49,6 +49,14 @@ Round 1 outcome:
 - B and C go to round 2, with a new D "Core Shack" (B's world with more
   mass and less decoration) as the third candidate.
 
+Round 2 outcome:
+- **B rejected: not enough mass.** Next to D its cards read thin and its
+  amber is spread too wide. Codified: `[Constraint: weight comes from
+  structure (title blocks, drawing borders, mono figures), not from
+  colour; accent colour is rationed to a mark or two]`.
+- C and D go to the final plate round, head to head on the working
+  screens (Plots, Market) at 1:1.
+
 ## Tokens, components, states
 
 To be filled when the direction is locked (Sprint 1), then the hierarchy
