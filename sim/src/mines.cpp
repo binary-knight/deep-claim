@@ -236,9 +236,9 @@ std::int64_t estimatedRemainingTonnes(const WorldState& state, const Mine& mine,
         0, estimate.tonnesEstimate - extractedSinceSurvey(state, mine, survey, estimate.resource));
 }
 
-void warnRunningLow(const Content& /*content*/, const WorldState& state, TickReport& report) {
+void warnRunningLow(const Content& /*content*/, WorldState& state, TickReport& report) {
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
-        const Mine& mine = state.mines[i];
+        Mine& mine = state.mines[i];
         if (mine.state != MineState::Operating ||
             state.companies[mine.owner.index()].bankrupt != 0) {
             continue;
@@ -247,10 +247,13 @@ void warnRunningLow(const Content& /*content*/, const WorldState& state, TickRep
         if (latest == nullptr) {
             continue;
         }
+        const SurveyId latestId(static_cast<std::uint32_t>(latest - state.surveys.data()));
+        if (mine.lowWarnedSurvey == latestId) {
+            continue;  // said already for this survey
+        }
         // Days of ore left by the cautious end of the survey, for the
-        // resource that lasts longest. Kept signed: once the low end is
-        // passed the figure goes negative, which is how the warning knows it
-        // has already been given.
+        // resource that lasts longest. Signed: negative once the low end
+        // is passed.
         bool any = false;
         std::int64_t daysLeft = 0;
         for (const SurveyEstimate& estimate : latest->estimates) {
@@ -263,16 +266,14 @@ void warnRunningLow(const Content& /*content*/, const WorldState& state, TickRep
             daysLeft = any ? std::max(daysLeft, days) : days;
             any = true;
         }
-        // Month-end check: say it once, in the month the figure first comes
-        // within kRunningLowDays (a month ago it was still above it). A
-        // survey's first month end always speaks if the figure is that low,
-        // so a fresh survey that is already past its low end is not silent.
-        const std::int64_t window = kRunningLowDays;
-        const bool firstCheck = state.day - latest->completesDay <= kDaysPerMonth;
-        const bool crossedThisMonth = daysLeft > window - static_cast<std::int64_t>(kDaysPerMonth);
-        if (!any || daysLeft > window || (!crossedThisMonth && !firstCheck)) {
+        // Said at the first month end the figure is within kRunningLowDays,
+        // however far past the low end the mine already is, and remembered
+        // on the mine so mothballing, a new unlock or a change of output
+        // cannot bring it back. A newer survey starts afresh.
+        if (!any || daysLeft > static_cast<std::int64_t>(kRunningLowDays)) {
             continue;
         }
+        mine.lowWarnedSurvey = latestId;
         Notice notice = mineNotice(NoticeKind::MineRunningLow, mine, MineId(i));
         notice.tonnes = std::max<std::int64_t>(0, daysLeft);
         report.notices.push_back(notice);

@@ -531,3 +531,96 @@ TEST_CASE("A fresh survey of a working mine is not charged for earlier extractio
     CHECK(old.mines.at(0).estimatedRemainingTonnes.at(0) ==
           lifetime * 3 - old.mines.at(0).extractedTonnes.at(0));
 }
+
+namespace {
+
+int countRunningLow(const sim::TickReport& report) {
+    return static_cast<int>(std::count_if(
+        report.notices.begin(), report.notices.end(),
+        [](const sim::Notice& n) { return n.kind == sim::NoticeKind::MineRunningLow; }));
+}
+
+}  // namespace
+
+TEST_CASE("Running low is said once per survey, whatever the mine does next", "[mines][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(80'000'000));
+    setDeposit(simulation, content, plot, sim::ResourceId(0), 10'000'000'000);
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    simulation.tick(content.balance.mineBuildDays + 1);
+    const std::int64_t output = simulation.view(kPlayer).mines.at(0).lastOutputTonnes.at(0);
+    REQUIRE(output > 0);
+    CHECK_FALSE(simulation.state().mines[0].lowWarnedSurvey.valid());
+
+    // Eighty days of ore: quiet, then one warning as it comes within thirty.
+    injectSurvey(simulation, content, plot, output * 80);
+    int warnings = 0;
+    for (int month = 0; month < 4 && warnings == 0; ++month) {
+        warnings += countRunningLow(tickToMonthEnd(simulation));
+    }
+    REQUIRE(warnings == 1);
+    const sim::SurveyId warned = simulation.state().mines[0].lowWarnedSurvey;
+    REQUIRE(warned.valid());
+    CHECK(warned.index() == simulation.state().surveys.size() - 1);
+
+    // Mothball for most of a month and reopen: the estimate has days left
+    // again at the next check, but the warning has been given.
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 0});
+    simulation.tick(20);
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 1});
+    simulation.tick(2);
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Operating);
+    for (int month = 0; month < 6; ++month) {
+        warnings += countRunningLow(tickToMonthEnd(simulation));
+    }
+    CHECK(warnings == 1);
+
+    // The marker survives a save and is checked on load.
+    const std::vector<std::uint8_t> bytes = simulation.save();
+    sim::Simulation other(content, 7, test::setup());
+    REQUIRE(other.load(bytes));
+    CHECK(other.state().mines[0].lowWarnedSurvey == warned);
+    CHECK(other.stateHash() == simulation.stateHash());
+    sim::WorldState broken = simulation.state();
+    broken.mines[0].lowWarnedSurvey = sim::SurveyId(999);  // no such survey
+    CHECK_FALSE(other.load(sim::saveGame(broken, {}, sim::hashContent(content))));
+    broken = simulation.state();
+    broken.surveys[warned.index()].company = kRival;  // not the owner's survey
+    CHECK_FALSE(other.load(sim::saveGame(broken, {}, sim::hashContent(content))));
+
+    // A newer survey is a new question: it warns once more.
+    injectSurvey(simulation, content, plot, output * 10);
+    CHECK(countRunningLow(tickToMonthEnd(simulation)) == 1);
+    CHECK(countRunningLow(tickToMonthEnd(simulation)) == 0);
+    CHECK(simulation.state().mines[0].lowWarnedSurvey != warned);
+}
+
+TEST_CASE("A survey already past its low end when the mine opens still warns", "[mines]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(80'000'000));
+    setDeposit(simulation, content, plot, sim::ResourceId(0), 10'000'000'000);
+    // Surveyed before building: a handful of tonnes, long since dug by the
+    // first month end of operation, and the survey is months old by then.
+    injectSurvey(simulation, content, plot, 5);
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    int warnings = 0;
+    for (sim::Day d = 0; d <= content.balance.mineBuildDays; ++d) {
+        warnings += countRunningLow(simulation.tick());
+    }
+    CHECK(warnings == 0);  // not while building
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Operating);
+    for (int month = 0; month < 6; ++month) {
+        const sim::TickReport& report = tickToMonthEnd(simulation);
+        for (const sim::Notice& notice : report.notices) {
+            if (notice.kind == sim::NoticeKind::MineRunningLow) {
+                ++warnings;
+                CHECK(notice.tonnes == 0);  // floored: the low end is behind us
+            }
+        }
+    }
+    CHECK(warnings == 1);
+}

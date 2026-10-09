@@ -164,6 +164,7 @@ void App::newGame(std::uint64_t seed) {
     model_.selected_plot = -1;
     model_.selected_resource = 0;
     model_.tab = 0;
+    resetLoanInput();
     syncPolicyInputs();
     lastRefreshedDay_ = session_->day();
 }
@@ -891,12 +892,20 @@ void App::onSell(int resourceIndex, bool all) {
 }
 
 void App::syncLoanInput() {
-    const std::string credit =
-        exactMoney(std::max(session_->view().loanCapacity, sim::Money::zero()));
-    if (model_.loan_input.empty() || model_.loan_input == loanPrefill_) {
-        model_.loan_input = credit;
+    // Anything in the field other than what was last put there is the
+    // player's, and stays the player's even if credit later equals it.
+    loanEdited_ = loanEdited_ || model_.loan_input != loanPrefill_;
+    if (loanEdited_) {
+        return;
     }
-    loanPrefill_ = credit;
+    loanPrefill_ = exactMoney(std::max(session_->view().loanCapacity, sim::Money::zero()));
+    model_.loan_input = loanPrefill_;
+}
+
+void App::resetLoanInput() {
+    loanEdited_ = false;
+    loanPrefill_.clear();
+    model_.loan_input.clear();
 }
 
 void App::onSetLogFilter(int filter) {
@@ -913,6 +922,12 @@ void App::onRepayAll(int loanIndex) {
     const sim::LoanId id(static_cast<std::uint32_t>(loanIndex));
     for (const sim::LoanView& loan : session_->view().loans) {
         if (loan.id == id && loan.active) {
+            // A click that outlived the button: cash has since fallen short.
+            const sim::CompanyView& view = session_->view();
+            if (view.bankrupt || loan.remaining > view.cash - view.reservedCash) {
+                setStatus(rejectReasonText(*content_, sim::RejectReason::InsufficientFunds), true);
+                return;
+            }
             // The balance to the cent, read now rather than from the label.
             session_->submit(sim::RepayLoan{Session::kPlayer, id, loan.remaining});
             setStatus(text(*content_, "status.repayment_ordered",
@@ -934,6 +949,7 @@ void App::onTakeLoan() {
         return;
     }
     session_->submit(sim::TakeLoan{Session::kPlayer, amount});
+    resetLoanInput();  // the field follows the credit that is left
     setStatus(text(*content_, "status.loan_requested", {{"amount", formatMoney(amount)}}));
 }
 
@@ -992,6 +1008,7 @@ void App::onLoad() {
     }
     model_.selected_plot = -1;
     syncPolicyInputs();
+    resetLoanInput();
     if (trace_) {
         const std::string copy = keepSaveCopy("load", bytes);
         trace_->loaded(session_->day(), copy, session_->stateHash());

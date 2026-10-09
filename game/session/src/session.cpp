@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <utility>
@@ -163,6 +164,33 @@ void Session::refreshView() {
     view_ = simulation_.view(kPlayer);
 }
 
+namespace {
+
+// The log entry for a month's automatic sales: the kind and company of the
+// summaries, with totals when there are several. Totals saturate; they are
+// for display and filtering only.
+sim::Notice mergedAutoSale(std::span<const sim::Notice> sales) {
+    sim::Notice merged = sales.front();
+    if (sales.size() == 1) {
+        return merged;
+    }
+    constexpr std::int64_t kMax = std::numeric_limits<std::int64_t>::max();
+    merged.resource = sim::ResourceId();
+    std::int64_t tonnes = 0;
+    std::int64_t cents = 0;
+    for (const sim::Notice& sale : sales) {
+        tonnes =
+            sale.tonnes > kMax - tonnes ? kMax : tonnes + std::max<std::int64_t>(sale.tonnes, 0);
+        const std::int64_t add = std::max<std::int64_t>(sale.amount.cents(), 0);
+        cents = add > kMax - cents ? kMax : cents + add;
+    }
+    merged.tonnes = tonnes;
+    merged.amount = sim::Money::fromCents(cents);
+    return merged;
+}
+
+}  // namespace
+
 bool Session::showsInLog(const sim::Notice& notice, std::span<const sim::PlotId> bidPlots) const {
     using K = sim::NoticeKind;
     switch (notice.kind) {
@@ -187,40 +215,32 @@ bool Session::showsInLog(const sim::Notice& notice, std::span<const sim::PlotId>
 void Session::logNotices(sim::Day day, std::span<const sim::Notice> notices,
                          std::span<const sim::PlotId> bidPlots) {
     // The sim reports one AutoSaleSummary per resource at month end; the log
-    // gets one line for the lot, where the first of them stood.
+    // gets one line for the lot, where the first of them stood, whether or
+    // not the sim reported them next to each other.
     std::vector<sim::Notice> autoSales;
-    const auto flushAutoSales = [&] {
-        if (autoSales.empty()) {
-            return;
+    for (const sim::Notice& notice : notices) {
+        if (notice.kind == sim::NoticeKind::AutoSaleSummary) {
+            autoSales.push_back(notice);
         }
-        sim::Notice merged = autoSales.front();
-        if (autoSales.size() > 1) {
-            merged.resource = sim::ResourceId();
-            merged.tonnes = 0;
-            merged.amount = sim::Money::zero();
-            for (const sim::Notice& sale : autoSales) {
-                merged.tonnes += sale.tonnes;
-                merged.amount += sale.amount;
-            }
-        }
-        appendLogText(day, merged, describeAutoSales(*content_, autoSales));
-        autoSales.clear();
-    };
+    }
+    bool salesLogged = false;
     for (const sim::Notice& notice : notices) {
         if (!showsInLog(notice, bidPlots)) {
             continue;
         }
         if (notice.kind == sim::NoticeKind::AutoSaleSummary) {
-            autoSales.push_back(notice);
+            if (!salesLogged) {
+                appendLogText(day, mergedAutoSale(autoSales),
+                              describeAutoSales(*content_, autoSales));
+                salesLogged = true;
+            }
             continue;
         }
-        flushAutoSales();
         appendLog(day, notice);
         if (!pausedBy_.has_value() && autoPause_.shouldPause(notice, kPlayer)) {
             pausedBy_ = notice;
         }
     }
-    flushAutoSales();
 }
 
 void Session::appendLog(sim::Day day, const sim::Notice& notice) {

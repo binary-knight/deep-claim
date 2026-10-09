@@ -82,10 +82,10 @@ World size and listing pace (spec 005), balance (spec 006), save slots.
     market. The session filters it exactly like a relist.
   - `max_unsold_rounds` 0 means "relist forever". The in-code test fixture
     uses it, so older sim tests keep their meaning; shipped data uses 3.
-  - `MineRunningLow` is said once per survey: in the month the low-end
-    figure first comes within 30 days, or at the survey's first month end
-    if it is already lower. The old rule repeated monthly; on the low end it
-    would have repeated for the whole second half of a mine's life.
+  - `MineRunningLow` is said once per survey. The mine records the survey
+    it has warned about (`Mine::lowWarnedSurvey`, serialized, hashed and
+    validated). The old rule repeated monthly; on the low end it would have
+    repeated for the whole second half of a mine's life.
   - The view also carries `withdrawnPlots`, so the Plots tab can say that
     withdrawn land will return when nothing unlisted remains.
   - `unlockDaysRemaining` counts to the day the ore is mineable, the day
@@ -117,7 +117,8 @@ World size and listing pace (spec 005), balance (spec 006), save slots.
     and Take loan also when all loan slots are in use, each a rejection the
     interface can foresee.
   - The loan field follows the remaining credit until the player types
-    something else.
+    something else (clearing it counts). A new game, a load or a loan taken
+    hands the field back.
   - Log filters classify in the client from the notice kind and company:
     Rivals is another company's purchase, mine start, bankruptcy or unlock;
     Market is listings, relists, withdrawals, ore sales (manual, automatic,
@@ -171,3 +172,31 @@ Files:
 - Client: `ui_model.*`, `app.*`, `main.rml`, `main.rcss`, `layout_probe.cpp`.
 - Prose: `tools/prose/draft.tsv`, `polished.tsv`, `data/strings.json`.
 - Tests beside each.
+- 2026-10-09, Codex review of the diff and this spec.
+  Applied:
+  - Running low could repeat (mothball, reopen, and the low-end figure is
+    back inside the window) and could stay silent (a survey from before the
+    mine opened whose low end was dug out before the first check). The
+    first build inferred "already said" from the figure; the mine now
+    records the survey it warned about. Tests for both cases.
+  - The loan field could overwrite a typed amount once remaining credit
+    happened to equal it. Edits are now tracked instead of compared.
+  - A Repay all click that outlived its button rechecks spendable cash and
+    reports the reason instead of sending an order that would bounce.
+  - The auto-sale collapse no longer depends on the sim reporting the
+    summaries next to each other, and its totals saturate.
+  - Test: monthly batches that straddle the end of the never-listed queue.
+  Declined:
+  - "A withdrawn plot's return is a relist and should be filtered." A
+    return is `PlotListed`: land the player can buy again after a year
+    away, at most one line a month (the listing pace), and late in a game
+    the only land news there is. The filtered kinds stay `PlotRelisted` and
+    `PlotWithdrawn`.
+  - Unicode-aware capitalisation. The catalogue's sentences open with ASCII
+    letters or a placeholder; `capitalised` leaves anything else untouched.
+  - Checked arithmetic on `close day + cooldown` and the client's
+    `day + survey duration`. The loader bounds the cooldown at 100 years of
+    days and saves bound the day (`kMaxDay`) and `relistNotBefore`
+    (`kMaxDeadline`); both sums are far inside 32 bits.
+  - Client tests for the loan field and Repay all. The client has no unit
+    harness, only the layout probe; the two fixes above are untested code.

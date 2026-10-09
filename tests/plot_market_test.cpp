@@ -599,3 +599,49 @@ TEST_CASE("Saves with inconsistent withdrawal state are rejected", "[market][sav
         CHECK(simulation.load(saveOf(broken)) == sameDay);  // cooldowns must not decrease
     }
 }
+
+TEST_CASE("Monthly batches offer never-listed land before returning withdrawn land", "[market]") {
+    sim::Content content = withdrawingContent();
+    content.balance.plotsListedPerMonth = 4;  // batches straddle the end of the queue
+    sim::Simulation simulation(content, 1, test::setup());
+    const std::size_t total = simulation.state().plots.size();
+    std::vector<sim::Day> returnsNotBefore(total, 0);  // set when a plot is withdrawn
+    std::vector<int> timesListed(total, 0);
+    int returned = 0;
+    for (int i = 0; i < 2500; ++i) {
+        const sim::Day processed = simulation.state().day;
+        const std::size_t neverListed =
+            simulation.state().listingQueue.size() - simulation.state().nextListing;
+        const sim::TickReport& report = simulation.tick();
+        std::size_t listedNow = 0;
+        for (const sim::Notice& notice : report.notices) {
+            const std::size_t p = notice.plot.valid() ? notice.plot.index() : 0;
+            if (notice.kind == sim::NoticeKind::PlotWithdrawn) {
+                returnsNotBefore[p] = processed + content.balance.relistCooldownDays;
+            } else if (notice.kind == sim::NoticeKind::PlotListed) {
+                ++listedNow;
+                ++timesListed[p];
+                if (returnsNotBefore[p] != 0) {
+                    ++returned;
+                    // Only once the never-listed plots ran out within this
+                    // batch, and only after its year away.
+                    CHECK(neverListed < content.balance.plotsListedPerMonth);
+                    CHECK(processed >= returnsNotBefore[p]);
+                    returnsNotBefore[p] = 0;
+                }
+            }
+        }
+        CHECK(listedNow <= content.balance.plotsListedPerMonth);
+        if (listedNow > 0) {
+            CHECK(processed % sim::kDaysPerMonth == 0);
+        }
+    }
+    CHECK(returned > 0);
+    CHECK(simulation.state().nextListing == simulation.state().listingQueue.size());
+    // The day-0 listings predate the first report; every other plot was
+    // announced at least once.
+    const auto announced = static_cast<std::size_t>(
+        std::count_if(timesListed.begin(), timesListed.end(), [](int n) { return n > 0; }));
+    CHECK(announced >= total - content.balance.plotsListedAtStart);
+    CHECK(simulation.load(simulation.save()));  // the long-run state passes validation
+}

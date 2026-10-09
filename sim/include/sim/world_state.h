@@ -146,6 +146,10 @@ struct Mine {
     std::vector<std::int64_t> extractedTonnes;   // indexed by ResourceId, lifetime total
     std::vector<std::int64_t> lastDayTonnes;     // what came out on the last processed day
     std::vector<std::int64_t> lastOutputTonnes;  // output on the most recent operating day
+    // The owner's survey that MineRunningLow has already been raised for
+    // (spec 004): the warning is given once per survey, whatever the mine
+    // does afterwards. Invalid until the first warning.
+    SurveyId lowWarnedSurvey;
 };
 
 // One research project. A company runs at most one at a time; the cost is

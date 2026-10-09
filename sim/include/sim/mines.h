@@ -65,12 +65,14 @@ void warnIdleMines(const Content& content, const WorldState& state, TickReport& 
                                                     const Survey& survey,
                                                     const SurveyEstimate& estimate);
 
-// Month end: a MineRunningLow notice (tonnes = days) for an operating mine
-// of a solvent company, given once, in the month the low end of its survey
-// (estimate x (1 - relative error)) first lasts kRunningLowDays or fewer at
-// the current output. The low end is used because a survey that reads high
-// would otherwise never warn (playtest 2). Unsurveyed mines never warn.
+// Month end: a MineRunningLow notice (tonnes = days, floored at zero) for
+// an operating mine of a solvent company when the low end of its latest
+// survey (estimate x (1 - relative error)) lasts kRunningLowDays or fewer
+// at the current output. Given once per survey: the mine remembers which
+// survey it has warned about. The low end is used because a survey that
+// reads high would otherwise never warn (playtest 2). Unsurveyed mines
+// never warn.
 constexpr Day kRunningLowDays = 30;
-void warnRunningLow(const Content& content, const WorldState& state, TickReport& report);
+void warnRunningLow(const Content& content, WorldState& state, TickReport& report);
 
 }  // namespace sim

@@ -384,11 +384,24 @@ bool validateMineShape(const Content& content, const WorldState& state, const Mi
     });
 }
 
+// The survey a mine has warned about is a completed survey of its plot by
+// its owner, or none.
+bool validLowWarning(const WorldState& state, const Mine& mine) {
+    if (!mine.lowWarnedSurvey.valid()) {
+        return true;
+    }
+    if (mine.lowWarnedSurvey.index() >= state.surveys.size()) {
+        return false;
+    }
+    const Survey& survey = state.surveys[mine.lowWarnedSurvey.index()];
+    return survey.complete != 0 && survey.plot == mine.plot && survey.company == mine.owner;
+}
+
 bool validateMines(const Content& content, const WorldState& state) {
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         const Mine& mine = state.mines[i];
         if (!validateMineShape(content, state, mine, MineId(i)) ||
-            !validateMineAccounting(content, state, mine)) {
+            !validateMineAccounting(content, state, mine) || !validLowWarning(state, mine)) {
             return false;
         }
     }
