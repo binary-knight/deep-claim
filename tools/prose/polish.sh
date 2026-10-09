@@ -10,7 +10,7 @@
 set -euo pipefail
 input="${1:?usage: polish.sh draft.txt}"
 voice="$(dirname "$0")/voice.md"
-prompt="You are the writer for Deep Claim, a mining-company management game. Rewrite each line below so it reads as natural human writing in the voice described, not as machine-generated text. Rules: keep every number, unit, currency figure, plot number (#N), resource name and {placeholder} exactly as given; keep each line to one or two sentences; keep the key unchanged; reply with the lines only, one per input line, in the same order, formatted key<TAB>text, nothing else.
+prompt="You are the writer for Deep Claim, a mining-company management game. Do not use any tools, run any command or read any file: everything you need is in this message, and your reply is plain text. Rewrite each line below so it reads as natural human writing in the voice described, not as machine-generated text. Rules: keep every number, unit, currency figure, plot number (#N), resource name and {placeholder} exactly as given; keep each line to one or two sentences; keep the key unchanged; reply with the lines only, one per input line, in the same order, formatted key<TAB>text, nothing else.
 
 VOICE
 $(cat "$voice")
@@ -24,8 +24,8 @@ while IFS=$'\t' read -r key draft; do
   if [ -z "$polished" ]; then
     echo "MISSING $key (kept draft)" >&2; printf '%s\t%s\n' "$key" "$draft"; continue
   fi
-  inv_d="$(printf '%s' "$draft" | grep -oE '\{[a-z_]+\}|#[0-9]+|[0-9][0-9,.]*[kMB%]?' | sort | tr '\n' ' ')"
-  inv_p="$(printf '%s' "$polished" | grep -oE '\{[a-z_]+\}|#[0-9]+|[0-9][0-9,.]*[kMB%]?' | sort | tr '\n' ' ')"
+  inv_d="$(printf '%s' "$draft" | { grep -oE '\{[a-z_]+\}|#[0-9]+|[0-9][0-9,.]*[kMB%]?' || true; } | sort | tr '\n' ' ')"
+  inv_p="$(printf '%s' "$polished" | { grep -oE '\{[a-z_]+\}|#[0-9]+|[0-9][0-9,.]*[kMB%]?' || true; } | sort | tr '\n' ' ')"
   if [ "$inv_d" != "$inv_p" ]; then
     echo "CHANGED $key: numbers or placeholders differ (kept draft)" >&2; printf '%s\t%s\n' "$key" "$draft"; continue
   fi
