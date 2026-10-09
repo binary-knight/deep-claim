@@ -57,6 +57,30 @@ Round 2 outcome:
 - C and D go to the final plate round, head to head on the working
   screens (Plots, Market) at 1:1.
 
+Final: **C "Control Room" is the material world**, with D's title blocks
+borrowed as its mass. D read as handsome but still; C earned it on the
+working screens, where density is a relief at 20x.
+
+### Material voice: Control Room
+
+- *Wants*: a persistent instrument strip; a rail of icons that stays out
+  of the way; state as words in chips (good, warn, danger), never as
+  dots; small sparklines where a trend changes a decision; figures in
+  mono, aligned; title blocks (index, title, 2px rule) on every section
+  so the eye finds the edges; cool blue for action and selection, amber
+  for warnings, red for danger only.
+- *Refuses*: decoration of any kind, pictures, gradients, glass; colour
+  without a meaning; more than one accent on a panel; wrapped figures;
+  anything the player must hover to learn.
+
+## Sprint 2: information hierarchy
+
+Plate locked. Three hierarchies of the dashboard on the C plate, same
+data, same copy: H1 "Decision desk" (what needs you first), H2 "Ledger"
+(the current card layout: company, finance, competitors, world,
+warehouse, log), H3 "Operations board" (assets first: plots and mines
+with output and remaining, prices beside, log last).
+
 ## Tokens, components, states
 
 To be filled when the direction is locked (Sprint 1), then the hierarchy
