@@ -53,6 +53,27 @@ bool validateCompletedTechs(const Content& content, const Company& company) {
     return true;
 }
 
+// Spec 001: one policy and one pair of month-to-date totals per resource,
+// flags 0 or 1, quantities within the persisted bounds.
+bool validateSellPolicies(const Content& content, const Company& company) {
+    const std::size_t resources = content.resources.size();
+    if (company.sellPolicies.size() != resources || company.autoSoldTonnes.size() != resources ||
+        company.autoSoldProceeds.size() != resources || company.coverCosts > 1) {
+        return false;
+    }
+    const bool policiesOk = std::ranges::all_of(company.sellPolicies, [](const SellPolicy& p) {
+        return p.enabled <= 1 && p.reserveTonnes >= 0 && p.reserveTonnes <= kMaxStockTonnes &&
+               p.floorPrice >= Money::zero() && p.floorPrice.cents() <= kMaxCashCents;
+    });
+    const bool tonnesOk = std::ranges::all_of(company.autoSoldTonnes, [](std::int64_t t) {
+        return t >= 0 && t <= kMaxStockTonnes;
+    });
+    const bool proceedsOk = std::ranges::all_of(company.autoSoldProceeds, [](Money m) {
+        return m >= Money::zero() && m.cents() <= kMaxCashCents;
+    });
+    return policiesOk && tonnesOk && proceedsOk;
+}
+
 bool validateCompany(const Content& content, const Company& company) {
     if (company.kind != CompanyKind::Player && company.kind != CompanyKind::Ai) {
         return false;
@@ -76,7 +97,8 @@ bool validateCompany(const Content& content, const Company& company) {
     const bool stocksOk = std::ranges::all_of(company.inventoryTonnes, [](std::int64_t tonnes) {
         return tonnes >= 0 && tonnes <= kMaxStockTonnes;
     });
-    return stocksOk && validateCompletedTechs(content, company);
+    return stocksOk && validateCompletedTechs(content, company) &&
+           validateSellPolicies(content, company);
 }
 
 bool validateCompanies(const Content& content, const WorldState& state) {

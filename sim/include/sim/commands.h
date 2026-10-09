@@ -69,8 +69,25 @@ struct StartResearch {
     TechId tech;
 };
 
+// Standing sell order for one resource (spec 001): every day, when the
+// price is at or above the floor, sell everything above the reserve.
+struct SetSellPolicy {
+    CompanyId company;
+    ResourceId resource;
+    std::uint8_t enabled = 0;
+    std::int64_t reserveTonnes = 0;
+    Money floorPrice;
+};
+
+// Month-end safety rule (spec 001): sell just enough stock to bring cash
+// back to zero after storage and loan charges.
+struct SetCoverCosts {
+    CompanyId company;
+    std::uint8_t enabled = 0;
+};
+
 using Command = std::variant<BidOnPlot, CommissionSurvey, BuildMine, SetMineState, SellOre,
-                             TakeLoan, RepayLoan, StartResearch>;
+                             TakeLoan, RepayLoan, StartResearch, SetSellPolicy, SetCoverCosts>;
 
 [[nodiscard]] CompanyId commandCompany(const Command& command);
 void setCommandCompany(Command& command, CompanyId company);
@@ -133,6 +150,8 @@ enum class NoticeKind : std::uint8_t {
     ResearchComplete,   // private: company, tech
     EventStarted,       // public: event
     EventEnded,         // public: event
+    CoverCostsSale,     // private: company, resource, tonnes, amount = proceeds (month end)
+    AutoSaleSummary,    // private: company, resource, tonnes, amount sold by policy this month
 };
 
 struct Notice {

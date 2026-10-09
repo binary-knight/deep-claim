@@ -28,6 +28,10 @@ Company makeCompany(const Content& content, std::string name, CompanyKind kind) 
     company.kind = kind;
     company.cash = content.balance.startingCapital;
     company.inventoryTonnes.assign(content.resources.size(), 0);
+    company.sellPolicies.assign(content.resources.size(), content.balance.defaultSellPolicy);
+    company.coverCosts = content.balance.defaultCoverCosts ? 1 : 0;
+    company.autoSoldTonnes.assign(content.resources.size(), 0);
+    company.autoSoldProceeds.assign(content.resources.size(), Money::zero());
     return company;
 }
 
@@ -152,6 +156,26 @@ void Simulation::handle(const StartResearch& c) {
     }
 }
 
+void Simulation::handle(const SetSellPolicy& c) {
+    if (const auto reason = validateSetSellPolicy(state_, c)) {
+        Notice notice =
+            makeNotice(NoticeKind::CommandRejected, c.company, PlotId(), c.floorPrice, *reason);
+        notice.resource = c.resource;
+        notice.tonnes = c.reserveTonnes;
+        report_.notices.push_back(notice);
+    } else {
+        applySetSellPolicy(state_, c);
+    }
+}
+
+void Simulation::handle(const SetCoverCosts& c) {
+    if (const auto reason = validateSetCoverCosts(state_, c)) {
+        reject(c.company, PlotId(), Money::zero(), *reason);
+    } else {
+        applySetCoverCosts(state_, c);
+    }
+}
+
 void Simulation::dispatch(const Command& command) {
     std::visit([this](const auto& concrete) { handle(concrete); }, command);
 }
@@ -168,6 +192,7 @@ const TickReport& Simulation::tick() {
     runPlotMarket(*content_, state_, report_);  // 2
     runSurveys(*content_, state_, report_);     // 3
     runMines(*content_, state_, report_);       // 4
+    runSellPolicies(*content_, state_);         // 4b (spec 001)
     runMarkets(*content_, state_);              // 5
     runFinance(*content_, state_, report_);     // 6
     runResearch(state_, report_);               // 7

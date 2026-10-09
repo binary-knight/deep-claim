@@ -49,7 +49,9 @@ content::Sources goodSources() {
       "bankruptcy_grace_months": 3, "market_supply_smoothing_days": 30,
       "market_price_adjust_days": 10, "demand_reversion_rate": 0.01, "demand_mult_min": 0.3,
       "demand_mult_max": 3, "price_floor_mult": 0.1, "price_cap_mult": 10,
-      "demand_growth_per_year": 0.04
+      "demand_growth_per_year": 0.04,
+      "default_sell_policy": {"enabled": true, "reserve_tonnes": 0, "floor_price": 0},
+      "default_cover_costs": true
     })";
     return s;
 }
@@ -221,6 +223,24 @@ TEST_CASE("Effect fields are validated against the effect type", "[content]") {
     CHECK(hasError(result, "techs.json", "[1].effects[0].value", "not allowed"));
     CHECK(hasError(result, "events.json", "[0].effects[1].resource", "not allowed"));
     CHECK(hasError(result, "events.json", "[0].effects[0].type", "unknown event effect type"));
+}
+
+TEST_CASE("Default sell policy keys load and are validated", "[content]") {
+    content::Sources s = goodSources();
+    const auto good = content::loadFromStrings(s);
+    REQUIRE(good.ok());
+    CHECK(good.content->balance.defaultSellPolicy.enabled == 1);
+    CHECK(good.content->balance.defaultSellPolicy.reserveTonnes == 0);
+    CHECK(good.content->balance.defaultSellPolicy.floorPrice == sim::Money::zero());
+    CHECK(good.content->balance.defaultCoverCosts);
+
+    s.balance = replaceOnce(s.balance, R"("default_cover_costs": true)",
+                            R"("default_cover_costs": "yes")");
+    s.balance = replaceOnce(s.balance, R"("reserve_tonnes": 0)", R"("reserve_tonnes": -1)");
+    const auto bad = content::loadFromStrings(s);
+    CHECK_FALSE(bad.ok());
+    CHECK(hasError(bad, "balance.json", "default_cover_costs", "expected true or false"));
+    CHECK(hasError(bad, "balance.json", "default_sell_policy.reserve_tonnes", "must be between"));
 }
 
 TEST_CASE("Large valid money values with cents are accepted", "[content]") {

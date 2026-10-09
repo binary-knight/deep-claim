@@ -333,6 +333,13 @@ std::string describeNotice(const sim::Content& content, const sim::CompanyView& 
         case K::OreSold:
             return std::format("Sold {} of {} for {}", formatTonnes(n.tonnes),
                                resourceName(content, n.resource), formatMoney(n.amount));
+        case K::CoverCostsSale:
+            return std::format("Sold {} of {} for {} to cover this month's costs",
+                               formatTonnes(n.tonnes), resourceName(content, n.resource),
+                               formatMoney(n.amount));
+        case K::AutoSaleSummary:
+            return std::format("Auto-sell this month: {} of {} for {}", formatTonnes(n.tonnes),
+                               resourceName(content, n.resource), formatMoney(n.amount));
         case K::StorageCharged:
             return std::format("Storage charged: {}", formatMoney(n.amount));
         case K::LoanTaken:

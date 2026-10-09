@@ -126,6 +126,10 @@ const char* noticeKindName(NoticeKind kind) {
             return "event_started";
         case NoticeKind::EventEnded:
             return "event_ended";
+        case NoticeKind::CoverCostsSale:
+            return "cover_costs_sale";
+        case NoticeKind::AutoSaleSummary:
+            return "auto_sale_summary";
     }
     return "unknown";
 }
@@ -156,6 +160,8 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::InsolvencyWarning:
         case NoticeKind::ResearchStarted:
         case NoticeKind::ResearchComplete:
+        case NoticeKind::CoverCostsSale:
+        case NoticeKind::AutoSaleSummary:
             return false;
     }
     return false;

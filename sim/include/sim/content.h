@@ -7,6 +7,7 @@
 #include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/money.h"
+#include "sim/sell_policy.h"
 #include "sim/types.h"
 
 #include <cstdint>
@@ -121,6 +122,9 @@ struct BalanceParams {
     Fixed priceFloorMult;  // relative to base price
     Fixed priceCapMult;
     Fixed demandGrowthPerYear;  // compound growth of every resource's base demand
+    // Standing sell orders every company starts with (spec 001).
+    SellPolicy defaultSellPolicy;
+    bool defaultCoverCosts = false;
 };
 
 struct Content {

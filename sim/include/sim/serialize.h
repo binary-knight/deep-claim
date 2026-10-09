@@ -76,9 +76,15 @@ void serialize(Archive& ar, Plot& plot) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, SellPolicy& policy) {
+    ar(policy.enabled, policy.reserveTonnes, policy.floorPrice);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Company& company) {
     ar(company.name, company.kind, company.cash, company.inventoryTonnes, company.completedTechs,
-       company.monthsInsolvent, company.bankrupt);
+       company.monthsInsolvent, company.bankrupt, company.sellPolicies, company.coverCosts,
+       company.autoSoldTonnes, company.autoSoldProceeds);
 }
 
 template <class Archive>
@@ -197,6 +203,17 @@ void serialize(Archive& ar, StartResearch& command) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, SetSellPolicy& command) {
+    ar(command.company, command.resource, command.enabled, command.reserveTonnes,
+       command.floorPrice);
+}
+
+template <class Archive>
+void serialize(Archive& ar, SetCoverCosts& command) {
+    ar(command.company, command.enabled);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Command& command) {
     auto index = static_cast<std::uint8_t>(command.index());
     ar(index);
@@ -225,6 +242,12 @@ void serialize(Archive& ar, Command& command) {
                 break;
             case 7:
                 command = StartResearch{};
+                break;
+            case 8:
+                command = SetSellPolicy{};
+                break;
+            case 9:
+                command = SetCoverCosts{};
                 break;
             default:
                 ar.fail();
@@ -284,7 +307,8 @@ void serialize(Archive& ar, BalanceParams& balance) {
        balance.plotsListedPerMonth, balance.bankruptcyGraceMonths,
        balance.marketSupplySmoothingDays, balance.marketPriceAdjustDays,
        balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
-       balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear);
+       balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear,
+       balance.defaultSellPolicy, balance.defaultCoverCosts);
 }
 
 template <class Archive>

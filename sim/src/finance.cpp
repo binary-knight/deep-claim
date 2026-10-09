@@ -4,6 +4,7 @@
 #include "sim/content.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
+#include "sim/markets.h"
 #include "sim/money.h"
 #include "sim/plot_market.h"
 #include "sim/tech.h"
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace sim {
 
@@ -42,6 +44,74 @@ void chargeStorage(const Content& content, WorldState& state, CompanyId companyI
     Company& company = state.companies[companyId.index()];
     company.cash = debitCash(company.cash, cost);
     report.notices.push_back(makeNotice(NoticeKind::StorageCharged, companyId, PlotId(), cost));
+}
+
+Notice saleNotice(NoticeKind kind, CompanyId company, ResourceId resource, std::int64_t tonnes,
+                  Money amount) {
+    Notice notice = makeNotice(kind, company, PlotId(), amount);
+    notice.resource = resource;
+    notice.tonnes = tonnes;
+    return notice;
+}
+
+// Spec 001: with the flag set and cash below zero after the month's
+// charges, sell just enough stock to reach zero, most valuable stock first.
+void coverCosts(const Content& content, WorldState& state, CompanyId companyId,
+                TickReport& report) {
+    Company& company = state.companies[companyId.index()];
+    if (company.coverCosts == 0) {
+        return;
+    }
+    // Unlocked resources with stock, by stock value descending; ties keep
+    // the lower id first.
+    std::vector<std::uint32_t> order;
+    for (std::uint32_t r = 0; r < state.markets.size(); ++r) {
+        if (company.inventoryTonnes[r] > 0 && resourceUnlocked(content, company, ResourceId(r))) {
+            order.push_back(r);
+        }
+    }
+    const auto value = [&](std::uint32_t r) {
+        return checkedMulDiv(state.markets[r].price.cents(), company.inventoryTonnes[r], 1)
+            .value_or(kMaxCashCents);
+    };
+    std::stable_sort(order.begin(), order.end(),
+                     [&](std::uint32_t a, std::uint32_t b) { return value(a) > value(b); });
+    for (const std::uint32_t r : order) {
+        if (company.cash >= Money::zero()) {
+            break;
+        }
+        const std::int64_t price = state.markets[r].price.cents();
+        if (price <= 0) {
+            continue;
+        }
+        const std::int64_t shortfall = -company.cash.cents();
+        const std::int64_t wanted = (shortfall + price - 1) / price;
+        const std::int64_t tonnes = saleTonnesWithinBounds(state, companyId, ResourceId(r), wanted);
+        if (tonnes <= 0) {
+            continue;
+        }
+        const Money proceeds = executeSale(state, companyId, ResourceId(r), tonnes);
+        company.autoSoldTonnes[r] = std::min(kMaxStockTonnes, company.autoSoldTonnes[r] + tonnes);
+        company.autoSoldProceeds[r] = Money::fromCents(
+            std::min(kMaxCashCents, company.autoSoldProceeds[r].cents() + proceeds.cents()));
+        report.notices.push_back(
+            saleNotice(NoticeKind::CoverCostsSale, companyId, ResourceId(r), tonnes, proceeds));
+    }
+}
+
+// Spec 001: one log line per resource the policies sold this month.
+void summarizeAutoSales(WorldState& state, CompanyId companyId, TickReport& report) {
+    Company& company = state.companies[companyId.index()];
+    for (std::uint32_t r = 0; r < state.markets.size(); ++r) {
+        if (company.autoSoldTonnes[r] == 0 && company.autoSoldProceeds[r] == Money::zero()) {
+            continue;
+        }
+        report.notices.push_back(saleNotice(NoticeKind::AutoSaleSummary, companyId, ResourceId(r),
+                                            company.autoSoldTonnes[r],
+                                            company.autoSoldProceeds[r]));
+        company.autoSoldTonnes[r] = 0;
+        company.autoSoldProceeds[r] = Money::zero();
+    }
 }
 
 void payLoans(const Content& content, WorldState& state, CompanyId companyId, TickReport& report) {
@@ -252,6 +322,8 @@ void runFinance(const Content& content, WorldState& state, TickReport& report) {
         }
         chargeStorage(content, state, companyId, report);
         payLoans(content, state, companyId, report);
+        coverCosts(content, state, companyId, report);
+        summarizeAutoSales(state, companyId, report);
         checkSolvency(content, state, companyId, report);
     }
 }
