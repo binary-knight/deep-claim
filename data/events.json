@@ -1,7 +1,6 @@
 [
   {
     "id": "ev_battery_boom",
-    "name": "EV battery demand surge",
     "daily_weight": 0.0006,
     "min_year": 2,
     "duration_days": 180,
@@ -15,7 +14,6 @@
   },
   {
     "id": "ev_construction_slump",
-    "name": "Construction slump",
     "daily_weight": 0.0006,
     "min_year": 1,
     "duration_days": 240,
@@ -29,7 +27,6 @@
   },
   {
     "id": "ev_fuel_spike",
-    "name": "Fuel price spike",
     "daily_weight": 0.0005,
     "min_year": 1,
     "duration_days": 120,
@@ -42,7 +39,6 @@
   },
   {
     "id": "ev_land_rush",
-    "name": "Land rush",
     "daily_weight": 0.0004,
     "min_year": 3,
     "duration_days": 360,
