@@ -89,6 +89,24 @@ Round 1 outcome:
   needs-you list, then plots and mines with prices beside, then finance,
   then log.
 
+Final: **H4 is the dashboard order**: 01 Needs you (numbered rows: verb
+phrase, sub-line, day count, action button), 02 Plots and mines with
+03 Prices beside it, 04 Finance as one dense row of six stats with
+sub-lines, 05 Recent. Warehouse detail lives on the Market tab. Plots and
+Market keep the Control Room layouts from the bench.
+
+## Sprint 3: phrasing
+
+Folded into the prose catalogue (spec 002): every string on the bench is
+a draft that goes through `tools/prose/polish.sh`; the design does not
+fix wording, it fixes where words sit and how many.
+
+## Sprint 4: spatial calibration
+
+Pending: 4px grid audit, figure baselines, Steam Deck fit of all three
+screens, inverse-scheme survival; output is the token block and the
+component inventory below.
+
 ## Tokens, components, states
 
 To be filled when the direction is locked (Sprint 1), then the hierarchy
