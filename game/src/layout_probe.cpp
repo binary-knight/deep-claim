@@ -86,8 +86,11 @@ int main(int argc, char** argv) {
     StubRender render;
     Rml::SetRenderInterface(&render);
     Rml::Initialise();
-    Rml::LoadFontFace((assets / "fonts" / "DejaVuSans.ttf").string());
-    Rml::LoadFontFace((assets / "fonts" / "DejaVuSans-Bold.ttf").string());
+    for (const char* face : {"Barlow-Regular.ttf", "Barlow-Medium.ttf", "Barlow-SemiBold.ttf",
+                             "BarlowCondensed-SemiBold.ttf", "BarlowCondensed-Bold.ttf",
+                             "JetBrainsMono-Regular.ttf", "JetBrainsMono-Medium.ttf"}) {
+        Rml::LoadFontFace((assets / "fonts" / face).string());
+    }
     game::registerChartElement();
     Rml::Context* context = Rml::CreateContext("main", Rml::Vector2i(1366, 820));
     auto services = platform::makeNullServices(std::filesystem::temp_directory_path(), "Probe");

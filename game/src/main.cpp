@@ -133,8 +133,13 @@ int main(int /*argc*/, char** /*argv*/) {
     Rml::SetRenderInterface(Backend::GetRenderInterface());
     Rml::Initialise();
 
-    Rml::LoadFontFace(utf8String(assetsDir / "fonts" / "DejaVuSans.ttf"));
-    Rml::LoadFontFace(utf8String(assetsDir / "fonts" / "DejaVuSans-Bold.ttf"));
+    // The design's three faces (docs/design/handoff.md): Barlow for text,
+    // Barlow Condensed for display, JetBrains Mono for figures.
+    for (const char* face : {"Barlow-Regular.ttf", "Barlow-Medium.ttf", "Barlow-SemiBold.ttf",
+                             "BarlowCondensed-SemiBold.ttf", "BarlowCondensed-Bold.ttf",
+                             "JetBrainsMono-Regular.ttf", "JetBrainsMono-Medium.ttf"}) {
+        Rml::LoadFontFace(utf8String(assetsDir / "fonts" / face));
+    }
     game::registerChartElement();
 
     Rml::Context* context = Rml::CreateContext("main", Rml::Vector2i(1366, 820));

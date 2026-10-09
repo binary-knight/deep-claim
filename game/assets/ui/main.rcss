@@ -2,7 +2,7 @@
    explicit. Units in dp scale with the window's pixel ratio. */
 
 body {
-    font-family: "DejaVu Sans";
+    font-family: "Barlow";
     font-size: 14dp;
     color: #e6e6e6;
     background-color: #14181f;
