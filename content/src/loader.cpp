@@ -858,10 +858,12 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     // Spec 001: the standing sell order every company starts with.
     if (const std::optional<Node> policy = node.object("default_sell_policy", true)) {
         policy->allowKeys({"enabled", "reserve_tonnes", "floor_price"});
-        balance.defaultSellPolicy.enabled = valueOr(policy->boolean("enabled", true), false) ? 1 : 0;
+        balance.defaultSellPolicy.enabled =
+            valueOr(policy->boolean("enabled", true), false) ? 1 : 0;
         balance.defaultSellPolicy.reserveTonnes =
             valueOr(policy->integer("reserve_tonnes", true, 0, sim::kMaxStockTonnes), 0LL);
-        balance.defaultSellPolicy.floorPrice = valueOr(policy->money("floor_price", true, zero), zero);
+        balance.defaultSellPolicy.floorPrice =
+            valueOr(policy->money("floor_price", true, zero), zero);
     }
     balance.defaultCoverCosts = valueOr(node.boolean("default_cover_costs", true), false);
 }

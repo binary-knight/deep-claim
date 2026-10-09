@@ -92,7 +92,8 @@ TEST_CASE("Every command survives a trip through trace JSON", "[trace]") {
     CHECK_FALSE(game::decodeCommand(R"({"cmd":"BuildMine","plot":4294967296})", decoded));
     CHECK_FALSE(game::decodeCommand(R"({"cmd":"BuildMine","plot":-1})", decoded));
     CHECK_FALSE(game::decodeCommand(R"({"cmd":"SetMineState","mine":1,"operate":1})", decoded));
-    CHECK_FALSE(game::decodeCommand(R"({"cmd":"SetSellPolicy","resource":0,"enabled":1})", decoded));
+    CHECK_FALSE(
+        game::decodeCommand(R"({"cmd":"SetSellPolicy","resource":0,"enabled":1})", decoded));
     CHECK_FALSE(game::decodeCommand(R"({"cmd":"SetCoverCosts"})", decoded));
     CHECK(game::decodeCommand(
         R"({"cmd":"SetSellPolicy","resource":0,"enabled":true,"reserve":5,"floor_cents":100})",

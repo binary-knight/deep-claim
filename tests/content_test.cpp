@@ -234,8 +234,8 @@ TEST_CASE("Default sell policy keys load and are validated", "[content]") {
     CHECK(good.content->balance.defaultSellPolicy.floorPrice == sim::Money::zero());
     CHECK(good.content->balance.defaultCoverCosts);
 
-    s.balance = replaceOnce(s.balance, R"("default_cover_costs": true)",
-                            R"("default_cover_costs": "yes")");
+    s.balance =
+        replaceOnce(s.balance, R"("default_cover_costs": true)", R"("default_cover_costs": "yes")");
     s.balance = replaceOnce(s.balance, R"("reserve_tonnes": 0)", R"("reserve_tonnes": -1)");
     const auto bad = content::loadFromStrings(s);
     CHECK_FALSE(bad.ok());

@@ -65,9 +65,8 @@ bool validateSellPolicies(const Content& content, const Company& company) {
         return p.enabled <= 1 && p.reserveTonnes >= 0 && p.reserveTonnes <= kMaxStockTonnes &&
                p.floorPrice >= Money::zero() && p.floorPrice.cents() <= kMaxCashCents;
     });
-    const bool tonnesOk = std::ranges::all_of(company.autoSoldTonnes, [](std::int64_t t) {
-        return t >= 0 && t <= kMaxStockTonnes;
-    });
+    const bool tonnesOk = std::ranges::all_of(
+        company.autoSoldTonnes, [](std::int64_t t) { return t >= 0 && t <= kMaxStockTonnes; });
     const bool proceedsOk = std::ranges::all_of(company.autoSoldProceeds, [](Money m) {
         return m >= Money::zero() && m.cents() <= kMaxCashCents;
     });

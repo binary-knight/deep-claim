@@ -156,7 +156,8 @@ TEST_CASE("Automatic sales are summarised once a month and the totals reset", "[
     // Month-end processing happens on the tick that starts on day 30.
     simulation.tick(sim::kDaysPerMonth + 1);
     const sim::TickReport& report = simulation.lastReport();
-    const sim::Notice* summary = findNotice(report.notices, sim::NoticeKind::AutoSaleSummary, kIron);
+    const sim::Notice* summary =
+        findNotice(report.notices, sim::NoticeKind::AutoSaleSummary, kIron);
     REQUIRE(summary != nullptr);
     CHECK(summary->tonnes == 300);
     CHECK(summary->amount > sim::Money::zero());
@@ -184,7 +185,8 @@ TEST_CASE("Cover costs sells just enough of the most valuable stock at month end
         simulation.submit(sim::SetCoverCosts{kPlayer, 1});
         const sim::TickReport& report = simulation.tick();
         CHECK(player(simulation).cash >= sim::Money::zero());
-        const sim::Notice* sale = findNotice(report.notices, sim::NoticeKind::CoverCostsSale, kIron);
+        const sim::Notice* sale =
+            findNotice(report.notices, sim::NoticeKind::CoverCostsSale, kIron);
         REQUIRE(sale != nullptr);
         CHECK(sale->tonnes > 0);
         CHECK(sale->tonnes < 100'000);  // just enough, not everything

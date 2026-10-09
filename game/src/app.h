@@ -75,6 +75,10 @@ private:
     void onBuild(int plotIndex);
     void onToggleMine(int mineIndex);
     void onSell(int resourceIndex, bool all);
+    // Standing sell policies (spec 001).
+    void syncPolicyInputs();
+    void onApplyPolicy(bool enabled);
+    void onToggleCoverCosts();
     void onTakeLoan();
     void onRepay(int loanIndex);
     void onResearch(int techIndex);

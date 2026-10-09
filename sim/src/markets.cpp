@@ -114,8 +114,7 @@ std::optional<RejectReason> validatePolicyCompany(const WorldState& state, Compa
     return std::nullopt;
 }
 
-void recordAutoSale(Company& company, std::uint32_t resource, std::int64_t tonnes,
-                    Money proceeds) {
+void recordAutoSale(Company& company, std::uint32_t resource, std::int64_t tonnes, Money proceeds) {
     company.autoSoldTonnes[resource] =
         std::min(kMaxStockTonnes, company.autoSoldTonnes[resource] + tonnes);
     company.autoSoldProceeds[resource] = Money::fromCents(
