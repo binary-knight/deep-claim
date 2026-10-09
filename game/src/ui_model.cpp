@@ -98,7 +98,7 @@ std::string plotStatus(const sim::CompanyView& view, const sim::PlotView& plot) 
     return "Not listed";
 }
 
-std::string auctionText(const sim::PlotView& plot) {
+std::string auctionText(const sim::Content& content, const sim::PlotView& plot) {
     if (!plot.auction) {
         return "";
     }
@@ -209,7 +209,7 @@ PlotRow makePlotRow(const sim::Content& content, const sim::CompanyView& view,
     row.owned = plot.owner == Session::kPlayer;
     row.status = plotStatus(view, plot);
     row.ask = row.listed ? formatMoney(plot.askPrice) : "";
-    row.auction = row.listed ? auctionText(plot) : "";
+    row.auction = row.listed ? auctionText(content, plot) : "";
     row.survey = surveyText(content, view, plot);
     row.mine = mineText(content, view, plot, row.owned);
     row.mine_here = plot.mine.has_value();
@@ -266,11 +266,16 @@ void fillResources(const Session& session, UiModel& model) {
         const sim::SellPolicy& policy = view.sellPolicies[r];
         const bool keep = policy.reserveTonnes > 0;
         const bool floor = policy.floorPrice > sim::Money::zero();
-        const char* policyKey = policy.enabled == 0 ? "ui.policy_manual"
-                                : keep && floor     ? "ui.policy_auto_keep_floor"
-                                : keep              ? "ui.policy_auto_keep"
-                                : floor             ? "ui.policy_auto_floor"
-                                                    : "ui.policy_auto";
+        const char* policyKey = "ui.policy_auto";
+        if (policy.enabled == 0) {
+            policyKey = "ui.policy_manual";
+        } else if (keep && floor) {
+            policyKey = "ui.policy_auto_keep_floor";
+        } else if (keep) {
+            policyKey = "ui.policy_auto_keep";
+        } else if (floor) {
+            policyKey = "ui.policy_auto_floor";
+        }
         row.policy = game::text(content, policyKey,
                                 {{"reserve", formatTonnes(policy.reserveTonnes)},
                                  {"price", formatMoney(policy.floorPrice)}});
