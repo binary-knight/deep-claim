@@ -27,7 +27,7 @@ TEST_CASE("Shipped data files load cleanly", "[content][data]") {
     for (const sim::RegionDef& region : c.regions) {
         plots += region.plotCount;
     }
-    CHECK(plots == 90);  // spec 005: 30 per region
+    CHECK(plots == 120);  // spec 005: 40 per region
 
     CHECK(c.findResource("lithium").valid());
     CHECK(c.resources[c.findResource("lithium").index()].unlockedBy ==
@@ -39,7 +39,7 @@ TEST_CASE("A world generates from the shipped data", "[content][data][worldgen]"
     REQUIRE(result.ok());
     const sim::Simulation simulation(*result.content, 1, test::setup());
     const sim::WorldState& state = simulation.state();
-    CHECK(state.plots.size() == 90);
+    CHECK(state.plots.size() == 120);
     std::size_t depositsTotal = 0;
     for (const sim::PlotDeposits& deposits : state.hidden.plotDeposits) {
         depositsTotal += deposits.deposits.size();
@@ -48,8 +48,8 @@ TEST_CASE("A world generates from the shipped data", "[content][data][worldgen]"
         }
     }
     // Priors sum to roughly 1 deposit per plot (1.1, 1.3 and 0.7 by region).
-    CHECK(depositsTotal > 60);
-    CHECK(depositsTotal < 130);
+    CHECK(depositsTotal > 85);
+    CHECK(depositsTotal < 165);
 }
 
 TEST_CASE("Shipped regions give every seed a fair opening hand", "[content][data][worldgen]") {
