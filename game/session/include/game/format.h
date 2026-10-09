@@ -43,7 +43,7 @@ std::string formatRatio(sim::Fixed ratio);
 // Locale-free, never throws.
 using TextArg = std::pair<std::string_view, std::string>;
 using TextArgs = std::initializer_list<TextArg>;
-[[nodiscard]] std::string fill(std::string_view text, TextArgs args);
+[[nodiscard]] std::string fill(std::string_view tmpl, TextArgs args);
 // The template for `key`, or "[key]" when the catalogue lacks it (the
 // loader rejects data without the required keys, so this only shows for
 // in-code test content).

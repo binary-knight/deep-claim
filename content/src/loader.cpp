@@ -1050,17 +1050,14 @@ bool allowsPlaceholder(std::string_view allowed, std::string_view name) {
     return false;
 }
 
-// Reads the flat key -> template object, checks it against the key table,
-// and fills in event and tech names and descriptions. Runs after techs and
-// events are parsed because their ids define the per-id keys.
-void parseStrings(const json& document, sim::Content& content, ErrorSink& sink) {
-    if (!document.is_object()) {
-        sink.add("", "expected a top-level object, got " + std::string(typeName(document)));
-        return;
-    }
-    // Every expected key with its allowed placeholders.
-    std::vector<std::pair<std::string, std::string_view>> expected;
-    expected.reserve(kStringKeys.size() + 2 * (content.events.size() + content.techs.size()));
+using ExpectedKey = std::pair<std::string, std::string_view>;  // key, allowed placeholders
+
+// Every key the catalogue must contain: the fixed table, the per-id event
+// and tech keys, and one reject key per RejectReason. Each NoticeKind must
+// have a base entry in the fixed table, so a new kind without prose fails.
+std::vector<ExpectedKey> expectedStringKeys(const sim::Content& content, ErrorSink& sink) {
+    std::vector<ExpectedKey> expected;
+    expected.reserve(kStringKeys.size() + 2 * (content.events.size() + content.techs.size()) + 32);
     for (const StringKeySpec& spec : kStringKeys) {
         expected.emplace_back(std::string(spec.key), spec.placeholders);
     }
@@ -1072,8 +1069,7 @@ void parseStrings(const json& document, sim::Content& content, ErrorSink& sink) 
         expected.emplace_back("tech." + tech.id + ".name", "");
         expected.emplace_back("tech." + tech.id + ".description", "");
     }
-    // The sim's own kind and reason names must each have a base key, so a
-    // new NoticeKind or RejectReason without prose fails here.
+    // The enums have no count; their name tables answer "unknown" past the end.
     for (int i = 0; i < 256; ++i) {
         const std::string_view name = sim::noticeKindName(static_cast<sim::NoticeKind>(i));
         if (name == "unknown") {
@@ -1081,7 +1077,7 @@ void parseStrings(const json& document, sim::Content& content, ErrorSink& sink) 
         }
         const std::string key = "notice." + std::string(name);
         if (std::none_of(expected.begin(), expected.end(),
-                         [&](const auto& entry) { return entry.first == key; })) {
+                         [&](const ExpectedKey& entry) { return entry.first == key; })) {
             sink.add(key, "no entry in the key table for this notice kind");
         }
     }
@@ -1092,37 +1088,55 @@ void parseStrings(const json& document, sim::Content& content, ErrorSink& sink) 
         }
         expected.emplace_back("reject." + std::string(name), "");
     }
+    return expected;
+}
 
-    for (const auto& [key, placeholders] : expected) {
-        const auto it = document.find(key);
-        if (it == document.end()) {
-            sink.add(key, "missing");
-            continue;
+// Validates one catalogue entry and stores it when it is usable.
+void readStringEntry(const json& document, const ExpectedKey& expected, sim::Content& content,
+                     ErrorSink& sink) {
+    const auto& [key, placeholders] = expected;
+    const auto it = document.find(key);
+    if (it == document.end()) {
+        sink.add(key, "missing");
+        return;
+    }
+    if (!it->is_string()) {
+        sink.add(key, "expected a string, got " + std::string(typeName(*it)));
+        return;
+    }
+    const auto text = it->get<std::string>();
+    if (text.empty()) {
+        sink.add(key, "must not be empty");
+        return;
+    }
+    const auto used = templatePlaceholders(text);
+    if (!used) {
+        sink.add(key, "malformed placeholder braces");
+        return;
+    }
+    for (const std::string& name : *used) {
+        if (!allowsPlaceholder(placeholders, name)) {
+            sink.add(key, "placeholder {" + name + "} is not available for this key");
         }
-        if (!it->is_string()) {
-            sink.add(key, "expected a string, got " + std::string(typeName(*it)));
-            continue;
-        }
-        const auto text = it->get<std::string>();
-        if (text.empty()) {
-            sink.add(key, "must not be empty");
-            continue;
-        }
-        const auto used = templatePlaceholders(text);
-        if (!used) {
-            sink.add(key, "malformed placeholder braces");
-            continue;
-        }
-        for (const std::string& name : *used) {
-            if (!allowsPlaceholder(placeholders, name)) {
-                sink.add(key, "placeholder {" + name + "} is not available for this key");
-            }
-        }
-        content.strings[key] = text;
+    }
+    content.strings[key] = text;
+}
+
+// Reads the flat key -> template object, checks it against the key table,
+// and fills in event and tech names and descriptions. Runs after techs and
+// events are parsed because their ids define the per-id keys.
+void parseStrings(const json& document, sim::Content& content, ErrorSink& sink) {
+    if (!document.is_object()) {
+        sink.add("", "expected a top-level object, got " + std::string(typeName(document)));
+        return;
+    }
+    const std::vector<ExpectedKey> expected = expectedStringKeys(content, sink);
+    for (const ExpectedKey& entry : expected) {
+        readStringEntry(document, entry, content, sink);
     }
     for (const auto& item : document.items()) {
         if (std::none_of(expected.begin(), expected.end(),
-                         [&](const auto& entry) { return entry.first == item.key(); })) {
+                         [&](const ExpectedKey& entry) { return entry.first == item.key(); })) {
             sink.add(item.key(), "unknown key");
         }
     }
