@@ -41,4 +41,14 @@ void applySetMineState(WorldState& state, const SetMineState& command, TickRepor
 // Finishes construction, extracts, charges opex, marks depletion.
 void runMines(const Content& content, WorldState& state, TickReport& report);
 
+// True when the plot under `mine` still holds ore its owner can extract
+// today: a remaining deposit of an unlocked resource.
+[[nodiscard]] bool mineHasExtractable(const Content& content, const WorldState& state,
+                                      const Mine& mine);
+
+// Month end: an IdleMineWarning for every operating mine of a solvent
+// company that has nothing extractable (empty, or only locked ore). The
+// mine keeps paying full opex; the warning is the player's cue to mothball.
+void warnIdleMines(const Content& content, const WorldState& state, TickReport& report);
+
 }  // namespace sim

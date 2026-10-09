@@ -90,6 +90,18 @@ void addOwnMines(const Content& content, const WorldState& state, CompanyId view
         mineView.extractedTonnes = mine.extractedTonnes;
         mineView.lastDayTonnes = mine.lastDayTonnes;
         mineView.lastOutputTonnes = mine.lastOutputTonnes;
+        mineView.bestEstimateTonnes.assign(content.resources.size(), 0);
+        // Surveys are appended in commission order, so the last complete own
+        // survey of this plot is the most recent one.
+        for (const Survey& survey : state.surveys) {
+            if (survey.company != viewer || survey.plot != mine.plot || survey.complete == 0) {
+                continue;
+            }
+            std::fill(mineView.bestEstimateTonnes.begin(), mineView.bestEstimateTonnes.end(), 0);
+            for (const SurveyEstimate& estimate : survey.estimates) {
+                mineView.bestEstimateTonnes[estimate.resource.index()] = estimate.tonnesEstimate;
+            }
+        }
         mineView.dailyOpex = mineDailyOpex(content, state, self, mine.state);
         view.mines.push_back(mineView);
     }

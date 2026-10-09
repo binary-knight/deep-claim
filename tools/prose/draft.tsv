@@ -180,3 +180,5 @@ tech.bulk_logistics.name	Bulk Logistics
 tech.bulk_logistics.description	Rail sidings and covered stockpiles cut storage costs by 40%.
 tech.lithium_processing.name	Lithium Processing
 tech.lithium_processing.description	A concentrator plant makes lithium ore saleable; without it lithium cannot be mined or sold.
+notice.idle_mine_warning	The mine on {plot} ran all month with nothing it can extract. It still costs full opex; mothball it or research what it needs.
+notice.mine_found_nothing	No ore the crew can work on {plot}. The mine stands idle.

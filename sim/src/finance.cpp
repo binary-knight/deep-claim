@@ -5,6 +5,7 @@
 #include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/markets.h"
+#include "sim/mines.h"
 #include "sim/money.h"
 #include "sim/plot_market.h"
 #include "sim/tech.h"
@@ -324,6 +325,7 @@ void runFinance(const Content& content, WorldState& state, TickReport& report) {
         summarizeAutoSales(state, companyId, report);
         checkSolvency(content, state, companyId, report);
     }
+    warnIdleMines(content, state, report);
 }
 
 }  // namespace sim

@@ -152,6 +152,8 @@ enum class NoticeKind : std::uint8_t {
     EventEnded,         // public: event
     CoverCostsSale,     // private: company, resource, tonnes, amount = proceeds (month end)
     AutoSaleSummary,    // private: company, resource, tonnes, amount sold by policy this month
+    IdleMineWarning,    // private: company, plot, mine (month end; operating, nothing extractable)
+    MineFoundNothing,   // private: company, plot, mine (opened on a plot with nothing extractable)
 };
 
 struct Notice {

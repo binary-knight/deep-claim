@@ -152,6 +152,28 @@ void applySetMineState(WorldState& state, const SetMineState& command, TickRepor
     report.notices.push_back(mineNotice(NoticeKind::MineSwitched, mine, command.mine));
 }
 
+bool mineHasExtractable(const Content& content, const WorldState& state, const Mine& mine) {
+    const Company& owner = state.companies[mine.owner.index()];
+    for (const DepositTruth& truth : state.hidden.plotDeposits[mine.plot.index()].deposits) {
+        if (truth.tonnesRemaining > 0 && resourceUnlocked(content, owner, truth.resource)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void warnIdleMines(const Content& content, const WorldState& state, TickReport& report) {
+    for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
+        const Mine& mine = state.mines[i];
+        if (mine.state != MineState::Operating ||
+            state.companies[mine.owner.index()].bankrupt != 0 ||
+            mineHasExtractable(content, state, mine)) {
+            continue;
+        }
+        report.notices.push_back(mineNotice(NoticeKind::IdleMineWarning, mine, MineId(i)));
+    }
+}
+
 void runMines(const Content& content, WorldState& state, TickReport& report) {
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         Mine& mine = state.mines[i];
@@ -162,10 +184,17 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
         if (mine.state == MineState::Closed || mine.state == MineState::Depleted) {
             continue;
         }
+        // A mine that opens on a plot with nothing it can extract (no deposit,
+        // or only locked ore) says so once instead of "operational" followed
+        // by "depleted" on the same day.
+        bool foundNothing = false;
         if (mine.state == MineState::Building) {
             if (mine.operationalDay <= state.day) {
                 mine.state = MineState::Operating;
-                report.notices.push_back(mineNotice(NoticeKind::MineOperational, mine, id));
+                foundNothing = !mineHasExtractable(content, state, mine);
+                report.notices.push_back(mineNotice(
+                    foundNothing ? NoticeKind::MineFoundNothing : NoticeKind::MineOperational, mine,
+                    id));
             } else {
                 continue;
             }
@@ -194,7 +223,9 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
                 debitCash(owner.cash, mineDailyOpex(content, state, owner, MineState::Operating));
             if (!anythingLeft) {
                 mine.state = MineState::Depleted;
-                report.notices.push_back(mineNotice(NoticeKind::MineDepleted, mine, id));
+                if (!foundNothing) {
+                    report.notices.push_back(mineNotice(NoticeKind::MineDepleted, mine, id));
+                }
             }
             continue;
         }

@@ -296,3 +296,95 @@ TEST_CASE("Mine accounting is conserved across the lifetime of a deposit", "[min
     broken.mines[0].state = sim::MineState::Mothballed;  // nothing left to mothball
     CHECK_FALSE(sim::validateWorld(content, broken));
 }
+
+namespace {
+
+// Removes every deposit from a plot through a save edit.
+void clearDeposits(sim::Simulation& simulation, const sim::Content& content, sim::PlotId plot) {
+    sim::WorldState edited = simulation.state();
+    edited.hidden.plotDeposits[plot.index()].deposits.clear();
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+}
+
+// Ticks until the next month boundary has been processed and returns that
+// tick's report.
+const sim::TickReport& tickToMonthEnd(sim::Simulation& simulation) {
+    while (simulation.state().day % sim::kDaysPerMonth != 0) {
+        simulation.tick();
+    }
+    return simulation.tick();  // processes the month-end day itself
+}
+
+}  // namespace
+
+TEST_CASE("A mine opened on an empty plot says it found nothing and is depleted", "[mines]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(50'000'000));
+    clearDeposits(simulation, content, plot);
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    simulation.tick(content.balance.mineBuildDays);
+    const sim::TickReport& opened = simulation.tick();
+    CHECK(hasNotice(opened.notices, sim::NoticeKind::MineFoundNothing));
+    CHECK_FALSE(hasNotice(opened.notices, sim::NoticeKind::MineOperational));
+    CHECK_FALSE(hasNotice(opened.notices, sim::NoticeKind::MineDepleted));
+    CHECK(simulation.state().mines[0].state == sim::MineState::Depleted);
+}
+
+TEST_CASE("A mine with only locked ore found nothing and warns at every month end", "[mines]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(50'000'000));
+    const sim::ResourceId lithium(2);  // unlocked by tech 1 in the fixture
+    setDeposit(simulation, content, plot, lithium, 5'000);
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    simulation.tick(content.balance.mineBuildDays);
+    const sim::TickReport& opened = simulation.tick();
+    CHECK(hasNotice(opened.notices, sim::NoticeKind::MineFoundNothing));
+    CHECK_FALSE(hasNotice(opened.notices, sim::NoticeKind::MineOperational));
+    CHECK(simulation.state().mines[0].state == sim::MineState::Operating);  // locked ore remains
+
+    const sim::TickReport& monthEnd = tickToMonthEnd(simulation);
+    CHECK(hasNotice(monthEnd.notices, sim::NoticeKind::IdleMineWarning));
+    // A day that is not a month end does not warn.
+    CHECK_FALSE(hasNotice(simulation.tick().notices, sim::NoticeKind::IdleMineWarning));
+
+    // Mothballing stops the warning; unlocking the ore makes it extractable.
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 0});
+    simulation.tick();
+    CHECK_FALSE(hasNotice(tickToMonthEnd(simulation).notices, sim::NoticeKind::IdleMineWarning));
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 1});
+    simulation.tick();
+    sim::WorldState edited = simulation.state();
+    edited.companies[0].completedTechs.push_back(sim::TechId(0));
+    edited.companies[0].completedTechs.push_back(sim::TechId(1));
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+    CHECK_FALSE(hasNotice(tickToMonthEnd(simulation).notices, sim::NoticeKind::IdleMineWarning));
+    CHECK(simulation.state().mines[0].extractedTonnes[lithium.index()] > 0);
+}
+
+TEST_CASE("The mine view carries the owner's latest survey estimate", "[mines][view]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(50'000'000));
+    setDeposit(simulation, content, plot, sim::ResourceId(0), 100'000);
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    simulation.tick();
+    REQUIRE(simulation.view(kPlayer).mines.size() == 1);
+    CHECK(simulation.view(kPlayer).mines[0].bestEstimateTonnes ==
+          std::vector<std::int64_t>(content.resources.size(), 0));  // never surveyed
+
+    simulation.submit(sim::CommissionSurvey{kPlayer, plot});
+    simulation.tick(content.balance.surveyDurationDays + 1);
+    const sim::CompanyView view = simulation.view(kPlayer);
+    REQUIRE(view.surveys.size() == 1);
+    REQUIRE(view.surveys[0].complete);
+    REQUIRE(view.surveys[0].estimates.size() == 1);
+    CHECK(view.mines[0].bestEstimateTonnes[0] == view.surveys[0].estimates[0].tonnesEstimate);
+    CHECK(view.mines[0].bestEstimateTonnes[0] > 0);
+    // The rival's view of the same plot carries no estimate.
+    CHECK(simulation.view(kRival).mines.empty());
+}
