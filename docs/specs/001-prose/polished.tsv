@@ -1,0 +1,15 @@
+notice.cover_costs_sale	Sold {tonnes} of {resource} for {amount} to balance the ledger this month.
+notice.auto_sale_summary	Automatic sales moved {tonnes} of {resource} this month for {amount}.
+ui.policy_summary_on	Daily auto-sell is active for {resource}. Everything above {reserve} sells whenever the price hits {price}/t or more.
+ui.policy_summary_off	Auto-sell is off. {resource} is sold by hand only.
+ui.cover_on	On: at each month end, just enough ore is sold to cover storage and loan payments, keeping cash at zero or above.
+ui.cover_off	Off: ending the month with cash below zero counts toward bankruptcy, even if the warehouse is full.
+ui.storage_warning	Storage is running {amount} a month, eating a large share of your cash. Sell ore or set an auto-sell policy on the Market tab.
+ui.auto_sold	Sold {tonnes} this month for {amount}.
+status.reserve_prompt	Set the reserve in tonnes to keep on the pile, such as 0 or 2,500.
+status.floor_prompt	Set the floor price per tonne to accept, such as 0 or 850.
+status.policy_applies	Auto-sell for {resource} starts tomorrow.
+status.policy_stops	Auto-sell for {resource} shuts off tomorrow.
+status.cover_on	Cover costs at month end turns on tomorrow.
+status.cover_off	Cover costs at month end turns off tomorrow.
+ui.policy_hint	Zero in either field means no limit. Automatic sales are tallied in the ledger once a month.

@@ -551,11 +551,11 @@ void App::onApplyPolicy(bool enabled) {
     std::int64_t reserve = 0;
     sim::Money floor;
     if (!game::parseTonnes(model_.policy_reserve_input, reserve)) {
-        setStatus("Enter the reserve in tonnes, such as 0 or 2,500.");
+        setStatus("Set the reserve in tonnes to keep on the pile, such as 0 or 2,500.");
         return;
     }
     if (!game::parseMoney(model_.policy_floor_input, floor)) {
-        setStatus("Enter the floor price per tonne, such as 0 or 850.");
+        setStatus("Set the floor price per tonne to accept, such as 0 or 850.");
         return;
     }
     sim::SetSellPolicy command;
@@ -566,16 +566,16 @@ void App::onApplyPolicy(bool enabled) {
     command.floorPrice = floor;
     session_->submit(command);
     const std::string& name = content_->resources[static_cast<std::size_t>(index)].name;
-    setStatus(enabled ? "Auto-sell for " + name + " applies from tomorrow."
-                      : "Auto-sell for " + name + " stops tomorrow.");
+    setStatus(enabled ? "Auto-sell for " + name + " starts tomorrow."
+                      : "Auto-sell for " + name + " shuts off tomorrow.");
 }
 
 void App::onToggleCoverCosts() {
     const bool enable = !session_->view().coverCosts;
     session_->submit(
         sim::SetCoverCosts{Session::kPlayer, enable ? std::uint8_t{1} : std::uint8_t{0}});
-    setStatus(enable ? "Cover costs at month end: on from tomorrow."
-                     : "Cover costs at month end: off from tomorrow.");
+    setStatus(enable ? "Cover costs at month end turns on tomorrow."
+                     : "Cover costs at month end turns off tomorrow.");
 }
 
 void App::onSurvey(int plotIndex) {

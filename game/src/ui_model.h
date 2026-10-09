@@ -51,7 +51,7 @@ struct ResourceRow {
     std::string stock;   // player's tonnes
     std::string stock_value;
     std::string policy;     // "Auto-sell: everything", "Auto-sell: keep 500 t", "Manual"
-    std::string auto_sold;  // "sold this month: 1,850 t for $1.6M" or ""
+    std::string auto_sold;  // "Sold 1,850 t this month for $1.6M." or ""
     bool has_stock = false;
     bool selected = false;
 };

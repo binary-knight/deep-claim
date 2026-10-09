@@ -179,3 +179,7 @@ convenience should be on unless the player chooses to speculate.
   the day's supply counter, so it does not register as supply (Codex
   review finding: counting it left a state that failed save validation).
   Month-end sales are rare and small, so the price effect is negligible.
+- 2026-10-09: all new player-facing strings went through the agy polish
+  pass (`tools/prose/polish.sh`); the draft and polished files are in
+  `docs/specs/001-prose/`. Every number and placeholder survived; the
+  polished text is what ships.

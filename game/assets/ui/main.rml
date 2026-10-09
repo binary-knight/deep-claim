@@ -150,7 +150,7 @@
                         <button class="small" data-if="policy_enabled" data-event-click="toggle_policy">Turn off</button>
                         <button class="small" data-if="!policy_enabled" data-event-click="toggle_policy">Turn on</button>
                     </div>
-                    <p class="muted">Zero for either field means no limit. Automatic sales are summarised in the log once a month.</p>
+                    <p class="muted">Zero in either field means no limit. Automatic sales are tallied in the ledger once a month.</p>
                 </div>
                 <h2>{{selected_resource_title}}</h2>
                 <price-chart data-attr-resource="selected_resource"/>

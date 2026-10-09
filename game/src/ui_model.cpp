@@ -261,7 +261,7 @@ void fillResources(const Session& session, UiModel& model) {
         }
         if (view.autoSoldTonnes[r] > 0) {
             row.auto_sold =
-                std::format("sold this month: {} for {}", formatTonnes(view.autoSoldTonnes[r]),
+                std::format("Sold {} this month for {}.", formatTonnes(view.autoSoldTonnes[r]),
                             formatMoney(view.autoSoldProceeds[r]));
         }
         model.resources.push_back(row);
@@ -274,18 +274,18 @@ void fillResources(const Session& session, UiModel& model) {
         model.policy_summary =
             policy.enabled != 0
                 ? std::format(
-                      "{} sells automatically every day: everything above {} when the "
-                      "price is {}/t or more.",
+                      "Daily auto-sell is active for {}. Everything above {} sells whenever "
+                      "the price hits {}/t or more.",
                       content.resources[r].name, formatTonnes(policy.reserveTonnes),
                       formatMoney(policy.floorPrice))
-                : content.resources[r].name + " is sold by hand only.";
+                : "Auto-sell is off. " + content.resources[r].name + " is sold by hand only.";
     }
     model.cover_costs = view.coverCosts;
     model.cover_costs_label =
-        view.coverCosts ? "On: at each month end, just enough ore is sold to keep cash at zero "
-                          "or above after storage and loan payments."
-                        : "Off: a month end that leaves cash below zero counts toward "
-                          "bankruptcy even if the warehouse is full.";
+        view.coverCosts ? "On: at each month end, just enough ore is sold to cover storage and "
+                          "loan payments, keeping cash at zero or above."
+                        : "Off: ending the month with cash below zero counts toward bankruptcy, "
+                          "even if the warehouse is full.";
     if (model.selected_resource >= 0 &&
         model.selected_resource < static_cast<int>(content.resources.size())) {
         model.selected_resource_title =
@@ -363,7 +363,7 @@ void fillFinance(const Session& session, UiModel& model) {
         (view.cash <= sim::Money::zero() ||
          view.monthlyStorageCost.cents() > view.cash.cents() / 10)) {
         model.storage_warning = std::format(
-            "Storage is costing {} a month, a large share of your cash. Sell ore "
+            "Storage is running {} a month, eating a large share of your cash. Sell ore "
             "or set an auto-sell policy on the Market tab.",
             formatMoney(view.monthlyStorageCost));
     }
