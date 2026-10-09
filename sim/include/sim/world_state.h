@@ -29,6 +29,11 @@ struct Plot {
     CompanyId owner;    // valid only when Sold
     AuctionId auction;  // valid only while Listed
     MineId mine;        // valid once a mine has been built here
+    // Auctions in a row that closed without a sale since the plot was last
+    // put up; at balance.maxUnsoldRounds the plot is withdrawn (spec 004).
+    std::uint32_t unsoldCount = 0;
+    // Set while withdrawn: the first day the plot may be listed again.
+    Day relistNotBefore = 0;
 };
 
 // True deposit of one resource on one plot. Hidden from every company;
@@ -141,6 +146,10 @@ struct Mine {
     std::vector<std::int64_t> extractedTonnes;   // indexed by ResourceId, lifetime total
     std::vector<std::int64_t> lastDayTonnes;     // what came out on the last processed day
     std::vector<std::int64_t> lastOutputTonnes;  // output on the most recent operating day
+    // The owner's survey that MineRunningLow has already been raised for
+    // (spec 004): the warning is given once per survey, whatever the mine
+    // does afterwards. Invalid until the first warning.
+    SurveyId lowWarnedSurvey;
 };
 
 // One research project. A company runs at most one at a time; the cost is
@@ -179,7 +188,10 @@ struct WorldState {
     std::vector<ActiveEvent> events;
     std::vector<PlotId> listingQueue;  // shuffled at generation; listed in order
     std::uint32_t nextListing = 0;     // index into listingQueue
-    std::uint32_t bidCounter = 0;      // monotonic order stamp for tie-breaks
+    // Plots withdrawn after going unsold, oldest first. They return to sale
+    // behind the never-listed plots, once their cooldown has passed.
+    std::vector<PlotId> withdrawnQueue;
+    std::uint32_t bidCounter = 0;  // monotonic order stamp for tie-breaks
     HiddenState hidden;
 };
 

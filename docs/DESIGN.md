@@ -678,3 +678,83 @@ architectural summary.
   instead), CSS ellipsis for the company name (truncated in code), SVG
   icons through the RmlUi SVG plugin (adds lunasvg; a TGA sprite sheet is
   enough for six icons).
+
+## Playtest 2 fixes (spec 004)
+
+Sim:
+- **Unsold land is withdrawn.** A plot counts its unsold rounds
+  (`Plot::unsoldCount`). At `balance.max_unsold_rounds` (3) it leaves the
+  market instead of relisting: listing Unlisted, `relistNotBefore` = close
+  day + `balance.relist_cooldown_days` (360), appended to
+  `WorldState::withdrawnQueue`, public `PlotWithdrawn` notice. The monthly
+  lister offers never-listed plots first; when none remain it takes the
+  front of the withdrawn queue once its cooldown has passed. Only the front
+  is checked: cooldowns end in withdrawal order. A returning plot keeps the
+  reduced ask it left with and starts a fresh count. `listingQueue` stays a
+  permutation of all plots, so "behind never-listed plots" is structural
+  rather than a sort. `max_unsold_rounds` 0 keeps the old relist-forever
+  rule; the in-code test fixture uses it.
+- **The golden determinism hash moved once**, 0x0fc2e895ca56a363 to
+  0x28adea3aad5623a7: plot state grew by two fields, world state by the
+  withdrawn queue and balance by two parameters, all of which are hashed.
+  No rule that the fixture exercises changed. (`Mine::lowWarnedSurvey` is
+  hashed too; the golden game has no mines, so it did not move the value.)
+- **Rival unlocks are news.** `runResearch` emits the public
+  `RivalUnlockedResource` (company, tech, resource) once per resource a
+  completed tech unlocks. The owner still gets its private
+  `ResearchComplete`; the session drops the player's own unlock line.
+- **Running low uses the low end.** The month-end check works on
+  estimate x (1 - relative error), minus extraction since the survey, and
+  warns when that lasts 30 days or fewer (the notice's day count is floored
+  at zero). It speaks once per survey: `Mine::lowWarnedSurvey` records the
+  survey already warned about, so mothballing, a new unlock or a change of
+  output cannot repeat it, and a survey that is already past its low end
+  when the mine opens still gets its one warning. A newer survey starts
+  afresh. The old rule repeated every month and waited for the central
+  estimate.
+- **View.** `unlistedPlotsRemaining` (never-listed plots), `withdrawnPlots`,
+  and per resource `unlockDaysRemaining` (days until the ore is mineable
+  when the unlocking tech is in the lab: completion day - today + 1) and
+  `unlockReady` (prerequisites complete, tech neither done nor running).
+- Saves validate the new state: a mine's warned survey is a completed
+  survey of its plot by its owner; counts only on listed plots and under the
+  limit, cooldowns only on withdrawn plots, the withdrawn queue distinct,
+  unlisted and in nondecreasing cooldown order, and every offered plot
+  that is unlisted and unowned accounted for by that queue.
+
+Session:
+- **The log is the player's, not the world's.** `Session::logNotices` drops
+  `PlotRelisted` and `PlotWithdrawn` for plots the player has neither
+  surveyed nor bid on, drops the player's own `RivalUnlockedResource`, and
+  folds a tick's `AutoSaleSummary` notices into one line built from
+  `notice.auto_sale_month` and `notice.auto_sale_item`. The trace's notice
+  records are written from the same place, so they are what the log shows;
+  day and hash records are untouched and replay is unaffected.
+- **Auto-pause** gains `research_complete`. Survey and research complete
+  default to on. The toggles file is read over the defaults, so a reason the
+  file has never heard of takes its default and every recorded toggle stays.
+- **Text.** Rejection templates embed `rejectReasonClause` (no full stop,
+  lower-case opening); `describeNotice` capitalises its result.
+- **Trace.** `StartResearch` command records carry `tech_id`; decoding still
+  uses the index. `deep_claim_replay` prints "building, opens day N" and a
+  bare "depleted".
+
+Client (all presentation of view data):
+- Finance: Repay all per loan; the loan form shows and prefills remaining
+  credit and disables Take loan with the reason.
+- Needs you: "The lab is idle" (when a project could start now) and "Survey
+  report on plot #N is in" (15 days, while the plot is listed).
+- Plots: a warning when a survey would report on or after the auction's
+  closing day; no survey on a worked-out mine; locked ore reads "mineable in
+  N days" or "one project away" with buy-ahead advice once
+  `unlockDaysRemaining` or `unlockReady` says so; a line when no unlisted
+  land remains.
+- Log: All / Mine / Market / Rivals, classified in `ui_model.cpp` from the
+  notice kind and company.
+- The layout probe plays its fixed game on through a landed survey report,
+  the end of the land queue, exhausted credit and a late survey, lays out
+  every tab at each stage, and lays out the Log tab under every filter on
+  both a fresh and a long game.
+- Observation from the probe's fixed game, not acted on here: by year 3,
+  23 of 30 plots had been withdrawn unsold. Land demand is spec 005/006
+  territory.

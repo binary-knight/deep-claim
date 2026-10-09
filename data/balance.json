@@ -15,6 +15,8 @@
   "auction_window_days": 45,
   "plots_listed_at_start": 3,
   "plots_listed_per_month": 1,
+  "max_unsold_rounds": 3,
+  "relist_cooldown_days": 360,
   "bankruptcy_grace_months": 3,
   "market_supply_smoothing_days": 30,
   "market_price_adjust_days": 10,

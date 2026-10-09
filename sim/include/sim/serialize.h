@@ -72,7 +72,7 @@ void serialize(Archive& ar, StrongId<Tag>& id) {
 template <class Archive>
 void serialize(Archive& ar, Plot& plot) {
     ar(plot.region, plot.areaHectares, plot.basePrice, plot.askPrice, plot.listing, plot.owner,
-       plot.auction, plot.mine);
+       plot.auction, plot.mine, plot.unsoldCount, plot.relistNotBefore);
 }
 
 template <class Archive>
@@ -124,7 +124,7 @@ void serialize(Archive& ar, Survey& survey) {
 template <class Archive>
 void serialize(Archive& ar, Mine& mine) {
     ar(mine.plot, mine.owner, mine.builtDay, mine.operationalDay, mine.state, mine.extractedTonnes,
-       mine.lastDayTonnes, mine.lastOutputTonnes);
+       mine.lastDayTonnes, mine.lastOutputTonnes, mine.lowWarnedSurvey);
 }
 
 template <class Archive>
@@ -157,7 +157,7 @@ template <class Archive>
 void serialize(Archive& ar, WorldState& state) {
     ar(state.day, state.rng, state.companies, state.plots, state.auctions, state.surveys,
        state.mines, state.markets, state.loans, state.research, state.events, state.listingQueue,
-       state.nextListing, state.bidCounter, state.hidden);
+       state.nextListing, state.withdrawnQueue, state.bidCounter, state.hidden);
 }
 
 // ---- commands (queued commands travel with saves) ----
@@ -304,11 +304,11 @@ void serialize(Archive& ar, BalanceParams& balance) {
        balance.surveyCost, balance.surveyDurationDays, balance.surveyBaseNoise,
        balance.mineCapexPerHectare, balance.mineBuildDays, balance.mineOpexPerDay,
        balance.mineMothballOpexMult, balance.auctionWindowDays, balance.plotsListedAtStart,
-       balance.plotsListedPerMonth, balance.bankruptcyGraceMonths,
-       balance.marketSupplySmoothingDays, balance.marketPriceAdjustDays,
-       balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
-       balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear,
-       balance.defaultSellPolicy, balance.defaultCoverCosts);
+       balance.plotsListedPerMonth, balance.maxUnsoldRounds, balance.relistCooldownDays,
+       balance.bankruptcyGraceMonths, balance.marketSupplySmoothingDays,
+       balance.marketPriceAdjustDays, balance.demandReversionRate, balance.demandMultMin,
+       balance.demandMultMax, balance.priceFloorMult, balance.priceCapMult,
+       balance.demandGrowthPerYear, balance.defaultSellPolicy, balance.defaultCoverCosts);
 }
 
 template <class Archive>

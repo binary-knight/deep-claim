@@ -436,3 +436,212 @@ TEST_CASE("Views carry the viewer's own research list", "[view]") {
     const sim::Simulation simulation(content, 1, test::setup());
     CHECK(simulation.view(kPlayer).completedTechs.empty());
 }
+
+namespace {
+
+// The fixture relists forever; these tests switch withdrawal on.
+sim::Content withdrawingContent() {
+    sim::Content content = test::makeContent();
+    content.balance.maxUnsoldRounds = 3;
+    content.balance.relistCooldownDays = 360;
+    return content;
+}
+
+bool inQueue(const std::vector<sim::PlotId>& queue, sim::PlotId plot) {
+    return std::find(queue.begin(), queue.end(), plot) != queue.end();
+}
+
+}  // namespace
+
+TEST_CASE("A plot unsold three times is withdrawn and returns after its cooldown", "[market]") {
+    const sim::Content content = withdrawingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = firstListed(simulation.state());
+    const sim::Money base = simulation.state().plots[plot.index()].basePrice;
+    const sim::Day window = content.balance.auctionWindowDays;
+
+    // Two unsold rounds: still listed, counting.
+    simulation.tick(window * 2 + 1);
+    CHECK(simulation.state().plots[plot.index()].listing == sim::PlotListing::Listed);
+    CHECK(simulation.state().plots[plot.index()].unsoldCount == 2);
+    CHECK(simulation.state().withdrawnQueue.empty());
+
+    // The third closes on day 3 * window: withdrawn, public notice, no auction.
+    while (simulation.state().day < window * 3) {
+        simulation.tick();
+    }
+    const sim::TickReport& closing = simulation.tick();
+    const sim::Plot& withdrawn = simulation.state().plots[plot.index()];
+    CHECK(withdrawn.listing == sim::PlotListing::Unlisted);
+    CHECK_FALSE(withdrawn.auction.valid());
+    CHECK(withdrawn.unsoldCount == 0);
+    CHECK(withdrawn.relistNotBefore == window * 3 + content.balance.relistCooldownDays);
+    CHECK(inQueue(simulation.state().withdrawnQueue, plot));
+    const sim::Money reduced = withdrawn.askPrice;
+    CHECK(reduced < base);
+    bool noticed = false;
+    for (const sim::Notice& notice : closing.notices) {
+        if (notice.kind == sim::NoticeKind::PlotWithdrawn && notice.plot == plot) {
+            noticed = true;
+            CHECK(notice.amount == reduced);
+            CHECK(sim::noticeIsPublic(notice.kind));
+        }
+        // Withdrawn instead of relisted, not as well as.
+        CHECK_FALSE((notice.kind == sim::NoticeKind::PlotRelisted && notice.plot == plot));
+    }
+    CHECK(noticed);
+    CHECK(simulation.view(kPlayer).withdrawnPlots >= 1);
+
+    // A save with withdrawn land loads and replays identically.
+    const std::vector<std::uint8_t> bytes = simulation.save();
+    sim::Simulation other(content, 99, test::setup());
+    REQUIRE(other.load(bytes));
+    CHECK(other.stateHash() == simulation.stateHash());
+
+    // It comes back only once every never-listed plot has been offered and
+    // its cooldown has passed, at the ask it left with.
+    const sim::Day notBefore = withdrawn.relistNotBefore;
+    sim::Day relistedOn = 0;
+    for (int i = 0; i < 4000 && relistedOn == 0; ++i) {
+        const sim::Day processed = simulation.state().day;
+        const sim::TickReport& report = simulation.tick();
+        for (const sim::Notice& notice : report.notices) {
+            if (notice.kind == sim::NoticeKind::PlotListed && notice.plot == plot) {
+                relistedOn = processed;
+                CHECK(notice.amount == reduced);
+            }
+        }
+    }
+    REQUIRE(relistedOn != 0);
+    CHECK(relistedOn >= notBefore);
+    CHECK(relistedOn % sim::kDaysPerMonth == 0);
+    CHECK(simulation.state().nextListing == simulation.state().listingQueue.size());
+    const sim::Plot& back = simulation.state().plots[plot.index()];
+    CHECK(back.listing == sim::PlotListing::Listed);
+    CHECK(back.relistNotBefore == 0);
+    CHECK(back.unsoldCount == 0);
+    CHECK(back.askPrice == reduced);
+    CHECK_FALSE(inQueue(simulation.state().withdrawnQueue, plot));
+    CHECK(simulation.view(kPlayer).unlistedPlotsRemaining == 0);
+    other.tick(simulation.state().day - other.state().day);
+    CHECK(other.stateHash() == simulation.stateHash());
+}
+
+TEST_CASE("With zero unsold rounds configured plots relist forever", "[market]") {
+    const sim::Content content = test::makeContent();
+    REQUIRE(content.balance.maxUnsoldRounds == 0);
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = firstListed(simulation.state());
+    simulation.tick(sim::kDaysPerYear * 2);
+    CHECK(simulation.state().plots[plot.index()].listing == sim::PlotListing::Listed);
+    CHECK(simulation.state().withdrawnQueue.empty());
+    CHECK(simulation.state().plots[plot.index()].unsoldCount > 3);
+}
+
+TEST_CASE("The view counts land not yet offered", "[market][view]") {
+    const sim::Content content = withdrawingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const std::uint32_t total = static_cast<std::uint32_t>(simulation.state().plots.size());
+    CHECK(simulation.view(kPlayer).unlistedPlotsRemaining ==
+          total - content.balance.plotsListedAtStart);
+    CHECK(simulation.view(kPlayer).withdrawnPlots == 0);
+    simulation.tick(sim::kDaysPerMonth + 1);
+    CHECK(simulation.view(kRival).unlistedPlotsRemaining ==
+          total - content.balance.plotsListedAtStart - content.balance.plotsListedPerMonth);
+}
+
+TEST_CASE("Saves with inconsistent withdrawal state are rejected", "[market][save]") {
+    const sim::Content content = withdrawingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(content.balance.auctionWindowDays * 3 + 2);
+    REQUIRE_FALSE(simulation.state().withdrawnQueue.empty());
+    const auto saveOf = [&](const sim::WorldState& s) {
+        return sim::saveGame(s, {}, sim::hashContent(content));
+    };
+    const sim::PlotId gone = simulation.state().withdrawnQueue.front();
+    const sim::PlotId listed = firstListed(simulation.state());
+    REQUIRE(listed.valid());
+    CHECK(simulation.load(saveOf(simulation.state())));
+
+    sim::WorldState broken = simulation.state();
+    broken.withdrawnQueue.push_back(gone);  // the same plot twice
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.withdrawnQueue.push_back(listed);  // a listed plot in the withdrawn queue
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.withdrawnQueue.clear();  // unlisted, already offered, in no queue
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.plots[listed.index()].relistNotBefore = 500;  // a cooldown on a listed plot
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.plots[listed.index()].unsoldCount = content.balance.maxUnsoldRounds;  // past the limit
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    broken = simulation.state();
+    broken.plots[gone.index()].unsoldCount = 1;  // unsold rounds on an unlisted plot
+    CHECK_FALSE(simulation.load(saveOf(broken)));
+
+    if (simulation.state().withdrawnQueue.size() >= 2) {
+        broken = simulation.state();
+        std::swap(broken.plots[broken.withdrawnQueue[0].index()].relistNotBefore,
+                  broken.plots[broken.withdrawnQueue[1].index()].relistNotBefore);
+        const bool sameDay =
+            simulation.state()
+                .plots[simulation.state().withdrawnQueue[0].index()]
+                .relistNotBefore ==
+            simulation.state().plots[simulation.state().withdrawnQueue[1].index()].relistNotBefore;
+        CHECK(simulation.load(saveOf(broken)) == sameDay);  // cooldowns must not decrease
+    }
+}
+
+TEST_CASE("Monthly batches offer never-listed land before returning withdrawn land", "[market]") {
+    sim::Content content = withdrawingContent();
+    content.balance.plotsListedPerMonth = 4;  // batches straddle the end of the queue
+    sim::Simulation simulation(content, 1, test::setup());
+    const std::size_t total = simulation.state().plots.size();
+    std::vector<sim::Day> returnsNotBefore(total, 0);  // set when a plot is withdrawn
+    std::vector<int> timesListed(total, 0);
+    int returned = 0;
+    for (int i = 0; i < 2500; ++i) {
+        const sim::Day processed = simulation.state().day;
+        const std::size_t neverListed =
+            simulation.state().listingQueue.size() - simulation.state().nextListing;
+        const sim::TickReport& report = simulation.tick();
+        std::size_t listedNow = 0;
+        for (const sim::Notice& notice : report.notices) {
+            const std::size_t p = notice.plot.valid() ? notice.plot.index() : 0;
+            if (notice.kind == sim::NoticeKind::PlotWithdrawn) {
+                returnsNotBefore[p] = processed + content.balance.relistCooldownDays;
+            } else if (notice.kind == sim::NoticeKind::PlotListed) {
+                ++listedNow;
+                ++timesListed[p];
+                if (returnsNotBefore[p] != 0) {
+                    ++returned;
+                    // Only once the never-listed plots ran out within this
+                    // batch, and only after its year away.
+                    CHECK(neverListed < content.balance.plotsListedPerMonth);
+                    CHECK(processed >= returnsNotBefore[p]);
+                    returnsNotBefore[p] = 0;
+                }
+            }
+        }
+        CHECK(listedNow <= content.balance.plotsListedPerMonth);
+        if (listedNow > 0) {
+            CHECK(processed % sim::kDaysPerMonth == 0);
+        }
+    }
+    CHECK(returned > 0);
+    CHECK(simulation.state().nextListing == simulation.state().listingQueue.size());
+    // The day-0 listings predate the first report; every other plot was
+    // announced at least once.
+    const auto announced = static_cast<std::size_t>(
+        std::count_if(timesListed.begin(), timesListed.end(), [](int n) { return n > 0; }));
+    CHECK(announced >= total - content.balance.plotsListedAtStart);
+    CHECK(simulation.load(simulation.save()));  // the long-run state passes validation
+}

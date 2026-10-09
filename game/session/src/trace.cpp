@@ -363,8 +363,13 @@ void TraceWriter::saved(sim::Day day, std::string_view file) {
     line(j.dump());
 }
 
-void TraceWriter::command(sim::Day day, const sim::Command& command) {
+void TraceWriter::command(sim::Day day, const sim::Command& command, const sim::Content* content) {
     Json j = commandJson(command);
+    if (const auto* research = std::get_if<sim::StartResearch>(&command);
+        research != nullptr && content != nullptr && research->tech.valid() &&
+        research->tech.index() < content->techs.size()) {
+        j["tech_id"] = content->techs[research->tech.index()].id;
+    }
     j["t"] = "command";
     j["day"] = day;
     line(j.dump());

@@ -164,6 +164,7 @@ void App::newGame(std::uint64_t seed) {
     model_.selected_plot = -1;
     model_.selected_resource = 0;
     model_.tab = 0;
+    resetLoanInput();
     syncPolicyInputs();
     lastRefreshedDay_ = session_->day();
 }
@@ -324,6 +325,7 @@ void App::bindModel() {
         h.RegisterMember("owned", &PlotPanel::owned);
         h.RegisterMember("can_survey", &PlotPanel::can_survey);
         h.RegisterMember("survey_label", &PlotPanel::survey_label);
+        h.RegisterMember("survey_note", &PlotPanel::survey_note);
         h.RegisterMember("can_build", &PlotPanel::can_build);
         h.RegisterMember("can_afford_mine", &PlotPanel::can_afford_mine);
         h.RegisterMember("build_label", &PlotPanel::build_label);
@@ -374,6 +376,7 @@ void App::bindModel() {
         h.RegisterMember("instalment", &LoanRow::instalment);
         h.RegisterMember("months", &LoanRow::months);
         h.RegisterMember("active", &LoanRow::active);
+        h.RegisterMember("can_repay_all", &LoanRow::can_repay_all);
     }
     if (auto h = ctor.RegisterStruct<LogRow>()) {
         h.RegisterMember("day", &LogRow::day);
@@ -439,6 +442,7 @@ void App::bindModel() {
     ctor.Bind("for_sale", &model_.for_sale);
     ctor.Bind("panel", &model_.panel);
     ctor.Bind("techs", &model_.techs);
+    ctor.Bind("no_unlisted", &model_.no_unlisted);
     // Market
     ctor.Bind("resources", &model_.resources);
     ctor.Bind("chart_title", &model_.chart_title);
@@ -459,6 +463,9 @@ void App::bindModel() {
     ctor.Bind("loans", &model_.loans);
     ctor.Bind("loan_rule", &model_.loan_rule);
     ctor.Bind("loan_limits", &model_.loan_limits);
+    ctor.Bind("loan_credit", &model_.loan_credit);
+    ctor.Bind("loan_blocked", &model_.loan_blocked);
+    ctor.Bind("can_take_loan", &model_.can_take_loan);
     ctor.Bind("cover_costs", &model_.cover_costs);
     ctor.Bind("cover_check", &model_.cover_check);
     ctor.Bind("cover_explain", &model_.cover_explain);
@@ -466,6 +473,8 @@ void App::bindModel() {
     ctor.Bind("solvency_rule", &model_.solvency_rule);
     // Log and inputs
     ctor.Bind("log", &model_.log);
+    ctor.Bind("log_filter", &model_.log_filter);
+    ctor.Bind("log_empty", &model_.log_empty);
     ctor.Bind("bid_input", &model_.bid_input);
     ctor.Bind("sell_input", &model_.sell_input);
     ctor.Bind("loan_input", &model_.loan_input);
@@ -533,6 +542,13 @@ void App::bindModel() {
     ctor.BindEventCallback("repay", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
         onRepay(intArg(a, 0));
     });
+    ctor.BindEventCallback("repay_all", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onRepayAll(intArg(a, 0));
+    });
+    ctor.BindEventCallback("set_log_filter",
+                           [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+                               onSetLogFilter(intArg(a, 0));
+                           });
     ctor.BindEventCallback("research", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
         onResearch(intArg(a, 0));
     });
@@ -574,6 +590,7 @@ void App::refresh() {
         }
     }
     seenLogEntries_ = log.size();
+    syncLoanInput();
     refreshModel(*session_, model_);
     if (handle_) {
         handle_.DirtyAllVariables();
@@ -619,6 +636,10 @@ void App::startGame(std::uint64_t seed) {
 
 void App::selectPlot(int index) {
     onSelectPlot(index);
+}
+
+void App::setLogFilter(int filter) {
+    onSetLogFilter(filter);
 }
 
 void App::showPauseMenu(bool on) {
@@ -752,6 +773,9 @@ void App::onNeedAction(int action, int target) {
         case 4:  // the Finance tab
             onSetTab(4);
             return;
+        case 5:  // the Research tab
+            onSetTab(3);
+            return;
         default:
             return;
     }
@@ -867,13 +891,65 @@ void App::onSell(int resourceIndex, bool all) {
     setStatus(text(*content_, "status.sale_queued", {{"tonnes", formatTonnes(tonnes)}}));
 }
 
+void App::syncLoanInput() {
+    // Anything in the field other than what was last put there is the
+    // player's, and stays the player's even if credit later equals it.
+    loanEdited_ = loanEdited_ || model_.loan_input != loanPrefill_;
+    if (loanEdited_) {
+        return;
+    }
+    loanPrefill_ = exactMoney(std::max(session_->view().loanCapacity, sim::Money::zero()));
+    model_.loan_input = loanPrefill_;
+}
+
+void App::resetLoanInput() {
+    loanEdited_ = false;
+    loanPrefill_.clear();
+    model_.loan_input.clear();
+}
+
+void App::onSetLogFilter(int filter) {
+    static constexpr std::array<const char*, 4> kFilters = {"all", "mine", "market", "rivals"};
+    if (filter < 0 || filter >= static_cast<int>(kFilters.size())) {
+        return;
+    }
+    traceUi("log_filter", kFilters.at(static_cast<std::size_t>(filter)));
+    model_.log_filter = filter;
+    refresh();
+}
+
+void App::onRepayAll(int loanIndex) {
+    const sim::LoanId id(static_cast<std::uint32_t>(loanIndex));
+    for (const sim::LoanView& loan : session_->view().loans) {
+        if (loan.id == id && loan.active) {
+            // A click that outlived the button: cash has since fallen short.
+            const sim::CompanyView& view = session_->view();
+            if (view.bankrupt || loan.remaining > view.cash - view.reservedCash) {
+                setStatus(rejectReasonText(*content_, sim::RejectReason::InsufficientFunds), true);
+                return;
+            }
+            // The balance to the cent, read now rather than from the label.
+            session_->submit(sim::RepayLoan{Session::kPlayer, id, loan.remaining});
+            setStatus(text(*content_, "status.repayment_ordered",
+                           {{"amount", formatMoney(loan.remaining)}}));
+            return;
+        }
+    }
+}
+
 void App::onTakeLoan() {
+    if (!model_.can_take_loan) {
+        // The button is disabled; a stale click still gets the reason.
+        setStatus(model_.loan_blocked, true);
+        return;
+    }
     sim::Money amount;
     if (!game::parseMoney(model_.loan_input, amount)) {
         setStatus(text(*content_, "status.loan_prompt"), true);
         return;
     }
     session_->submit(sim::TakeLoan{Session::kPlayer, amount});
+    resetLoanInput();  // the field follows the credit that is left
     setStatus(text(*content_, "status.loan_requested", {{"amount", formatMoney(amount)}}));
 }
 
@@ -932,6 +1008,7 @@ void App::onLoad() {
     }
     model_.selected_plot = -1;
     syncPolicyInputs();
+    resetLoanInput();
     if (trace_) {
         const std::string copy = keepSaveCopy("load", bytes);
         trace_->loaded(session_->day(), copy, session_->stateHash());

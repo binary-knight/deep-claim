@@ -136,6 +136,10 @@ const char* noticeKindName(NoticeKind kind) {
             return "mine_found_nothing";
         case NoticeKind::MineRunningLow:
             return "mine_running_low";
+        case NoticeKind::PlotWithdrawn:
+            return "plot_withdrawn";
+        case NoticeKind::RivalUnlockedResource:
+            return "rival_unlocked_resource";
     }
     return "unknown";
 }
@@ -149,6 +153,8 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::Bankrupt:
         case NoticeKind::EventStarted:
         case NoticeKind::EventEnded:
+        case NoticeKind::PlotWithdrawn:
+        case NoticeKind::RivalUnlockedResource:
             return true;
         case NoticeKind::CommandRejected:
         case NoticeKind::AuctionLost:

@@ -134,7 +134,7 @@ TEST_CASE("Every notice kind and reject reason has shipped prose", "[strings][da
     const std::string text = game::describeNotice(content, view, rejected);
     CHECK(text.find("#4") != std::string::npos);
     CHECK(text.find("$1.18M") != std::string::npos);
-    CHECK(text.find(game::rejectReasonText(content, sim::RejectReason::InsufficientFunds)) !=
+    CHECK(text.find(game::rejectReasonClause(content, sim::RejectReason::InsufficientFunds)) !=
           std::string::npos);
 
     for (const sim::EventDef& event : content.events) {
@@ -261,8 +261,74 @@ TEST_CASE("Every rejection variant renders with the figures it is given", "[stri
         CHECK(text.front() != '[');
         CHECK(text.find('{') == std::string::npos);
         CHECK(text.find(v.mustContain) != std::string::npos);
-        CHECK(text.find(game::rejectReasonText(content, n.reason)) != std::string::npos);
+        CHECK(text.find(game::rejectReasonClause(content, n.reason)) != std::string::npos);
     }
+}
+
+TEST_CASE("Rejections read as one sentence and every notice starts with a capital",
+          "[strings][data]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    REQUIRE(result.ok());
+    const sim::Content& content = *result.content;
+    sim::CompanyView view;
+    sim::CompanyPublicView me;
+    me.id = sim::CompanyId(0);
+    me.name = "Deep Claim Mining";
+    view.companies.push_back(me);
+
+    const auto isUpper = [](char c) { return c >= 'A' && c <= 'Z'; };
+    for (int r = 1;
+         std::string_view(sim::rejectReasonName(static_cast<sim::RejectReason>(r))) != "unknown";
+         ++r) {
+        sim::Notice n;
+        n.kind = sim::NoticeKind::CommandRejected;
+        n.company = sim::CompanyId(0);
+        n.amount = sim::Money::fromUnits(1'000'000);
+        n.reason = static_cast<sim::RejectReason>(r);
+        for (int shape = 0; shape < 4; ++shape) {
+            n.plot = shape == 1 ? sim::PlotId(2) : sim::PlotId();
+            n.loan = shape == 2 ? sim::LoanId(0) : sim::LoanId();
+            n.tech = shape == 3 ? sim::TechId(0) : sim::TechId();
+            const std::string text = game::describeNotice(content, view, n);
+            INFO(text);
+            CHECK(text.find("..") == std::string::npos);
+            CHECK(text.back() == '.');
+            CHECK(isUpper(text.front()));
+            const std::size_t colon = text.find(": ");
+            REQUIRE(colon != std::string::npos);
+            CHECK_FALSE(isUpper(text[colon + 2]));  // one sentence: no capital after the colon
+            // Exactly one full stop that ends a sentence.
+            CHECK(text.find(". ") == std::string::npos);
+        }
+    }
+    // The clause form of a reason: no full stop, lower-case opening.
+    CHECK(game::rejectReasonClause(content, sim::RejectReason::LoanLimitExceeded) ==
+          "the bank will not lend that much on our remaining credit");
+    CHECK(game::capitalised("plot #3 is up.") == "Plot #3 is up.");
+    CHECK(game::capitalised("$5 fee.") == "$5 fee.");
+    CHECK(game::capitalised("").empty());
+
+    for (int i = 0;
+         std::string_view(sim::noticeKindName(static_cast<sim::NoticeKind>(i))) != "unknown"; ++i) {
+        sim::Notice notice;
+        notice.kind = static_cast<sim::NoticeKind>(i);
+        notice.company = sim::CompanyId(0);
+        notice.plot = sim::PlotId(27);
+        notice.resource = sim::ResourceId(0);
+        notice.tech = sim::TechId(0);
+        notice.event = sim::EventId(0);
+        notice.amount = sim::Money::fromUnits(1'000);
+        notice.tonnes = 5;
+        const std::string text = game::describeNotice(content, view, notice);
+        INFO(text);
+        const char first = text.front();
+        CHECK_FALSE((first >= 'a' && first <= 'z'));
+    }
+    sim::Notice listed;
+    listed.kind = sim::NoticeKind::PlotListed;
+    listed.plot = sim::PlotId(27);
+    listed.amount = sim::Money::fromUnits(1'000'000);
+    CHECK(game::describeNotice(content, view, listed).starts_with("Plot #28 is up for auction."));
 }
 
 TEST_CASE("A prose edit keeps the content fingerprint; a name edit moves it", "[strings][data]") {

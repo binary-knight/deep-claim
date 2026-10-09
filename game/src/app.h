@@ -64,6 +64,7 @@ public:
     void startGame(std::uint64_t seed);
     void selectPlot(int index);
     void showPauseMenu(bool on);
+    void setLogFilter(int filter);
     void refreshNow();
     [[nodiscard]] Session& session() { return *session_; }
 
@@ -101,6 +102,13 @@ private:
     void onToggleCoverCosts();
     void onTakeLoan();
     void onRepay(int loanIndex);
+    void onRepayAll(int loanIndex);
+    void onSetLogFilter(int filter);
+    // Keeps the loan field showing the remaining credit until the player
+    // types something else (clearing it counts); a new game, a load or a
+    // loan taken hands the field back.
+    void syncLoanInput();
+    void resetLoanInput();
     void onResearch(int techIndex);
     void onSave();
     void onLoad();
@@ -119,6 +127,8 @@ private:
     std::size_t seenLogEntries_ = 0;  // log entries already checked for rejections
     AutoPause pauseRules_ = AutoPause::defaults();
     bool deckForced_ = false;
+    std::string loanPrefill_;  // what syncLoanInput last put in the field
+    bool loanEdited_ = false;  // the player has typed over it
 
     std::filesystem::path playtestDir_;
     std::string buildId_;

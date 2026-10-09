@@ -278,8 +278,11 @@ th.w-sell { width: 250dp; }
 th.w-tech { width: 260dp; }
 th.w-start { width: 200dp; }
 th.w-inst { width: 150dp; }
-th.w-months { width: 100dp; }
-th.w-repay { width: 200dp; }
+th.w-months { width: 80dp; }
+th.w-repay { width: 270dp; }
+/* The loan row holds a field and two buttons: a narrower field keeps the
+   money columns wide enough for their headers in the deck frame. */
+td.act input.text { width: 84dp; }
 td.act button { margin: 0 0 0 4dp; }
 td button, td input.text { vertical-align: middle; }
 td .sub { display: block; }

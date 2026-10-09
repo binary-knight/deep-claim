@@ -41,7 +41,7 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // move it. If a deliberate simulation change alters it, update the
     // constant in the same commit and say so in the commit message.
     // Moved once for spec 001 (standing sell policies added company state).
-    constexpr std::uint64_t kGolden = 0x0fc2e895ca56a363ULL;
+    constexpr std::uint64_t kGolden = 0x28adea3aad5623a7ULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
     simulation.tick(sim::kDaysPerYear);

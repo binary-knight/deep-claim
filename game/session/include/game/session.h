@@ -97,6 +97,13 @@ private:
     bool stopIfPaused();
     void refreshView();
     void appendLog(sim::Day day, const sim::Notice& notice);
+    void appendLogText(sim::Day day, const sim::Notice& notice, std::string text);
+    // Writes the tick's notices to the log: drops what the player has no
+    // stake in and folds the month's automatic sales into one line.
+    void logNotices(sim::Day day, std::span<const sim::Notice> notices,
+                    std::span<const sim::PlotId> bidPlots);
+    [[nodiscard]] bool showsInLog(const sim::Notice& notice,
+                                  std::span<const sim::PlotId> bidPlots) const;
 
     const sim::Content* content_;
     sim::Simulation simulation_;
@@ -109,6 +116,9 @@ private:
     AutoPause autoPause_ = AutoPause::defaults();
     std::optional<sim::Notice> pausedBy_;
     std::vector<sim::Money> cashHistory_;
+    // Plots the player ordered a bid on since the last tick (the bid and the
+    // auction's close can be processed in the same day).
+    std::vector<sim::PlotId> submittedBids_;
 };
 
 }  // namespace game

@@ -28,7 +28,8 @@ struct NeedRow {
     std::string sub;
     std::string days;  // "in 30 days" or ""
     // What the action button does: 0 none, 1 open the plot (Plots tab),
-    // 2 mothball the mine, 3 open the Market tab, 4 open the Finance tab.
+    // 2 mothball the mine, 3 open the Market tab, 4 open the Finance tab,
+    // 5 open the Research tab.
     int action = 0;
     int target = -1;  // plot index or mine index for actions 1 and 2
     std::string act_label;
@@ -71,7 +72,8 @@ struct EstimateRow {
     std::string resource;
     std::string tonnes;  // "~185,330 t"
     std::string error;   // "(x0.28)"
-    std::string needs;   // "needs Lithium Processing" or ""
+    // "needs Lithium Processing", "mineable in 40 days", "one project away" or ""
+    std::string needs;
     bool locked = false;
 };
 
@@ -96,6 +98,9 @@ struct PlotPanel {
     bool owned = false;
     bool can_survey = false;
     std::string survey_label;  // "Survey ($150k)" or "Survey again ($150k)"
+    // Why a survey would be wasted: the report lands after the auction
+    // closes, or the mine here is worked out (then the button is disabled).
+    std::string survey_note;
     bool can_build = false;
     bool can_afford_mine = false;
     std::string build_label;    // "Build mine ($2.00M)"
@@ -149,6 +154,7 @@ struct LoanRow {
     std::string instalment;
     std::string months;
     bool active = false;
+    bool can_repay_all = false;  // spendable cash covers the balance
 };
 
 struct LogRow {
@@ -215,6 +221,7 @@ struct UiModel {
     std::vector<SaleRow> for_sale;
     PlotPanel panel;
     std::vector<TechRow> techs;  // also the research tiles on the Plots tab
+    std::string no_unlisted;     // "No unlisted land remains." once the queue is empty
 
     // Market
     std::vector<ResourceRow> resources;
@@ -238,6 +245,9 @@ struct UiModel {
     std::vector<LoanRow> loans;
     std::string loan_rule;
     std::string loan_limits;
+    std::string loan_credit;     // "You can borrow up to $8.84M."
+    std::string loan_blocked;    // why Take loan is disabled, or ""
+    bool can_take_loan = false;  // credit covers the minimum loan and a slot is free
     bool cover_costs = false;
     std::string cover_check;
     std::string cover_explain;
@@ -246,7 +256,9 @@ struct UiModel {
     std::string storage_month_long;  // "$12k/month"
 
     // Log
-    std::vector<LogRow> log;
+    std::vector<LogRow> log;  // newest first, after the filter
+    int log_filter = 0;       // 0 all, 1 mine, 2 market, 3 rivals
+    std::string log_empty;    // shown when the filter leaves nothing
 
     // Inputs bound to text fields
     std::string bid_input;

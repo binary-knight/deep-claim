@@ -143,6 +143,17 @@ struct CompanyView {
     std::vector<Money> autoSoldProceeds;
     std::vector<TechId> completedTechs;  // own research only
     std::optional<ResearchView> activeResearch;
+    // Per resource (spec 004), for ore the viewer cannot mine yet: days until
+    // the viewer's research in progress unlocks it (0 when that tech is not
+    // being researched), and whether the unlocking tech could be started now
+    // (its prerequisites are complete and it is not done). Indexed by
+    // ResourceId; both zero for unlocked resources.
+    std::vector<Day> unlockDaysRemaining;
+    std::vector<std::uint8_t> unlockReady;
+    // Land not yet offered: plots never listed, and plots withdrawn after
+    // going unsold that will return to sale.
+    std::uint32_t unlistedPlotsRemaining = 0;
+    std::uint32_t withdrawnPlots = 0;
     std::vector<PlotView> plots;
     std::vector<SurveyView> surveys;
     std::vector<MineView> mines;

@@ -51,6 +51,25 @@ const char* mineStateName(sim::MineState state) {
     return "?";
 }
 
+// A mine's state in words. MineView::operationalDay is the day the mine
+// opens (or opened): in the future while building, and no measure of how
+// long a mothballed or depleted mine has been that way.
+std::string mineStatus(const sim::MineView& mine) {
+    switch (mine.state) {
+        case sim::MineState::Building:
+            return std::format("building, opens day {}", mine.operationalDay);
+        case sim::MineState::Operating:
+            return std::format("operating since day {}", mine.operationalDay);
+        case sim::MineState::Mothballed:
+            return std::format("mothballed (opened day {})", mine.operationalDay);
+        case sim::MineState::Depleted:
+            return "depleted";
+        case sim::MineState::Closed:
+            return "closed";
+    }
+    return "?";
+}
+
 std::string companyName(const sim::CompanyView& view, sim::CompanyId id) {
     for (const sim::CompanyPublicView& company : view.companies) {
         if (company.id == id) {
@@ -115,8 +134,7 @@ void printMines(const sim::Content& content, const sim::CompanyView& v) {
     }
     std::cout << "\nmines:\n";
     for (const sim::MineView& m : v.mines) {
-        std::cout << std::format("  plot #{} {} since day {}, opex {}/day\n", m.plot.value() + 1,
-                                 mineStateName(m.state), m.operationalDay,
+        std::cout << std::format("  plot #{} {}, opex {}/day\n", m.plot.value() + 1, mineStatus(m),
                                  game::formatMoney(m.dailyOpex));
         for (std::size_t r = 0; r < m.extractedTonnes.size(); ++r) {
             if (m.extractedTonnes[r] == 0 && m.lastOutputTonnes[r] == 0) {

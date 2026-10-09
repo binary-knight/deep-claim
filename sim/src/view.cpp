@@ -8,6 +8,8 @@
 #include "sim/money.h"
 #include "sim/plot_market.h"
 #include "sim/surveys.h"
+#include "sim/tech.h"
+#include "sim/types.h"
 #include "sim/world_state.h"
 
 #include <algorithm>
@@ -162,6 +164,33 @@ void addResearchAndEvents(const WorldState& state, CompanyId viewer, CompanyView
     }
 }
 
+// How close the viewer is to each resource it cannot mine yet.
+void addUnlockProgress(const Content& content, const WorldState& state, CompanyId viewer,
+                       CompanyView& view) {
+    const Company& self = state.companies[viewer.index()];
+    view.unlockDaysRemaining.assign(content.resources.size(), 0);
+    view.unlockReady.assign(content.resources.size(), 0);
+    for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
+        const TechId tech = content.resources[r].unlockedBy;
+        if (!tech.valid() || resourceUnlocked(content, self, ResourceId(r))) {
+            continue;
+        }
+        if (view.activeResearch.has_value() && view.activeResearch->tech == tech) {
+            // Research completes while its completion day is processed, so
+            // the resource is mineable the day after.
+            const Day completes = view.activeResearch->completesDay;
+            view.unlockDaysRemaining[r] = completes >= state.day ? completes - state.day + 1 : 1;
+            continue;
+        }
+        const TechDef& def = content.techs[tech.index()];
+        const bool ready = std::ranges::all_of(def.prerequisites, [&](TechId p) {
+            return std::find(self.completedTechs.begin(), self.completedTechs.end(), p) !=
+                   self.completedTechs.end();
+        });
+        view.unlockReady[r] = ready ? 1 : 0;
+    }
+}
+
 void addCompanies(const WorldState& state, CompanyView& view) {
     for (std::uint32_t i = 0; i < state.companies.size(); ++i) {
         const Company& other = state.companies[i];
@@ -212,6 +241,10 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     addMarkets(content, state, view);
     addOwnLoans(state, company, view);
     addResearchAndEvents(state, company, view);
+    addUnlockProgress(content, state, company, view);
+    view.unlistedPlotsRemaining =
+        static_cast<std::uint32_t>(state.listingQueue.size()) - state.nextListing;
+    view.withdrawnPlots = static_cast<std::uint32_t>(state.withdrawnQueue.size());
     addCompanies(state, view);
     return view;
 }

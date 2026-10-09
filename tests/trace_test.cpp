@@ -36,6 +36,10 @@ sim::PlotId firstListed(const game::Session& session) {
 // A short game with a few orders at known days, traced into `out`.
 void playTraced(game::Session& session, game::TraceWriter& trace) {
     session.setTrace(&trace);
+    // The script counts days; nothing may stop the clock under it.
+    game::AutoPause never;
+    never.enabled.fill(false);
+    session.setAutoPause(never);
     const sim::PlotId plot = firstListed(session);
     REQUIRE(plot.valid());
     session.submit(sim::CommissionSurvey{{}, plot});
@@ -395,4 +399,39 @@ TEST_CASE("PNG encoder output decodes with an independent stored-deflate reader"
     CHECK(game::encodePngRgb(0, 1, rgb).empty());
     CHECK(game::encodePngRgb(400, 100, rgb).empty());
     CHECK(game::encodePngRgb(40'000, 1, std::span<const std::uint8_t>{}).empty());
+}
+
+TEST_CASE("StartResearch records carry the tech id and still decode by index", "[trace]") {
+    const sim::Content content = test::makeContent();
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 1, test::setup());
+    session.setTrace(&trace);
+    session.submit(sim::StartResearch{{}, sim::TechId(1)});
+    session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(1'000'000)});
+
+    std::istringstream lines(out.str());
+    std::string line;
+    int research = 0;
+    while (std::getline(lines, line)) {
+        if (line.find("\"StartResearch\"") == std::string::npos) {
+            CHECK(line.find("tech_id") == std::string::npos);
+            continue;
+        }
+        ++research;
+        CHECK(line.find("\"tech_id\":\"" + content.techs[1].id + "\"") != std::string::npos);
+        game::TraceRecord record;
+        std::string error;
+        REQUIRE(game::parseTraceLine(line, record, error));
+        REQUIRE(record.command.has_value());
+        const auto* decoded = std::get_if<sim::StartResearch>(&*record.command);
+        REQUIRE(decoded != nullptr);
+        CHECK(decoded->tech == sim::TechId(1));
+    }
+    CHECK(research == 1);
+    // Without content (a bare writer) the record is as before.
+    std::ostringstream bare;
+    game::TraceWriter plain(bare);
+    plain.command(3, sim::StartResearch{{}, sim::TechId(0)});
+    CHECK(bare.str().find("tech_id") == std::string::npos);
 }

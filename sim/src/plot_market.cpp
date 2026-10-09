@@ -81,6 +81,7 @@ void closeAuction(const Content& content, WorldState& state, AuctionId auctionId
         company.cash -= bid.amount;
         plot.owner = bid.company;
         plot.listing = PlotListing::Sold;
+        plot.unsoldCount = 0;
         state.auctions[auctionId.index()].winner = bid.company;
         state.auctions[auctionId.index()].winningAmount = bid.amount;
         winner = bid.company;
@@ -104,10 +105,23 @@ void closeAuction(const Content& content, WorldState& state, AuctionId auctionId
         return;
     }
 
-    // Unsold: drop the ask (never below half the land value) and relist.
+    // Unsold: drop the ask (never below half the land value).
     const Money floor = plot.basePrice.scaled(kAskFloorMult);
     plot.askPrice = std::max(plot.askPrice.scaled(kUnsoldAskMult), floor);
     const Money newAsk = plot.askPrice;
+    ++plot.unsoldCount;
+    const BalanceParams& balance = content.balance;
+    if (balance.maxUnsoldRounds != 0 && plot.unsoldCount >= balance.maxUnsoldRounds) {
+        // Nobody wants it: off the market until the cooldown has passed. It
+        // keeps its reduced ask and queues behind land never yet offered.
+        plot.listing = PlotListing::Unlisted;
+        plot.unsoldCount = 0;
+        plot.relistNotBefore = state.day + balance.relistCooldownDays;
+        state.withdrawnQueue.push_back(plotId);
+        report.notices.push_back(
+            auctionNotice(NoticeKind::PlotWithdrawn, CompanyId(), plotId, AuctionId(), newAsk));
+        return;
+    }
     const AuctionId relisted = openAuction(content, state, plotId);  // may reallocate auctions
     report.notices.push_back(
         auctionNotice(NoticeKind::PlotRelisted, CompanyId(), plotId, relisted, newAsk));
@@ -116,12 +130,25 @@ void closeAuction(const Content& content, WorldState& state, AuctionId auctionId
 }  // namespace
 
 void listPlots(const Content& content, WorldState& state, std::uint32_t count, TickReport& report) {
-    for (std::uint32_t i = 0; i < count && state.nextListing < state.listingQueue.size(); ++i) {
-        const PlotId plotId = state.listingQueue[state.nextListing++];
-        // Land price events scale the ask of plots listed while they run.
-        Plot& listed = state.plots[plotId.index()];
-        listed.askPrice = listed.basePrice.scaled(
-            eventMultiplier(content, state, EventEffectType::LandPriceMult));
+    for (std::uint32_t i = 0; i < count; ++i) {
+        PlotId plotId;
+        if (state.nextListing < state.listingQueue.size()) {
+            plotId = state.listingQueue[state.nextListing++];
+            // Land price events scale the ask of plots listed while they run.
+            Plot& fresh = state.plots[plotId.index()];
+            fresh.askPrice = fresh.basePrice.scaled(
+                eventMultiplier(content, state, EventEffectType::LandPriceMult));
+        } else if (!state.withdrawnQueue.empty() &&
+                   state.plots[state.withdrawnQueue.front().index()].relistNotBefore <= state.day) {
+            // Never-listed land is gone: the longest-withdrawn plot returns at
+            // the reduced ask it left with. The queue is in withdrawal order,
+            // so its cooldowns end in order and only the front needs checking.
+            plotId = state.withdrawnQueue.front();
+            state.withdrawnQueue.erase(state.withdrawnQueue.begin());
+            state.plots[plotId.index()].relistNotBefore = 0;
+        } else {
+            return;
+        }
         const AuctionId auction = openAuction(content, state, plotId);
         report.notices.push_back(auctionNotice(NoticeKind::PlotListed, CompanyId(), plotId, auction,
                                                state.plots[plotId.index()].askPrice));

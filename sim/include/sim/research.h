@@ -23,6 +23,6 @@ void applyStartResearch(const Content& content, WorldState& state, const StartRe
                         TickReport& report);
 
 // Completes projects due today and grants their techs.
-void runResearch(WorldState& state, TickReport& report);
+void runResearch(const Content& content, WorldState& state, TickReport& report);
 
 }  // namespace sim

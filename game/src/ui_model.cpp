@@ -111,11 +111,40 @@ bool resourceLocked(const sim::Content& content, const sim::CompanyView& view,
     return required.valid() && !knowsTech(view, required);
 }
 
-std::string lockedNote(const sim::Content& content, sim::ResourceId resource) {
+// How close the player is to a locked resource (spec 004): days left on the
+// unlocking research when it is in the lab, else whether it could start now.
+struct UnlockOutlook {
+    sim::Day days = 0;  // > 0 while the unlocking tech is being researched
+    bool ready = false;
+};
+
+UnlockOutlook unlockOutlook(const sim::CompanyView& view, sim::ResourceId resource) {
+    UnlockOutlook outlook;
+    const std::size_t r = resource.index();
+    if (r < view.unlockDaysRemaining.size()) {
+        outlook.days = view.unlockDaysRemaining[r];
+    }
+    outlook.ready = outlook.days == 0 && r < view.unlockReady.size() && view.unlockReady[r] != 0;
+    return outlook;
+}
+
+// "needs <tech>" until the player is close; then an invitation.
+std::string lockedNote(const sim::Content& content, const sim::CompanyView& view,
+                       sim::ResourceId resource) {
     const sim::TechId required = content.resources[resource.index()].unlockedBy;
-    return required.valid()
-               ? text(content, "ui.needs_tech", {{"tech", content.techs[required.index()].name}})
-               : "";
+    if (!required.valid()) {
+        return "";
+    }
+    const std::string& tech = content.techs[required.index()].name;
+    const UnlockOutlook outlook = unlockOutlook(view, resource);
+    if (outlook.days > 0) {
+        return textPlural(content, "ui.unlock_in_days", outlook.days,
+                          {{"days", std::to_string(outlook.days)}});
+    }
+    if (outlook.ready) {
+        return text(content, "ui.unlock_ready", {{"tech", tech}});
+    }
+    return text(content, "ui.needs_tech", {{"tech", tech}});
 }
 
 std::string companyLabel(const sim::CompanyView& view, sim::CompanyId id) {
@@ -417,6 +446,54 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
     }
 }
 
+// A tech the player could start this minute: not known, prerequisites done,
+// affordable. The Research tab's Start button uses the same test.
+bool techStartable(const sim::Content& content, const sim::CompanyView& view, std::uint32_t i) {
+    const sim::TechDef& tech = content.techs[i];
+    return !view.bankrupt && !view.activeResearch && !knowsTech(view, sim::TechId(i)) &&
+           std::ranges::all_of(tech.prerequisites,
+                               [&](sim::TechId p) { return knowsTech(view, p); }) &&
+           tech.cost <= view.cash - view.reservedCash;
+}
+
+constexpr sim::Day kSurveyNewsDays = 15;
+
+// Things waiting on a decision rather than a date (spec 004): an idle lab
+// with a project it could start, and a survey report that has just landed
+// on a plot still at auction.
+void addDecisionNeeds(const sim::Content& content, const sim::CompanyView& view,
+                      std::vector<PendingNeed>& pending) {
+    int startable = 0;
+    for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
+        startable += techStartable(content, view, i) ? 1 : 0;
+    }
+    if (startable > 0) {
+        NeedRow row;
+        row.title = text(content, "ui.need_lab_idle_title");
+        row.sub = textPlural(content, "ui.need_lab_idle_sub", startable,
+                             {{"count", std::to_string(startable)}});
+        row.action = 5;
+        row.act_label = "Research";
+        pending.push_back({0, kWarningPriority + 3, std::move(row)});
+    }
+    for (const sim::SurveyView& survey : view.surveys) {
+        const sim::PlotView& plot = view.plots[survey.plot.index()];
+        if (!survey.complete || view.day > survey.completesDay + kSurveyNewsDays ||
+            plot.listing != sim::PlotListing::Listed || !plot.auction ||
+            findSurvey(view, survey.plot).latest != &survey) {
+            continue;
+        }
+        NeedRow row;
+        row.title = text(content, "ui.need_survey_in_title", {{"plot", plotLabel(plot.id)}});
+        row.sub = text(content, "ui.need_survey_in_sub",
+                       {{"day", std::to_string(plot.auction->closesOnDay)}});
+        row.action = 1;
+        row.target = static_cast<int>(plot.id.value());
+        row.act_label = "Read";
+        pending.push_back({0, kWarningPriority + 4, std::move(row)});
+    }
+}
+
 // A closing auction matters when the player has a bid in or has surveyed
 // the plot.
 std::optional<PendingNeed> auctionNeed(const sim::Content& content, const sim::CompanyView& view,
@@ -495,6 +572,7 @@ void fillNeeds(const Session& session, UiModel& model) {
     const sim::CompanyView& view = session.view();
     std::vector<PendingNeed> pending;
     addWarningNeeds(content, view, pending);
+    addDecisionNeeds(content, view, pending);
     addDatedNeeds(content, view, pending);
     std::stable_sort(
         pending.begin(), pending.end(), [](const PendingNeed& a, const PendingNeed& b) {
@@ -633,6 +711,34 @@ void fillFinanceRow(const Session& session, UiModel& model) {
 
 // ---- plots ----
 
+// Among a survey's locked ores, the one whose unlock is nearest in the lab
+// and one the lab could start on today.
+struct NearestUnlock {
+    sim::ResourceId soon;  // being researched; `days` until it is mineable
+    sim::Day days = 0;
+    sim::ResourceId ready;  // one project away
+
+    [[nodiscard]] sim::ResourceId closest() const { return soon.valid() ? soon : ready; }
+};
+
+NearestUnlock nearestUnlock(const sim::Content& content, const sim::CompanyView& view,
+                            const sim::SurveyView& survey) {
+    NearestUnlock nearest;
+    for (const sim::SurveyEstimateView& e : survey.estimates) {
+        if (!resourceLocked(content, view, e.resource)) {
+            continue;
+        }
+        const UnlockOutlook outlook = unlockOutlook(view, e.resource);
+        if (outlook.days > 0 && (!nearest.soon.valid() || outlook.days < nearest.days)) {
+            nearest.soon = e.resource;
+            nearest.days = outlook.days;
+        } else if (outlook.ready && !nearest.ready.valid()) {
+            nearest.ready = e.resource;
+        }
+    }
+    return nearest;
+}
+
 // The survey column of a for-sale row: estimate summary, error, and one flag
 // chip (bids, not surveyed, empty, locked ore).
 void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
@@ -664,7 +770,9 @@ void fillSurveyCell(const sim::Content& content, const sim::CompanyView& view,
     }
     row.error = std::format("({})", formatRatio(estimates[0].relativeError));
     if (lockedOnly) {
-        row.flag = "locked ore";
+        // "mineable in N days" or "one project away" once the player is close.
+        const sim::ResourceId close = nearestUnlock(content, view, *found.latest).closest();
+        row.flag = close.valid() ? lockedNote(content, view, close) : "locked ore";
         row.flag_class = "warn";
     } else if (plot.auction && rivalBids(*plot.auction) > 0) {
         row.flag =
@@ -696,6 +804,14 @@ void fillSale(const Session& session, UiModel& model) {
         row.has_flag = !row.flag.empty();
         model.for_sale.push_back(row);
     }
+    model.no_unlisted.clear();
+    if (view.unlistedPlotsRemaining == 0) {
+        model.no_unlisted =
+            view.withdrawnPlots == 0
+                ? text(content, "ui.no_unlisted")
+                : textPlural(content, "ui.no_unlisted_withdrawn", view.withdrawnPlots,
+                             {{"count", std::to_string(view.withdrawnPlots)}});
+    }
 }
 
 // The survey block of the selected plot. Returns whether anything found
@@ -721,7 +837,7 @@ bool fillPanelSurvey(const sim::Content& content, const sim::CompanyView& view,
         row.tonnes = std::format("~{}", formatTonnes(e.tonnesEstimate));
         row.error = std::format("({})", formatRatio(e.relativeError));
         row.locked = resourceLocked(content, view, e.resource);
-        row.needs = row.locked ? lockedNote(content, e.resource) : "";
+        row.needs = row.locked ? lockedNote(content, view, e.resource) : "";
         anyExtractable = anyExtractable || !row.locked;
         valueCents +=
             sim::checkedMulDiv(view.markets[e.resource.index()].price.cents(), e.tonnesEstimate, 1)
@@ -736,8 +852,32 @@ bool fillPanelSurvey(const sim::Content& content, const sim::CompanyView& view,
 // Two independent warnings: the build risk (blind bet, survey still out,
 // empty plot, locked ore only) and competition on the auction. One does not
 // hide the other.
-void fillPanelNotice(const sim::Content& content, const sim::PlotView& plot,
-                     const SurveyLookup& found, bool anyExtractable, PlotPanel& panel) {
+// Buy-ahead advice for a plot whose ore is all locked but nearly in reach:
+// the nearest unlock in the lab, else one the lab could start today. Empty
+// when the player is not close to any of it.
+std::string lockedAdvice(const sim::Content& content, const sim::CompanyView& view,
+                         const sim::SurveyView& survey) {
+    const NearestUnlock nearest = nearestUnlock(content, view, survey);
+    const sim::ResourceId soon = nearest.soon;
+    const sim::Day soonDays = nearest.days;
+    const sim::ResourceId ready = nearest.ready;
+    if (soon.valid()) {
+        return textPlural(content, "ui.notice_locked_soon", soonDays,
+                          {{"resource", content.resources[soon.index()].name},
+                           {"days", std::to_string(soonDays)}});
+    }
+    if (ready.valid()) {
+        const sim::TechId tech = content.resources[ready.index()].unlockedBy;
+        return text(content, "ui.notice_locked_ready",
+                    {{"resource", content.resources[ready.index()].name},
+                     {"tech", content.techs[tech.index()].name}});
+    }
+    return "";
+}
+
+void fillPanelNotice(const sim::Content& content, const sim::CompanyView& view,
+                     const sim::PlotView& plot, const SurveyLookup& found, bool anyExtractable,
+                     PlotPanel& panel) {
     if (panel.listed && plot.auction && rivalBids(*plot.auction) > 0) {
         panel.contest = text(content, "ui.notice_contested");
     }
@@ -758,6 +898,11 @@ void fillPanelNotice(const sim::Content& content, const sim::PlotView& plot,
         return;
     }
     if (!anyExtractable) {
+        panel.notice_class = "warn";
+        panel.notice = lockedAdvice(content, view, *found.latest);
+        if (!panel.notice.empty()) {
+            return;
+        }
         std::string techs;
         for (const EstimateRow& row : panel.estimates) {
             if (!row.needs.empty() && techs.find(row.needs) == std::string::npos) {
@@ -771,7 +916,25 @@ void fillPanelNotice(const sim::Content& content, const sim::PlotView& plot,
 
 void fillPanelActions(const sim::Content& content, const sim::CompanyView& view,
                       const sim::PlotView& plot, const SurveyLookup& found, PlotPanel& panel) {
-    panel.can_survey = !found.pending && (!plot.owner.valid() || panel.owned) && !view.bankrupt;
+    // A worked-out mine has answered the question a survey asks.
+    const bool workedOut = panel.owned && plot.mine &&
+                           (plot.mine->state == sim::MineState::Depleted ||
+                            plot.mine->state == sim::MineState::Closed);
+    panel.can_survey =
+        !found.pending && (!plot.owner.valid() || panel.owned) && !view.bankrupt && !workedOut;
+    if (workedOut) {
+        panel.survey_note = text(content, "ui.survey_depleted");
+    } else if (panel.can_survey && panel.listed && plot.auction) {
+        // An order placed now is processed today and reports after the
+        // survey's duration; the auction is settled earlier in its closing
+        // day than reports are delivered, so the same day is already late.
+        const sim::Day report = view.day + content.balance.surveyDurationDays;
+        if (report >= plot.auction->closesOnDay) {
+            panel.survey_note = text(content, "ui.survey_late",
+                                     {{"report", std::to_string(report)},
+                                      {"day", std::to_string(plot.auction->closesOnDay)}});
+        }
+    }
     panel.survey_label =
         text(content, found.latest != nullptr ? "ui.survey_again" : "ui.survey_first",
              {{"amount", formatMoney(content.balance.surveyCost)}});
@@ -818,7 +981,7 @@ void fillPanel(const Session& session, UiModel& model) {
     panel.odds = oddsText(content, plot);
     const SurveyLookup found = findSurvey(view, plot.id);
     const bool anyExtractable = fillPanelSurvey(content, view, found, panel);
-    fillPanelNotice(content, plot, found, anyExtractable, panel);
+    fillPanelNotice(content, view, plot, found, anyExtractable, panel);
     fillPanelActions(content, view, plot, found, panel);
     model.panel = panel;
 }
@@ -864,7 +1027,7 @@ ResourceRow makeResourceRow(const sim::Content& content, const sim::CompanyView&
     row.stock_value = moneyTimesTonnes(market.price, tonnes);
     row.has_stock = tonnes > 0;
     row.locked = resourceLocked(content, view, sim::ResourceId(r));
-    row.locked_note = row.locked ? lockedNote(content, sim::ResourceId(r)) : "";
+    row.locked_note = row.locked ? lockedNote(content, view, sim::ResourceId(r)) : "";
     row.selected = static_cast<int>(r) == selected;
     const sim::SellPolicy& policy = view.sellPolicies[r];
     row.policy_on = policy.enabled != 0;
@@ -977,6 +1140,7 @@ void fillFinance(const Session& session, UiModel& model) {
     const sim::CompanyView& view = session.view();
     const sim::BalanceParams& b = content.balance;
     model.loans.clear();
+    const sim::Money spendable = view.cash - view.reservedCash;
     for (const sim::LoanView& loan : view.loans) {
         if (!loan.active) {
             continue;
@@ -989,8 +1153,23 @@ void fillFinance(const Session& session, UiModel& model) {
         row.instalment = formatMoney(loan.principalPerMonth) + " + interest";
         row.months = std::to_string(loan.monthsRemaining);
         row.active = loan.active;
+        row.can_repay_all = !view.bankrupt && loan.remaining <= spendable;
         model.loans.push_back(row);
     }
+    // The loan form states the remaining credit and refuses in advance what
+    // the bank would refuse (spec 004).
+    const sim::Money credit = std::max(view.loanCapacity, sim::Money::zero());
+    model.loan_credit = text(content, "ui.loan_credit", {{"amount", formatMoney(credit)}});
+    model.loan_blocked.clear();
+    if (model.loans.size() >= b.maxActiveLoans) {
+        model.loan_blocked =
+            text(content, "ui.loan_blocked_count", {{"count", std::to_string(b.maxActiveLoans)}});
+    } else if (credit < b.loanMinPrincipal) {
+        model.loan_blocked =
+            text(content, "ui.loan_blocked_credit",
+                 {{"amount", formatMoney(credit)}, {"min", formatMoney(b.loanMinPrincipal)}});
+    }
+    model.can_take_loan = model.loan_blocked.empty() && !view.bankrupt;
     model.loan_rule = text(content, "ui.loan_rule", {{"ratio", formatRatio(b.loanAnnualRate)}});
     model.loan_limits = text(content, "ui.loan_limits",
                              {{"amount", formatMoney(view.loanCapacity)},
@@ -1031,23 +1210,58 @@ bool noticeIsWarning(sim::NoticeKind kind) {
     }
 }
 
+// The Log tab's filters (spec 004): 1 mine (own orders, mines, surveys,
+// research, finance), 2 market (land coming to auction, ore sales, world
+// events), 3 rivals (what another company did). Presentation only: decided
+// from the notice kind and whose notice it is.
+int logCategory(const sim::Notice& notice) {
+    using K = sim::NoticeKind;
+    const bool rival = notice.company.valid() && notice.company != Session::kPlayer;
+    switch (notice.kind) {
+        case K::PlotSold:
+        case K::MineStarted:
+        case K::Bankrupt:
+            return rival ? 3 : 1;
+        case K::RivalUnlockedResource:
+            return 3;
+        case K::PlotListed:
+        case K::PlotRelisted:
+        case K::PlotWithdrawn:
+        case K::OreSold:
+        case K::AutoSaleSummary:
+        case K::CoverCostsSale:
+        case K::EventStarted:
+            return 2;
+        case K::EventEnded:
+            // The session's "Game loaded" marker borrows this kind with no event.
+            return notice.event.valid() ? 2 : 1;
+        default:
+            return 1;
+    }
+}
+
+constexpr std::size_t kLogRows = 200;
+
 void fillLog(const Session& session, UiModel& model) {
     model.log.clear();
     model.recent.clear();
     const std::vector<LogEntry>& entries = session.log();
-    // Newest first, capped for the list.
-    const std::size_t count = std::min<std::size_t>(entries.size(), 200);
-    for (std::size_t i = 0; i < count; ++i) {
+    // Newest first, capped for the list. The dashboard's "Recent" ignores
+    // the filter.
+    for (std::size_t i = 0; i < entries.size() && model.log.size() < kLogRows; ++i) {
         const LogEntry& entry = entries[entries.size() - 1 - i];
         LogRow row;
         row.day = formatDay(entry.day);
         row.text = entry.text;
         row.warning = noticeIsWarning(entry.notice.kind);
-        if (model.recent.size() < 3) {
+        if (i < 3) {
             model.recent.push_back(row);
         }
-        model.log.push_back(row);
+        if (model.log_filter == 0 || logCategory(entry.notice) == model.log_filter) {
+            model.log.push_back(row);
+        }
     }
+    model.log_empty = model.log.empty() ? text(session.content(), "ui.log_empty") : "";
 }
 
 void fillPauseRows(const Session& session, UiModel& model) {

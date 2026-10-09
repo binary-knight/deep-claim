@@ -9,7 +9,10 @@
 // probed twice: on a fresh game, and on a fixed-seed game played forward
 // until the player owns a plot with a working mine, a loan and a research
 // project, with a plot selected and the auto-pause menu open, so every
-// table has rows.
+// table has rows. A third pass plays the same game on to the states spec
+// 004 added (a survey report just in, a survey that would land late, credit
+// exhausted, no unlisted land left) and lays out the Log tab under each of
+// its filters.
 // Not part of the shipped game.
 #include "sim/commands.h"
 #include "sim/view.h"
@@ -18,6 +21,7 @@
 #include "chart_element.h"
 #include "content/loader.h"
 #include "game/auto_pause.h"
+#include "game/format.h"
 #include "game/session.h"
 #include "platform/services.h"
 
@@ -345,6 +349,152 @@ bool playScenario(game::App& app, const sim::Content& content) {
     return true;
 }
 
+bool hasNeed(const game::UiModel& model, const std::string& title) {
+    return std::any_of(model.needs.begin(), model.needs.end(),
+                       [&](const game::NeedRow& row) { return row.title == title; });
+}
+
+// A new company has money and an empty lab: the dashboard must say so.
+bool checkFreshNeeds(const game::App& app, const sim::Content& content) {
+    if (hasNeed(app.model(), game::text(content, "ui.need_lab_idle_title"))) {
+        return true;
+    }
+    std::cout << "SCENARIO: a fresh game has no lab-idle row under Needs you\n";
+    return false;
+}
+
+constexpr int kLateMaxDays = 1500;
+
+// Plays the populated game on to the states spec 004 added. In order: a
+// survey report lands on a plot still at auction (needs-you row); the land
+// queue runs dry; credit is drawn to nothing (loan form disabled with its
+// reason); and a listed plot is selected whose auction closes before a
+// survey ordered now could report (the survey warning). Returns false with
+// a reason when the fixed seed no longer reaches one of them.
+bool playLateScenario(game::App& app, const sim::Content& content) {
+    game::Session& session = app.session();
+    const auto fail = [&](const char* what) {
+        std::cout << std::format("SCENARIO (late): {} ({})\n", what, app.model().day);
+        return false;
+    };
+    // 1. Survey the listed plot whose auction closes last, and wait for the report.
+    sim::PlotId surveyed;
+    sim::Day latest = 0;
+    for (const sim::PlotView& plot : session.view().plots) {
+        if (plot.listing == sim::PlotListing::Listed && plot.auction &&
+            plot.auction->closesOnDay > latest) {
+            surveyed = plot.id;
+            latest = plot.auction->closesOnDay;
+        }
+    }
+    if (!surveyed.valid() || latest <= session.day() + content.balance.surveyDurationDays + 1) {
+        return fail("no auction is open long enough to survey");
+    }
+    session.submit(sim::CommissionSurvey{{}, surveyed});
+    for (sim::Day d = 0; d <= content.balance.surveyDurationDays; ++d) {
+        session.stepOneDay();
+    }
+    app.refreshNow();
+    const std::string reportRow = game::text(content, "ui.need_survey_in_title",
+                                             {{"plot", std::format("#{}", surveyed.value() + 1)}});
+    if (!hasNeed(app.model(), reportRow)) {
+        return fail("the survey report did not raise a needs-you row");
+    }
+    std::cout << std::format("\nlate: {}, \"{}\" under Needs you\n", app.model().day, reportRow);
+    return true;
+}
+
+// The second half of the late scenario, probed separately so the survey row
+// above is still on the dashboard when it is laid out.
+bool playEndgameScenario(game::App& app, const sim::Content& content) {
+    game::Session& session = app.session();
+    const auto fail = [&](const char* what) {
+        std::cout << std::format("SCENARIO (endgame): {} ({})\n", what, app.model().day);
+        return false;
+    };
+    // 2. Until every plot has been offered once.
+    for (int day = 0; day < kLateMaxDays && session.view().unlistedPlotsRemaining > 0; ++day) {
+        session.stepOneDay();
+    }
+    if (session.view().unlistedPlotsRemaining > 0 || session.gameOver()) {
+        return fail("the land queue did not run dry with the player solvent");
+    }
+    // 3. Draw the remaining credit, in as many loans as the bank allows.
+    if (session.view().loanCapacity >= content.balance.loanMinPrincipal) {
+        session.submit(sim::TakeLoan{{}, session.view().loanCapacity});
+        session.stepOneDay();
+    }
+    // 4. A listed plot a survey ordered today would report on too late.
+    sim::PlotId late;
+    for (int day = 0; day < kLateMaxDays && !late.valid(); ++day) {
+        for (const sim::PlotView& plot : session.view().plots) {
+            if (plot.listing == sim::PlotListing::Listed && plot.auction &&
+                session.day() + content.balance.surveyDurationDays >= plot.auction->closesOnDay) {
+                late = plot.id;
+                break;
+            }
+        }
+        if (!late.valid()) {
+            session.stepOneDay();
+        }
+    }
+    if (!late.valid() || session.gameOver()) {
+        return fail("no auction is about to close");
+    }
+    app.refreshNow();
+    app.selectPlot(static_cast<int>(late.value()));
+    const game::UiModel& model = app.model();
+    if (model.no_unlisted.empty()) {
+        return fail("the Plots tab does not say the land has run out");
+    }
+    if (model.can_take_loan || model.loan_blocked.empty()) {
+        return fail("the loan form is not disabled with a reason at zero credit");
+    }
+    if (model.panel.survey_note.empty()) {
+        return fail("the selected plot carries no late-survey warning");
+    }
+    std::cout << std::format("\nendgame: {}\n  plots: {}\n  loans: {}\n  survey: {}\n", model.day,
+                             model.no_unlisted, model.loan_blocked, model.panel.survey_note);
+    return true;
+}
+
+// The Log tab under each filter, in both frames. Each filter must leave
+// either rows or the "nothing here" line.
+bool probeLogFilters(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    bool ok = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== log filters, frame {}x{}{} ==\n", frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        std::size_t all = 0;
+        std::size_t parts = 0;
+        for (int filter = 0; filter < 4; ++filter) {
+            app.setLogFilter(filter);
+            const std::size_t rows = app.model().log.size();
+            std::cout << std::format("filter {}: {} rows{}\n", filter, rows,
+                                     app.model().log_empty.empty() ? "" : " (empty line shown)");
+            if ((rows == 0) == app.model().log_empty.empty()) {
+                std::cout << "    filter shows neither rows nor the empty line\n";
+                ok = false;
+            }
+            all = filter == 0 ? rows : all;
+            parts += filter == 0 ? 0 : rows;
+            const bool passed = probeTab(context, app, system, frame, 5, false);
+            ok = ok && passed;
+        }
+        // Every entry belongs to exactly one filter (the list is capped, so
+        // the parts can only exceed the capped whole).
+        if (parts < all) {
+            std::cout << std::format("    filters cover {} of {} rows\n", parts, all);
+            ok = false;
+        }
+        app.setLogFilter(0);
+    }
+    return ok;
+}
+
 // Every tab in both frames. Returns false when any tab fails.
 bool probeFrames(Rml::Context& context, game::App& app, LoggingSystem& system, const char* label,
                  bool pauseMenu) {
@@ -361,6 +511,33 @@ bool probeFrames(Rml::Context& context, game::App& app, LoggingSystem& system, c
         }
     }
     return ok;
+}
+
+constexpr int kLayoutFailure = 3;
+constexpr int kScenarioFailure = 5;
+
+// The played game, stage by stage, each laid out before the next is played.
+// Returns 0, or the exit code of the first stage that failed.
+int probeScenarios(Rml::Context& context, game::App& app, LoggingSystem& system,
+                   const sim::Content& content) {
+    if (!playScenario(app, content)) {
+        return kScenarioFailure;
+    }
+    if (!probeFrames(context, app, system, "populated", true)) {
+        return kLayoutFailure;
+    }
+    if (!playLateScenario(app, content)) {
+        return kScenarioFailure;
+    }
+    if (!probeFrames(context, app, system, "survey in", false)) {
+        return kLayoutFailure;
+    }
+    if (!playEndgameScenario(app, content)) {
+        return kScenarioFailure;
+    }
+    const bool laidOut = probeFrames(context, app, system, "endgame", false);
+    const bool filtered = probeLogFilters(context, app, system);
+    return laidOut && filtered ? 0 : kLayoutFailure;
 }
 
 }  // namespace
@@ -401,13 +578,16 @@ int main(int argc, char** argv) {
             exitCode = 4;
         }
         app.update(0.0);
-        if (!probeFrames(*context, app, system, "fresh", false)) {
+        if (!checkFreshNeeds(app, *loaded.content)) {
+            exitCode = 5;
+        }
+        // A fresh log has nothing from rivals yet: the filters' empty line.
+        if (!probeFrames(*context, app, system, "fresh", false) ||
+            !probeLogFilters(*context, app, system)) {
             exitCode = 3;
         }
-        if (!playScenario(app, *loaded.content)) {
-            exitCode = 5;
-        } else if (!probeFrames(*context, app, system, "populated", true)) {
-            exitCode = 3;
+        if (const int code = probeScenarios(*context, app, system, *loaded.content); code != 0) {
+            exitCode = code;
         }
         std::cout << (exitCode == 0 ? "\nLAYOUT OK\n" : "\nLAYOUT FAILURE\n");
     }
