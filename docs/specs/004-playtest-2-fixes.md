@@ -72,3 +72,40 @@ World size and listing pace (spec 005), balance (spec 006), save slots.
 
 ## Decisions
 - 2026-10-09: drafted from playtest 2.
+
+## Plan
+State (sim, all serialized and hashed):
+- `Plot::unsoldCount` (rounds closed without a sale in the current run of
+  listings) and `Plot::relistNotBefore` (first day a withdrawn plot may be
+  listed again, 0 otherwise).
+- `WorldState::withdrawnQueue`: withdrawn plots in withdrawal order. The
+  monthly lister offers never-listed plots first and takes the front of
+  this queue only when they have run out and its cooldown has passed.
+- `BalanceParams::maxUnsoldRounds`, `relistCooldownDays`.
+- Notices `PlotWithdrawn` and `RivalUnlockedResource`, both public.
+- `CompanyView`: `unlistedPlotsRemaining`, `withdrawnPlots`,
+  `unlockDaysRemaining[]`, `unlockReady[]`.
+
+Data keys:
+- `balance.json`: `max_unsold_rounds` 3, `relist_cooldown_days` 360. Three
+  rounds is 135 days on the market with the ask already cut by a fifth or
+  more: every company has had four months and three prices to want it. A
+  year away is long enough for prices, research and cash to have changed
+  the answer, and short enough that the land is seen again in a normal
+  game. Zero rounds means "relist forever" (the old rule).
+- `strings.json`: `notice.plot_withdrawn`, `notice.rival_unlocked_resource`,
+  `notice.auto_sale_month`, `notice.auto_sale_item`, `ui.pause_on.research_complete`,
+  and the `ui.*` sentences for the rows, warnings and reasons listed under
+  Player-facing behaviour.
+- Auto-pause file: new key `research_complete`.
+- Trace: `StartResearch` command records gain `"tech_id"`.
+
+Files:
+- Sim: `world_state.h`, `serialize.h`, `content.h`, `commands.{h,cpp}`,
+  `plot_market.cpp`, `research.cpp`, `mines.cpp`, `view.{h,cpp}`, `save.cpp`,
+  `worldgen.cpp`; `content/src/loader.cpp`; `data/balance.json`.
+- Session: `session.cpp` (log filter, summary collapse), `auto_pause.*`,
+  `text.cpp` (rejection join, capitals), `trace.cpp`, `replay_main.cpp`.
+- Client: `ui_model.*`, `app.*`, `main.rml`, `main.rcss`, `layout_probe.cpp`.
+- Prose: `tools/prose/draft.tsv`, `polished.tsv`, `data/strings.json`.
+- Tests beside each.
