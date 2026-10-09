@@ -191,13 +191,13 @@ std::optional<std::filesystem::path> App::takeScreenshotRequest() {
 
 void App::screenshotDone(const std::filesystem::path& file, bool ok) {
     if (!ok) {
-        setStatus("Screenshot failed.");
+        setStatus(text(*content_, "status.screenshot_failed"));
         return;
     }
     if (trace_) {
         trace_->screenshot(session_->day(), file.filename().string());
     }
-    setStatus("Screenshot saved: " + file.filename().string());
+    setStatus(text(*content_, "status.screenshot_saved", {{"name", file.filename().string()}}));
 }
 
 void App::bindModel() {
@@ -219,6 +219,9 @@ void App::bindModel() {
         h.RegisterMember("mine", &PlotRow::mine);
         h.RegisterMember("capex", &PlotRow::capex);
         h.RegisterMember("odds", &PlotRow::odds);
+        h.RegisterMember("odds_line", &PlotRow::odds_line);
+        h.RegisterMember("costs_line", &PlotRow::costs_line);
+        h.RegisterMember("build_blocked", &PlotRow::build_blocked);
         h.RegisterMember("can_afford_mine", &PlotRow::can_afford_mine);
         h.RegisterMember("listed", &PlotRow::listed);
         h.RegisterMember("mine_here", &PlotRow::mine_here);
@@ -283,6 +286,24 @@ void App::bindModel() {
     ctor.Bind("mine_build_days", &model_.mine_build_days);
     ctor.Bind("grace_months", &model_.grace_months);
     ctor.Bind("loan_terms", &model_.loan_terms);
+    ctor.Bind("ui_shortcuts", &model_.ui_shortcuts);
+    ctor.Bind("ui_how_to_1", &model_.ui_how_to_1);
+    ctor.Bind("ui_how_to_2", &model_.ui_how_to_2);
+    ctor.Bind("ui_how_to_3", &model_.ui_how_to_3);
+    ctor.Bind("ui_company_terms", &model_.ui_company_terms);
+    ctor.Bind("ui_finance_cash", &model_.ui_finance_cash);
+    ctor.Bind("ui_finance_debt", &model_.ui_finance_debt);
+    ctor.Bind("ui_finance_storage", &model_.ui_finance_storage);
+    ctor.Bind("ui_no_events", &model_.ui_no_events);
+    ctor.Bind("ui_plots_intro", &model_.ui_plots_intro);
+    ctor.Bind("ui_policy_form_keep", &model_.ui_policy_form_keep);
+    ctor.Bind("ui_policy_form_mid", &model_.ui_policy_form_mid);
+    ctor.Bind("ui_policy_form_end", &model_.ui_policy_form_end);
+    ctor.Bind("ui_policy_hint", &model_.ui_policy_hint);
+    ctor.Bind("ui_chart_hint", &model_.ui_chart_hint);
+    ctor.Bind("ui_borrow_line", &model_.ui_borrow_line);
+    ctor.Bind("ui_each_mine_opex", &model_.ui_each_mine_opex);
+    ctor.Bind("ui_game_over", &model_.ui_game_over);
     ctor.Bind("speed_label", &model_.speed_label);
     ctor.Bind("speed", &model_.speed);
     ctor.Bind("tab", &model_.tab);
@@ -551,11 +572,11 @@ void App::onApplyPolicy(bool enabled) {
     std::int64_t reserve = 0;
     sim::Money floor;
     if (!game::parseTonnes(model_.policy_reserve_input, reserve)) {
-        setStatus("Set the reserve in tonnes to keep on the pile, such as 0 or 2,500.");
+        setStatus(text(*content_, "status.reserve_prompt"));
         return;
     }
     if (!game::parseMoney(model_.policy_floor_input, floor)) {
-        setStatus("Set the floor price per tonne to accept, such as 0 or 850.");
+        setStatus(text(*content_, "status.floor_prompt"));
         return;
     }
     sim::SetSellPolicy command;
@@ -566,41 +587,38 @@ void App::onApplyPolicy(bool enabled) {
     command.floorPrice = floor;
     session_->submit(command);
     const std::string& name = content_->resources[static_cast<std::size_t>(index)].name;
-    setStatus(enabled ? "Auto-sell for " + name + " starts tomorrow."
-                      : "Auto-sell for " + name + " shuts off tomorrow.");
+    setStatus(text(*content_, enabled ? "status.policy_starts" : "status.policy_stops",
+                   {{"resource", name}}));
 }
 
 void App::onToggleCoverCosts() {
     const bool enable = !session_->view().coverCosts;
     session_->submit(
         sim::SetCoverCosts{Session::kPlayer, enable ? std::uint8_t{1} : std::uint8_t{0}});
-    setStatus(enable ? "Cover costs at month end turns on tomorrow."
-                     : "Cover costs at month end turns off tomorrow.");
+    setStatus(text(*content_, enable ? "status.cover_on" : "status.cover_off"));
 }
 
 void App::onSurvey(int plotIndex) {
     session_->submit(sim::CommissionSurvey{Session::kPlayer,
                                            sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
-    setStatus("Survey queued; it starts tomorrow and results arrive in the log.");
+    setStatus(text(*content_, "status.survey_queued"));
 }
 
 void App::onBid(int plotIndex) {
     sim::Money amount;
     if (!game::parseMoney(model_.bid_input, amount)) {
-        setStatus("Enter a bid amount such as 1.2M, 850k or 1,200,000.");
+        setStatus(text(*content_, "status.bid_prompt"));
         return;
     }
     session_->submit(sim::BidOnPlot{Session::kPlayer,
                                     sim::PlotId(static_cast<std::uint32_t>(plotIndex)), amount});
-    setStatus(
-        "Bid of " + formatMoney(amount) +
-        " queued for tomorrow; sealed until the auction closes. Rejections appear in the log.");
+    setStatus(text(*content_, "status.bid_queued", {{"amount", formatMoney(amount)}}));
 }
 
 void App::onBuild(int plotIndex) {
     session_->submit(
         sim::BuildMine{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
-    setStatus("Mine queued; construction starts tomorrow if the order is accepted.");
+    setStatus(text(*content_, "status.build_queued"));
 }
 
 void App::onToggleMine(int mineIndex) {
@@ -610,7 +628,7 @@ void App::onToggleMine(int mineIndex) {
             const bool operate = mine.state != sim::MineState::Operating;
             session_->submit(sim::SetMineState{Session::kPlayer, id,
                                                operate ? std::uint8_t{1} : std::uint8_t{0}});
-            setStatus(operate ? "Reopening the mine." : "Mothballing the mine.");
+            setStatus(text(*content_, operate ? "status.mine_reopen" : "status.mine_mothball"));
             return;
         }
     }
@@ -623,40 +641,40 @@ void App::onSell(int resourceIndex, bool all) {
     }
     std::int64_t tonnes = session_->view().inventoryTonnes[static_cast<std::size_t>(resourceIndex)];
     if (!all && !game::parseTonnes(model_.sell_input, tonnes)) {
-        setStatus("Enter a quantity in tonnes, such as 1,500.");
+        setStatus(text(*content_, "status.sell_prompt"));
         return;
     }
     // The sim decides whether the quantity is valid; its reason shows in the log.
     session_->submit(sim::SellOre{
         Session::kPlayer, sim::ResourceId(static_cast<std::uint32_t>(resourceIndex)), tonnes});
-    setStatus("Sale of " + formatTonnes(tonnes) + " queued at today's price.");
+    setStatus(text(*content_, "status.sale_queued", {{"tonnes", formatTonnes(tonnes)}}));
 }
 
 void App::onTakeLoan() {
     sim::Money amount;
     if (!game::parseMoney(model_.loan_input, amount)) {
-        setStatus("Enter a loan amount such as 2M.");
+        setStatus(text(*content_, "status.loan_prompt"));
         return;
     }
     session_->submit(sim::TakeLoan{Session::kPlayer, amount});
-    setStatus("Loan of " + formatMoney(amount) + " requested.");
+    setStatus(text(*content_, "status.loan_requested", {{"amount", formatMoney(amount)}}));
 }
 
 void App::onRepay(int loanIndex) {
     sim::Money amount;
     if (!game::parseMoney(model_.repay_input, amount)) {
-        setStatus("Enter an amount to repay.");
+        setStatus(text(*content_, "status.repay_prompt"));
         return;
     }
     session_->submit(sim::RepayLoan{Session::kPlayer,
                                     sim::LoanId(static_cast<std::uint32_t>(loanIndex)), amount});
-    setStatus("Repayment of " + formatMoney(amount) + " ordered.");
+    setStatus(text(*content_, "status.repayment_ordered", {{"amount", formatMoney(amount)}}));
 }
 
 void App::onResearch(int techIndex) {
     session_->submit(
         sim::StartResearch{Session::kPlayer, sim::TechId(static_cast<std::uint32_t>(techIndex))});
-    setStatus("Research queued; it starts tomorrow if the order is accepted.");
+    setStatus(text(*content_, "status.research_queued"));
 }
 
 void App::onSave() {
@@ -664,17 +682,18 @@ void App::onSave() {
     const std::filesystem::path temp = path.string() + ".tmp";
     const std::vector<std::uint8_t> bytes = session_->save();
     if (!writeFile(temp, bytes)) {
-        setStatus("Could not write " + temp.string());
+        setStatus(text(*content_, "status.save_write_failed", {{"name", temp.string()}}));
         return;
     }
     // Replace the previous save only once the new one is fully on disk.
     std::error_code error;
     std::filesystem::rename(temp, path, error);
     if (error) {
-        setStatus("Could not replace " + path.string() + ": " + error.message());
+        setStatus(text(*content_, "status.save_replace_failed",
+                       {{"name", path.string()}, {"reason", error.message()}}));
         return;
     }
-    setStatus("Saved to " + path.string());
+    setStatus(text(*content_, "status.saved", {{"name", path.string()}}));
     if (trace_) {
         trace_->saved(session_->day(), keepSaveCopy("save", bytes));
     }
@@ -684,13 +703,13 @@ void App::onLoad() {
     const std::filesystem::path path = services_->saveDirectory() / kSaveFile;
     std::ifstream file(path, std::ios::binary);
     if (!file) {
-        setStatus("No save found at " + path.string());
+        setStatus(text(*content_, "status.no_save", {{"name", path.string()}}));
         return;
     }
     const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)),
                                           std::istreambuf_iterator<char>());
     if (!session_->load(bytes)) {
-        setStatus("That save is not valid for this version of the game data.");
+        setStatus(text(*content_, "status.save_invalid"));
         return;
     }
     model_.selected_plot = -1;
@@ -699,19 +718,19 @@ void App::onLoad() {
         const std::string copy = keepSaveCopy("load", bytes);
         trace_->loaded(session_->day(), copy, session_->stateHash());
         if (copy.empty()) {
-            setStatus("Game loaded, but the playtest copy of the save could not be written.");
+            setStatus(text(*content_, "status.loaded_copy_failed"));
             refresh();
             return;
         }
     }
     refresh();
-    setStatus("Game loaded.");
+    setStatus(text(*content_, "status.loaded"));
 }
 
 void App::onNewGame() {
     newGame(clockSeed());
     refresh();
-    setStatus("New game started.");
+    setStatus(text(*content_, "status.new_game"));
 }
 
 }  // namespace game

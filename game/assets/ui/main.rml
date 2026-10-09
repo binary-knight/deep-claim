@@ -3,6 +3,8 @@
     <title>Deep Claim</title>
     <link type="text/rcss" href="main.rcss"/>
 </head>
+<!-- Every sentence here is bound from the prose catalogue (data/strings.json,
+     spec 002); only one- or two-word labels on buttons and columns are literal. -->
 <body data-model="game">
     <div id="header">
         <div class="stat"><span class="label">Company</span><span class="value">{{company}}</span></div>
@@ -33,7 +35,7 @@
             <button data-class-active="tab == 3" data-event-click="set_tab(3)">Research</button>
             <button data-class-active="tab == 4" data-event-click="set_tab(4)">Finance</button>
             <button data-class-active="tab == 5" data-event-click="set_tab(5)">Log</button>
-            <p class="muted" style="margin-top: 20dp; font-size: 12dp;">Space pauses, 1 2 3 set speed, period steps one day, F8 opens the debugger.</p>
+            <p class="muted" style="margin-top: 20dp; font-size: 12dp;">{{ui_shortcuts}}</p>
         </div>
 
         <div id="content">
@@ -42,9 +44,9 @@
                 <h1>Dashboard</h1>
                 <div class="card" data-if="show_intro">
                     <h2>How to play</h2>
-                    <p>The game starts paused. Orders you place are applied when the next day runs, and the log tells you whether they were accepted.</p>
-                    <p>1. Plots: survey a listed plot ({{survey_cost}}, {{survey_days}} days) to estimate its deposits, then place a sealed bid before the auction closes. 2. Build a mine on a plot you own; it takes {{mine_build_days}} days and then produces every day. 3. Sell ore from the Market tab when the price suits you; storage costs money each month. 4. Research improves surveys and mines. 5. Stay solvent: more than {{grace_months}} month-ends in the red is bankruptcy.</p>
-                    <p class="muted">Cash is what you hold; spendable is cash minus your standing bids. Only one save slot exists; New game and Load replace the current game without asking.</p>
+                    <p>{{ui_how_to_1}}</p>
+                    <p>{{ui_how_to_2}}</p>
+                    <p class="muted">{{ui_how_to_3}}</p>
                     <button class="small" data-event-click="hide_intro">Hide</button>
                 </div>
                 <div class="cards">
@@ -53,13 +55,13 @@
                         <p>{{plots_summary}}</p>
                         <p>{{mines_summary}}</p>
                         <p>{{research_summary}}</p>
-                        <p class="muted">Mine opex today {{mine_opex}}, survey error {{survey_noise}}</p>
+                        <p class="muted">{{ui_company_terms}}</p>
                     </div>
                     <div class="card">
                         <h2>Finance</h2>
-                        <p>Cash {{cash}}, spendable {{spendable}}</p>
-                        <p>Debt {{debt}}, can still borrow {{loan_capacity}}</p>
-                        <p>Storage {{storage_cost}}</p>
+                        <p>{{ui_finance_cash}}</p>
+                        <p>{{ui_finance_debt}}</p>
+                        <p>{{ui_finance_storage}}</p>
                         <p class="warning" data-if="storage_warning != ''">{{storage_warning}}</p>
                         <p class="danger" data-if="insolvency != ''">{{insolvency}}</p>
                     </div>
@@ -70,7 +72,7 @@
                     <div class="card">
                         <h2>World events</h2>
                         <p data-for="event : events" class="warning">{{event}}</p>
-                        <p class="muted" data-if="events.size == 0">Nothing unusual.</p>
+                        <p class="muted" data-if="events.size == 0">{{ui_no_events}}</p>
                     </div>
                 </div>
                 <h2>Warehouse</h2>
@@ -90,7 +92,7 @@
             <!-- Plots -->
             <div data-if="tab == 1">
                 <h1>Plots</h1>
-                <p class="muted">Surveys cost money and take time; they estimate what lies beneath. Bids are sealed; the highest at close wins and pays its bid.</p>
+                <p class="muted">{{ui_plots_intro}}</p>
                 <table>
                     <tr><th>Plot</th><th>Region</th><th>Area</th><th>Status</th><th>Ask</th><th>Auction</th><th>Survey</th><th>Mine</th></tr>
                     <tr data-for="p : plots" class="clickable" data-class-selected="p.index == selected_plot" data-event-click="select_plot(p.index)">
@@ -101,8 +103,8 @@
                 <div class="card" style="margin-top: 12dp;">
                     <h2>{{selected_plot_title}}</h2>
                     <div data-for="p : plots" data-if="p.index == selected_plot">
-                        <p>{{p.region}} odds of holding each resource: {{p.odds}}.</p>
-                        <p>A mine here costs {{p.capex}} and takes {{mine_build_days}} days to build; a survey costs {{survey_cost}} and reports in {{survey_days}} days.</p>
+                        <p>{{p.odds_line}}</p>
+                        <p>{{p.costs_line}}</p>
                         <div class="row">
                             <button data-if="p.can_survey" data-event-click="survey(p.index)">Survey</button>
                             <button class="disabled" data-if="!p.can_survey">Survey</button>
@@ -111,7 +113,7 @@
                                 <button class="primary" data-event-click="bid(p.index)">Place bid</button>
                             </span>
                             <button class="primary" data-if="p.can_build && p.can_afford_mine" data-event-click="build(p.index)">Build mine ({{p.capex}})</button>
-                            <button class="disabled" data-if="p.can_build && !p.can_afford_mine">Build mine ({{p.capex}}): not enough spendable cash, see Finance for a loan</button>
+                            <button class="disabled" data-if="p.can_build && !p.can_afford_mine">{{p.build_blocked}}</button>
                             <button data-if="p.can_toggle_mine" data-event-click="toggle_mine(p.mine_index)">
                                 <span data-if="p.mine_operating">Mothball</span><span data-if="!p.mine_operating">Reopen</span>
                             </button>
@@ -141,20 +143,20 @@
                     <h2>Auto-sell policy</h2>
                     <p>{{policy_summary}}</p>
                     <div class="row">
-                        <span>Keep</span>
+                        <span>{{ui_policy_form_keep}}</span>
                         <input class="text" type="text" data-value="policy_reserve_input" style="width: 90dp;"/>
-                        <span>t in the warehouse. Sell only at</span>
+                        <span>{{ui_policy_form_mid}}</span>
                         <input class="text" type="text" data-value="policy_floor_input" style="width: 90dp;"/>
-                        <span>per tonne or more.</span>
+                        <span>{{ui_policy_form_end}}</span>
                         <button class="small primary" data-event-click="apply_policy">Apply</button>
                         <button class="small" data-if="policy_enabled" data-event-click="toggle_policy">Turn off</button>
                         <button class="small" data-if="!policy_enabled" data-event-click="toggle_policy">Turn on</button>
                     </div>
-                    <p class="muted">Zero in either field means no limit. Automatic sales are tallied in the ledger once a month.</p>
+                    <p class="muted">{{ui_policy_hint}}</p>
                 </div>
                 <h2>{{selected_resource_title}}</h2>
                 <price-chart data-attr-resource="selected_resource"/>
-                <p class="muted">Columns are daily prices; the light line is the base price. Selling into the market lowers tomorrow's price; demand drifts and world events move it too.</p>
+                <p class="muted">{{ui_chart_hint}}</p>
             </div>
 
             <!-- Research -->
@@ -176,7 +178,7 @@
                 <div class="cards">
                     <div class="card">
                         <h2>Borrow</h2>
-                        <p>Capacity {{loan_capacity}}. {{loan_terms}}</p>
+                        <p>{{ui_borrow_line}}</p>
                         <div class="row">
                             <input class="text" type="text" data-value="loan_input"/>
                             <button class="primary" data-event-click="take_loan">Take loan</button>
@@ -184,8 +186,8 @@
                     </div>
                     <div class="card">
                         <h2>Costs</h2>
-                        <p>Storage {{storage_cost}}</p>
-                        <p>Each operating mine {{mine_opex}}</p>
+                        <p>{{ui_finance_storage}}</p>
+                        <p>{{ui_each_mine_opex}}</p>
                         <p class="warning" data-if="storage_warning != ''">{{storage_warning}}</p>
                     </div>
                     <div class="card">
@@ -225,7 +227,7 @@
     <div id="overlay" data-if="game_over">
         <div class="panel">
             <h1>Bankrupt</h1>
-            <p>{{company}} could not cover its debts for too long. The courts have closed the mines.</p>
+            <p>{{ui_game_over}}</p>
             <p class="warning">{{status_line}}</p>
             <button class="primary" data-event-click="new_game">Start a new company</button>
             <button data-event-click="load">Load last save</button>

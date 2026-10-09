@@ -30,6 +30,10 @@ struct PlotRow {
     std::string mine;     // mine state or ""
     std::string capex;    // capex quote
     std::string odds;     // the region's chance of each resource
+    // Prose for the selected-plot panel, filled from the catalogue.
+    std::string odds_line;      // "Copper Belt odds of holding each resource: ..."
+    std::string costs_line;     // "A mine here costs ... and takes ... days ..."
+    std::string build_blocked;  // the disabled Build button's label
     bool can_afford_mine = false;
     bool listed = false;
     bool mine_here = false;
@@ -100,6 +104,26 @@ struct UiModel {
     std::string mine_build_days;
     std::string grace_months;
     std::string loan_terms;
+    // Prose from the catalogue (ui.*), bound into the document so no
+    // sentence a player reads is a literal in the RML.
+    std::string ui_shortcuts;
+    std::string ui_how_to_1;
+    std::string ui_how_to_2;
+    std::string ui_how_to_3;
+    std::string ui_company_terms;
+    std::string ui_finance_cash;
+    std::string ui_finance_debt;
+    std::string ui_finance_storage;
+    std::string ui_no_events;
+    std::string ui_plots_intro;
+    std::string ui_policy_form_keep;
+    std::string ui_policy_form_mid;
+    std::string ui_policy_form_end;
+    std::string ui_policy_hint;
+    std::string ui_chart_hint;
+    std::string ui_borrow_line;  // capacity sentence followed by the loan terms
+    std::string ui_each_mine_opex;
+    std::string ui_game_over;
 
     // Dashboard
     std::string loan_capacity;

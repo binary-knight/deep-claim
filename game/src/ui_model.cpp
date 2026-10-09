@@ -102,12 +102,14 @@ std::string auctionText(const sim::PlotView& plot) {
     if (!plot.auction) {
         return "";
     }
-    std::string text = std::format("closes {}, {} bid{}", formatDay(plot.auction->closesOnDay),
-                                   plot.auction->bidCount, plot.auction->bidCount == 1 ? "" : "s");
+    std::string line = textPlural(content, "ui.auction", plot.auction->bidCount,
+                                  {{"day", formatDay(plot.auction->closesOnDay)},
+                                   {"bids", std::to_string(plot.auction->bidCount)}});
     if (plot.auction->myBid > sim::Money::zero()) {
-        text += ", yours " + formatMoney(plot.auction->myBid);
+        line += ", " +
+                text(content, "ui.auction_yours", {{"amount", formatMoney(plot.auction->myBid)}});
     }
-    return text;
+    return line;
 }
 
 // The player's latest completed survey of a plot plus any pending one.
@@ -135,13 +137,14 @@ std::string surveyText(const sim::Content& content, const sim::CompanyView& view
                                 formatTonnes(e.tonnesEstimate));
         }
         if (text.empty()) {
-            text = "nothing found";  // presence is certain; no error band applies
+            text = game::text(content, "ui.survey_none");  // presence is certain; no error band
         } else {
             text += std::format(" (error {})", formatRatio(latest->estimates[0].relativeError));
         }
     }
     if (pending) {
-        text += text.empty() ? "survey in progress" : "; new survey in progress";
+        text += text.empty() ? game::text(content, "ui.survey_pending")
+                             : "; " + game::text(content, "ui.survey_pending_again");
     }
     return text;
 }
@@ -163,14 +166,16 @@ std::string mineText(const sim::Content& content, const sim::CompanyView& view,
         std::string output;
         for (std::uint32_t r = 0; r < mine.lastDayTonnes.size(); ++r) {
             if (mine.lastDayTonnes[r] > 0) {
-                output += std::format(" {} {}", formatTonnes(mine.lastDayTonnes[r]),
-                                      content.resources[r].name);
+                output +=
+                    std::format("{}{} {}", output.empty() ? "" : ", ",
+                                formatTonnes(mine.lastDayTonnes[r]), content.resources[r].name);
             }
         }
         if (!output.empty()) {
-            text += ", today:" + output;
+            text += ", " + game::text(content, "ui.mine_today", {{"output", output}});
         }
-        text += ", opex " + formatMoney(mine.dailyOpex) + "/day";
+        text +=
+            ", " + game::text(content, "ui.mine_opex", {{"amount", formatMoney(mine.dailyOpex)}});
     }
     return text;
 }
@@ -191,6 +196,15 @@ PlotRow makePlotRow(const sim::Content& content, const sim::CompanyView& view,
         const std::int64_t percent = prior.presenceProb.raw() / (sim::Fixed::kScale / 100);
         row.odds += std::format("{} {}%", content.resources[prior.resource.index()].name, percent);
     }
+    row.odds_line =
+        game::text(content, "ui.plot_odds", {{"region", row.region}, {"odds", row.odds}});
+    row.costs_line =
+        game::text(content, "ui.plot_costs",
+                   {{"amount", row.capex},
+                    {"days", std::to_string(content.balance.mineBuildDays)},
+                    {"survey_cost", formatMoney(content.balance.surveyCost)},
+                    {"survey_days", std::to_string(content.balance.surveyDurationDays)}});
+    row.build_blocked = game::text(content, "ui.build_blocked", {{"amount", row.capex}});
     row.listed = plot.listing == sim::PlotListing::Listed;
     row.owned = plot.owner == Session::kPlayer;
     row.status = plotStatus(view, plot);
@@ -220,9 +234,11 @@ void fillPlots(const Session& session, UiModel& model) {
     }
     if (model.selected_plot >= 0 && model.selected_plot < static_cast<int>(model.plots.size())) {
         const PlotRow& row = model.plots[static_cast<std::size_t>(model.selected_plot)];
-        model.selected_plot_title = std::format("{} ({}, {})", row.name, row.region, row.area);
+        model.selected_plot_title =
+            game::text(content, "ui.selected_plot_title",
+                       {{"plot", row.name}, {"region", row.region}, {"area", row.area}});
     } else {
-        model.selected_plot_title = "Select a plot";
+        model.selected_plot_title = game::text(content, "ui.select_plot");
     }
 }
 
@@ -248,21 +264,20 @@ void fillResources(const Session& session, UiModel& model) {
         row.has_stock = tonnes > 0;
         row.selected = static_cast<int>(r) == model.selected_resource;
         const sim::SellPolicy& policy = view.sellPolicies[r];
-        if (policy.enabled == 0) {
-            row.policy = "Manual";
-        } else {
-            row.policy = "Auto-sell";
-            if (policy.reserveTonnes > 0) {
-                row.policy += ", keep " + formatTonnes(policy.reserveTonnes);
-            }
-            if (policy.floorPrice > sim::Money::zero()) {
-                row.policy += ", at " + formatMoney(policy.floorPrice) + "/t or more";
-            }
-        }
+        const bool keep = policy.reserveTonnes > 0;
+        const bool floor = policy.floorPrice > sim::Money::zero();
+        const char* policyKey = policy.enabled == 0 ? "ui.policy_manual"
+                                : keep && floor     ? "ui.policy_auto_keep_floor"
+                                : keep              ? "ui.policy_auto_keep"
+                                : floor             ? "ui.policy_auto_floor"
+                                                    : "ui.policy_auto";
+        row.policy = game::text(content, policyKey,
+                                {{"reserve", formatTonnes(policy.reserveTonnes)},
+                                 {"price", formatMoney(policy.floorPrice)}});
         if (view.autoSoldTonnes[r] > 0) {
-            row.auto_sold =
-                std::format("Sold {} this month for {}.", formatTonnes(view.autoSoldTonnes[r]),
-                            formatMoney(view.autoSoldProceeds[r]));
+            row.auto_sold = game::text(content, "ui.auto_sold",
+                                       {{"tonnes", formatTonnes(view.autoSoldTonnes[r])},
+                                        {"amount", formatMoney(view.autoSoldProceeds[r])}});
         }
         model.resources.push_back(row);
     }
@@ -271,26 +286,20 @@ void fillResources(const Session& session, UiModel& model) {
         const auto r = static_cast<std::size_t>(model.selected_resource);
         const sim::SellPolicy& policy = view.sellPolicies[r];
         model.policy_enabled = policy.enabled != 0;
-        model.policy_summary =
-            policy.enabled != 0
-                ? std::format(
-                      "Daily auto-sell is active for {}. Everything above {} sells whenever "
-                      "the price hits {}/t or more.",
-                      content.resources[r].name, formatTonnes(policy.reserveTonnes),
-                      formatMoney(policy.floorPrice))
-                : "Auto-sell is off. " + content.resources[r].name + " is sold by hand only.";
+        model.policy_summary = game::text(
+            content, policy.enabled != 0 ? "ui.policy_summary_on" : "ui.policy_summary_off",
+            {{"resource", content.resources[r].name},
+             {"reserve", formatTonnes(policy.reserveTonnes)},
+             {"price", formatMoney(policy.floorPrice)}});
     }
     model.cover_costs = view.coverCosts;
-    model.cover_costs_label =
-        view.coverCosts ? "On: at each month end, just enough ore is sold to cover storage and "
-                          "loan payments, keeping cash at zero or above."
-                        : "Off: ending the month with cash below zero counts toward bankruptcy, "
-                          "even if the warehouse is full.";
+    model.cover_costs_label = game::text(content, view.coverCosts ? "ui.cover_on" : "ui.cover_off");
     if (model.selected_resource >= 0 &&
         model.selected_resource < static_cast<int>(content.resources.size())) {
-        model.selected_resource_title =
-            content.resources[static_cast<std::size_t>(model.selected_resource)].name +
-            " price, last 90 days";
+        model.selected_resource_title = game::text(
+            content, "ui.price_title",
+            {{"resource",
+              content.resources[static_cast<std::size_t>(model.selected_resource)].name}});
     }
 }
 
@@ -312,33 +321,35 @@ void fillTechs(const Session& session, UiModel& model) {
         row.effects = effectsText(content, tech);
         const bool ready = std::ranges::all_of(tech.prerequisites, known);
         if (known(sim::TechId(i))) {
-            row.status = "Known";
+            row.status = game::text(content, "ui.tech_known");
         } else if (view.activeResearch && view.activeResearch->tech == sim::TechId(i)) {
-            row.status =
-                std::format("In progress, done {}", formatDay(view.activeResearch->completesDay));
+            row.status = game::text(content, "ui.tech_in_progress",
+                                    {{"day", formatDay(view.activeResearch->completesDay)}});
         } else if (!ready) {
             std::string needs;
             for (const sim::TechId p : tech.prerequisites) {
                 if (!known(p)) {
-                    needs += (needs.empty() ? "needs " : ", ") + content.techs[p.index()].name;
+                    needs += (needs.empty() ? "" : ", ") + content.techs[p.index()].name;
                 }
             }
-            row.status = needs;
+            row.status = game::text(content, "ui.tech_needs", {{"tech", needs}});
         } else if (view.activeResearch) {
-            row.status = "Available (lab busy)";
+            row.status = game::text(content, "ui.tech_available_busy");
         } else {
-            row.status = "Available";
+            row.status = game::text(content, "ui.tech_available");
             row.can_start = !view.bankrupt && tech.cost <= view.cash - view.reservedCash;
         }
         model.techs.push_back(row);
     }
     if (view.activeResearch) {
-        model.research_summary = std::format("Researching {} until {}",
-                                             content.techs[view.activeResearch->tech.index()].name,
-                                             formatDay(view.activeResearch->completesDay));
+        model.research_summary =
+            game::text(content, "ui.research_active",
+                       {{"tech", content.techs[view.activeResearch->tech.index()].name},
+                        {"day", formatDay(view.activeResearch->completesDay)}});
     } else {
-        model.research_summary = std::format("{} of {} technologies known, lab idle",
-                                             view.completedTechs.size(), content.techs.size());
+        model.research_summary = game::text(content, "ui.research_idle",
+                                            {{"known", std::to_string(view.completedTechs.size())},
+                                             {"total", std::to_string(content.techs.size())}});
     }
 }
 
@@ -349,8 +360,10 @@ void fillFinance(const Session& session, UiModel& model) {
         LoanRow row;
         row.index = static_cast<int>(loan.id.value());
         row.remaining = formatMoney(loan.remaining);
-        row.instalment = formatMoney(loan.principalPerMonth) + "/month + interest";
-        row.months = std::format("{} months left", loan.monthsRemaining);
+        row.instalment = game::text(session.content(), "ui.loan_instalment",
+                                    {{"amount", formatMoney(loan.principalPerMonth)}});
+        row.months = game::text(session.content(), "ui.loan_months",
+                                {{"months", std::to_string(loan.monthsRemaining)}});
         row.active = loan.active;
         model.loans.push_back(row);
     }
@@ -362,10 +375,8 @@ void fillFinance(const Session& session, UiModel& model) {
     if (view.monthlyStorageCost > sim::Money::zero() &&
         (view.cash <= sim::Money::zero() ||
          view.monthlyStorageCost.cents() > view.cash.cents() / 10)) {
-        model.storage_warning = std::format(
-            "Storage is running {} a month, eating a large share of your cash. Sell ore "
-            "or set an auto-sell policy on the Market tab.",
-            formatMoney(view.monthlyStorageCost));
+        model.storage_warning = game::text(session.content(), "ui.storage_warning",
+                                           {{"amount", formatMoney(view.monthlyStorageCost)}});
     }
     model.mine_opex = formatMoney(view.mineOpexQuote) + "/day";
     model.survey_noise = formatRatio(view.surveyNoiseQuote);
@@ -389,6 +400,26 @@ void fillLog(const Session& session, UiModel& model) {
     }
 }
 
+// Sentences the document shows verbatim, with the balance figures filled in.
+void fillCatalogueProse(const sim::Content& content, UiModel& model) {
+    const sim::BalanceParams& b = content.balance;
+    model.ui_shortcuts = text(content, "ui.shortcuts");
+    model.ui_how_to_1 = text(content, "ui.how_to_1");
+    model.ui_how_to_2 = text(content, "ui.how_to_2",
+                             {{"survey_cost", formatMoney(b.surveyCost)},
+                              {"survey_days", std::to_string(b.surveyDurationDays)},
+                              {"days", std::to_string(b.mineBuildDays)},
+                              {"months", std::to_string(b.bankruptcyGraceMonths)}});
+    model.ui_how_to_3 = text(content, "ui.how_to_3");
+    model.ui_no_events = text(content, "ui.no_events");
+    model.ui_plots_intro = text(content, "ui.plots_intro");
+    model.ui_policy_form_keep = text(content, "ui.policy_form_keep");
+    model.ui_policy_form_mid = text(content, "ui.policy_form_mid");
+    model.ui_policy_form_end = text(content, "ui.policy_form_end");
+    model.ui_policy_hint = text(content, "ui.policy_hint");
+    model.ui_chart_hint = text(content, "ui.chart_hint");
+}
+
 }  // namespace
 
 void refreshModel(const Session& session, UiModel& model) {
@@ -399,20 +430,22 @@ void refreshModel(const Session& session, UiModel& model) {
     model.cash = formatMoney(view.cash);
     model.spendable = formatMoney(view.cash - view.reservedCash);
     model.debt = formatMoney(view.outstandingPrincipal);
-    model.insolvency = view.monthsInsolvent == 0
-                           ? ""
-                           : std::format("Insolvent for {} month-end{}; bankruptcy after {}",
-                                         view.monthsInsolvent, view.monthsInsolvent == 1 ? "" : "s",
-                                         content.balance.bankruptcyGraceMonths + 1);
+    model.insolvency =
+        view.monthsInsolvent == 0
+            ? ""
+            : textPlural(content, "ui.insolvency", view.monthsInsolvent,
+                         {{"months", std::to_string(view.monthsInsolvent)},
+                          {"count", std::to_string(content.balance.bankruptcyGraceMonths + 1)}});
     model.survey_cost = formatMoney(content.balance.surveyCost);
     model.survey_days = std::to_string(content.balance.surveyDurationDays);
     model.mine_build_days = std::to_string(content.balance.mineBuildDays);
     model.grace_months = std::to_string(content.balance.bankruptcyGraceMonths);
-    model.loan_terms = std::format(
-        "Loans run {} months at {} a year on the balance, repaid in equal principal instalments "
-        "plus interest; minimum {}, at most {} at once.",
-        content.balance.loanTermMonths, formatRatio(content.balance.loanAnnualRate),
-        formatMoney(content.balance.loanMinPrincipal), content.balance.maxActiveLoans);
+    model.loan_terms = text(content, "ui.loan_terms",
+                            {{"months", std::to_string(content.balance.loanTermMonths)},
+                             {"ratio", formatRatio(content.balance.loanAnnualRate)},
+                             {"amount", formatMoney(content.balance.loanMinPrincipal)},
+                             {"count", std::to_string(content.balance.maxActiveLoans)}});
+    fillCatalogueProse(content, model);
     model.speed_label = speedLabel(session.speed());
     model.speed = static_cast<int>(session.speed());
     model.game_over = session.gameOver();
@@ -421,31 +454,49 @@ void refreshModel(const Session& session, UiModel& model) {
     for (const sim::MineView& mine : view.mines) {
         operating += mine.state == sim::MineState::Operating ? 1 : 0;
     }
-    model.mines_summary = std::format("{} mine{} ({} operating)", view.mines.size(),
-                                      view.mines.size() == 1 ? "" : "s", operating);
-    model.plots_summary = std::format(
-        "{} plot{} owned, {} for sale", view.companies[Session::kPlayer.index()].plotsOwned,
-        view.companies[Session::kPlayer.index()].plotsOwned == 1 ? "" : "s",
-        std::count_if(view.plots.begin(), view.plots.end(), [](const sim::PlotView& p) {
-            return p.listing == sim::PlotListing::Listed;
-        }));
+    model.mines_summary = textPlural(
+        content, "ui.mines_summary", static_cast<std::int64_t>(view.mines.size()),
+        {{"count", std::to_string(view.mines.size())}, {"operating", std::to_string(operating)}});
+    const std::uint32_t owned = view.companies[Session::kPlayer.index()].plotsOwned;
+    const auto listed =
+        std::count_if(view.plots.begin(), view.plots.end(),
+                      [](const sim::PlotView& p) { return p.listing == sim::PlotListing::Listed; });
+    model.plots_summary =
+        textPlural(content, "ui.plots_summary", owned,
+                   {{"count", std::to_string(owned)}, {"listed", std::to_string(listed)}});
     model.rivals.clear();
     for (std::uint32_t c = 1; c < view.companies.size(); ++c) {
         const sim::CompanyPublicView& rival = view.companies[c];
-        model.rivals.push_back(std::format("{}: {} plot{}{}", rival.name, rival.plotsOwned,
-                                           rival.plotsOwned == 1 ? "" : "s",
-                                           rival.bankrupt ? " (bankrupt)" : ""));
+        model.rivals.push_back(rival.bankrupt
+                                   ? text(content, "ui.rival_bankrupt", {{"company", rival.name}})
+                                   : textPlural(content, "ui.rival", rival.plotsOwned,
+                                                {{"company", rival.name},
+                                                 {"count", std::to_string(rival.plotsOwned)}}));
     }
     model.events.clear();
     for (const sim::ActiveEventView& event : view.events) {
-        model.events.push_back(std::format(
-            "{} (until {})", content.events[event.event.index()].name, formatDay(event.endsDay)));
+        model.events.push_back(text(content, "ui.event_active",
+                                    {{"event", content.events[event.event.index()].name},
+                                     {"day", formatDay(event.endsDay)}}));
     }
     fillPlots(session, model);
     fillResources(session, model);
     fillTechs(session, model);
     fillFinance(session, model);
     fillLog(session, model);
+    // Sentences that quote figures computed above.
+    model.ui_company_terms = text(content, "ui.company_terms",
+                                  {{"amount", model.mine_opex}, {"ratio", model.survey_noise}});
+    model.ui_finance_cash =
+        text(content, "ui.finance_cash", {{"cash", model.cash}, {"spendable", model.spendable}});
+    model.ui_finance_debt =
+        text(content, "ui.finance_debt", {{"debt", model.debt}, {"amount", model.loan_capacity}});
+    model.ui_finance_storage =
+        text(content, "ui.finance_storage", {{"amount", model.storage_cost}});
+    model.ui_borrow_line = text(content, "ui.borrow_capacity", {{"amount", model.loan_capacity}}) +
+                           " " + model.loan_terms;
+    model.ui_each_mine_opex = text(content, "ui.each_mine_opex", {{"amount", model.mine_opex}});
+    model.ui_game_over = text(content, "ui.game_over", {{"company", model.company}});
 }
 
 }  // namespace game
