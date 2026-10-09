@@ -30,6 +30,7 @@
   "notice.mine_depleted": "The mine on {plot} is worked out. Nothing left to pull.",
   "notice.mine_found_nothing": "No ore the crew can work on {plot}. The mine stands idle.",
   "notice.mine_operational": "The mine on {plot} is operational. Headframe is turning.",
+  "notice.mine_running_low": "The survey crew reports {days} days of ore left on {plot}.",
   "notice.mine_started": "{company} poured footings for a mine on {plot}.",
   "notice.mine_switched": "The mine on {plot} changed operating status.",
   "notice.ore_sold": "Sold {tonnes} of {resource} off the pile for {amount}.",

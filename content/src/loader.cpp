@@ -880,7 +880,7 @@ struct StringKeySpec {
     std::string_view placeholders;  // comma separated, no spaces
 };
 
-constexpr std::array<StringKeySpec, 211> kStringKeys = {{
+constexpr std::array<StringKeySpec, 212> kStringKeys = {{
     {"notice.command_rejected", "reason"},
     {"notice.command_rejected.amount", "amount,reason"},
     {"notice.command_rejected.plot", "plot,reason"},
@@ -905,6 +905,7 @@ constexpr std::array<StringKeySpec, 211> kStringKeys = {{
     {"notice.auto_sale_summary", "tonnes,resource,amount"},
     {"notice.idle_mine_warning", "plot"},
     {"notice.mine_found_nothing", "plot"},
+    {"notice.mine_running_low", "plot,days"},
     {"ui.days_in", "days"},
     {"ui.needs_tech", "tech"},
     {"ui.remaining_building", "days"},

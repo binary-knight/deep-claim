@@ -134,6 +134,8 @@ const char* noticeKindName(NoticeKind kind) {
             return "idle_mine_warning";
         case NoticeKind::MineFoundNothing:
             return "mine_found_nothing";
+        case NoticeKind::MineRunningLow:
+            return "mine_running_low";
     }
     return "unknown";
 }
@@ -168,6 +170,7 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::AutoSaleSummary:
         case NoticeKind::IdleMineWarning:
         case NoticeKind::MineFoundNothing:
+        case NoticeKind::MineRunningLow:
             return false;
     }
     return false;

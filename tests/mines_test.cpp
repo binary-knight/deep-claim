@@ -388,3 +388,60 @@ TEST_CASE("The mine view carries the owner's latest survey estimate", "[mines][v
     // The rival's view of the same plot carries no estimate.
     CHECK(simulation.view(kRival).mines.empty());
 }
+
+// Injects a completed survey of `plot` for the player estimating `tonnes`
+// of resource 0, as the latest survey on record.
+void injectSurvey(sim::Simulation& simulation, const sim::Content& content, sim::PlotId plot,
+                  std::int64_t tonnes) {
+    sim::WorldState edited = simulation.state();
+    sim::Survey survey;
+    survey.company = kPlayer;
+    survey.plot = plot;
+    // Saves are validated: a complete survey finished before today and ran
+    // the full survey duration.
+    REQUIRE(edited.day > content.balance.surveyDurationDays + 1);
+    survey.completesDay = edited.day - 1;
+    survey.commissionedDay = survey.completesDay - content.balance.surveyDurationDays;
+    survey.complete = 1;
+    survey.estimates.push_back({sim::ResourceId(0), tonnes, sim::Fixed::one()});
+    edited.surveys.push_back(survey);
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+}
+
+TEST_CASE("A mine warns at month end when the survey estimate is nearly spent", "[mines]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::PlotId plot = buyFirstListed(simulation, kPlayer);
+    grantCash(simulation, content, kPlayer, sim::Money::fromUnits(50'000'000));
+    setDeposit(simulation, content, plot, sim::ResourceId(0), 10'000'000'000);  // never depletes
+    simulation.submit(sim::BuildMine{kPlayer, plot});
+    simulation.tick(content.balance.mineBuildDays + 1);
+    const sim::CompanyView opened = simulation.view(kPlayer);
+    const sim::MineView& mine = opened.mines.at(0);
+    REQUIRE(mine.state == sim::MineState::Operating);
+    const std::int64_t output = mine.lastOutputTonnes.at(0);
+    REQUIRE(output > 0);
+    const std::int64_t extracted = mine.extractedTonnes.at(0);
+
+    // Without a survey there is no estimate and no warning.
+    CHECK_FALSE(hasNotice(tickToMonthEnd(simulation).notices, sim::NoticeKind::MineRunningLow));
+
+    // A generous estimate: hundreds of days left, no warning.
+    injectSurvey(simulation, content, plot, extracted + output * 1000);
+    CHECK_FALSE(hasNotice(tickToMonthEnd(simulation).notices, sim::NoticeKind::MineRunningLow));
+
+    // The latest survey says about twenty days: warn, with the days in the notice.
+    const std::int64_t extractedNow = simulation.view(kPlayer).mines.at(0).extractedTonnes.at(0);
+    injectSurvey(simulation, content, plot, extractedNow + output * (sim::kRunningLowDays - 10));
+    const sim::TickReport& monthEnd = tickToMonthEnd(simulation);
+    REQUIRE(hasNotice(monthEnd.notices, sim::NoticeKind::MineRunningLow));
+    for (const sim::Notice& notice : monthEnd.notices) {
+        if (notice.kind == sim::NoticeKind::MineRunningLow) {
+            CHECK(notice.plot == plot);
+            CHECK(notice.tonnes <= sim::kRunningLowDays);
+            CHECK(notice.company == kPlayer);
+        }
+    }
+    // The rival never sees it.
+    CHECK(simulation.view(kRival).mines.empty());
+}

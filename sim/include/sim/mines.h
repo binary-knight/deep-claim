@@ -51,4 +51,11 @@ void runMines(const Content& content, WorldState& state, TickReport& report);
 // mine keeps paying full opex; the warning is the player's cue to mothball.
 void warnIdleMines(const Content& content, const WorldState& state, TickReport& report);
 
+// Month end: a MineRunningLow notice (tonnes = days) for every operating
+// mine of a solvent company whose owner's latest survey estimate, less what
+// came out, lasts kRunningLowDays or fewer at the current output. Surveys
+// are estimates, so this is a cue, not a fact; unsurveyed mines never warn.
+constexpr Day kRunningLowDays = 30;
+void warnRunningLow(const Content& content, const WorldState& state, TickReport& report);
+
 }  // namespace sim

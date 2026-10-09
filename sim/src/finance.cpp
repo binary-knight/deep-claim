@@ -326,6 +326,7 @@ void runFinance(const Content& content, WorldState& state, TickReport& report) {
         checkSolvency(content, state, companyId, report);
     }
     warnIdleMines(content, state, report);
+    warnRunningLow(content, state, report);
 }
 
 }  // namespace sim

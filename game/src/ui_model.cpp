@@ -1023,6 +1023,7 @@ bool noticeIsWarning(sim::NoticeKind kind) {
         case sim::NoticeKind::BidForfeited:
         case sim::NoticeKind::IdleMineWarning:
         case sim::NoticeKind::MineFoundNothing:
+        case sim::NoticeKind::MineRunningLow:
             return true;
         default:
             return false;

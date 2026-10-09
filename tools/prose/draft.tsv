@@ -267,3 +267,4 @@ ui.pause_on.mine_found_nothing	Mine found nothing
 ui.pause_on.idle_mine	Idle mine warning
 ui.pause_menu_title	Stop the clock when
 status.paused_by	Paused: {text}
+notice.mine_running_low	By the last survey, the mine on {plot} has about {days} days of ore left.
