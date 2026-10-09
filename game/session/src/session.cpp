@@ -65,6 +65,12 @@ int Session::advance(double seconds) {
         tickOnce();
         accumulator_ -= 1.0;
         ++ticked;
+        if (pausedBy_.has_value()) {
+            // Something the player wants to see: stop here, on this day.
+            setSpeed(Speed::Paused);
+            accumulator_ = 0.0;
+            break;
+        }
     }
     if (ticked == rate * 2) {
         accumulator_ = 0.0;
@@ -76,6 +82,12 @@ void Session::stepOneDay() {
     if (!gameOver()) {
         tickOnce();
     }
+}
+
+std::optional<sim::Notice> Session::takePausedBy() {
+    std::optional<sim::Notice> notice;
+    notice.swap(pausedBy_);
+    return notice;
 }
 
 void Session::submit(sim::Command command) {
@@ -119,6 +131,9 @@ void Session::tickOnce() {
     }
     for (const sim::Notice& notice : simulation_.reportFor(kPlayer)) {
         appendLog(processed, notice);
+        if (!pausedBy_.has_value() && autoPause_.shouldPause(notice, kPlayer)) {
+            pausedBy_ = notice;
+        }
     }
     if (trace_ != nullptr && view_.day % sim::kDaysPerMonth == 0) {
         trace_->state(*content_, view_);

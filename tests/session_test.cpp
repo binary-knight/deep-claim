@@ -112,6 +112,9 @@ TEST_CASE("The session stops once the player is bankrupt", "[session]") {
     }
     broke.companies[0].cash = sim::Money::fromUnits(-50'000'000);
     REQUIRE(session.load(sim::saveGame(broke, {}, sim::hashContent(content))));
+    game::AutoPause never;  // the insolvency warnings would otherwise stop the clock
+    never.enabled.fill(false);
+    session.setAutoPause(never);
     session.setSpeed(game::Speed::Fastest);
     for (int i = 0; i < 20; ++i) {
         session.advance(1.0);
@@ -159,4 +162,86 @@ TEST_CASE("Money and tonnage parsers are strict and exact", "[session][format]")
     CHECK(game::exactMoney(sim::Money::fromCents(123'456'789)) == "1234567.89");
     CHECK(game::parseMoney(game::exactMoney(sim::Money::fromCents(123'456'789)), money));
     CHECK(money == sim::Money::fromCents(123'456'789));
+}
+
+TEST_CASE("Auto-pause stops the clock on a configured notice and not on others", "[session]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    sim::PlotId listed;
+    for (const sim::PlotView& plot : session.view().plots) {
+        if (plot.listing == sim::PlotListing::Listed) {
+            listed = plot.id;
+            break;
+        }
+    }
+    REQUIRE(listed.valid());
+
+    SECTION("survey complete pauses when enabled") {
+        game::AutoPause rules = game::AutoPause::defaults();
+        CHECK_FALSE(rules.isEnabled(game::PauseOn::SurveyComplete));  // off by default
+        rules.set(game::PauseOn::SurveyComplete, true);
+        session.setAutoPause(rules);
+        session.submit(sim::CommissionSurvey{{}, listed});
+        session.setSpeed(game::Speed::Fastest);
+        int ticked = 0;
+        for (int i = 0; i < 10 && session.speed() != game::Speed::Paused; ++i) {
+            ticked += session.advance(1.0);
+        }
+        // Commissioned on day 0, processed on day 0, completes
+        // surveyDurationDays later; the clock stops on that day exactly.
+        CHECK(session.speed() == game::Speed::Paused);
+        CHECK(session.day() == content.balance.surveyDurationDays + 1);
+        CHECK(ticked == static_cast<int>(session.day()));
+        const std::optional<sim::Notice> why = session.takePausedBy();
+        REQUIRE(why.has_value());
+        CHECK(why->kind == sim::NoticeKind::SurveyComplete);
+        CHECK_FALSE(session.takePausedBy().has_value());  // handed over once
+        // Resuming works and does not re-pause on the same notice.
+        session.setSpeed(game::Speed::Fastest);
+        CHECK(session.advance(1.0) == 20);
+    }
+    SECTION("survey complete does not pause under the defaults") {
+        session.submit(sim::CommissionSurvey{{}, listed});
+        session.setSpeed(game::Speed::Fastest);
+        for (int i = 0; i < 3; ++i) {
+            session.advance(1.0);
+        }
+        CHECK(session.speed() == game::Speed::Fastest);
+        CHECK(session.day() == 60);
+        CHECK_FALSE(session.takePausedBy().has_value());
+    }
+    SECTION("a rival's auction win is not the player's") {
+        sim::Notice sold = sim::makeNotice(sim::NoticeKind::PlotSold, sim::CompanyId(1), listed);
+        CHECK_FALSE(game::AutoPause::defaults().shouldPause(sold, game::Session::kPlayer));
+        sold.company = game::Session::kPlayer;
+        CHECK(game::AutoPause::defaults().shouldPause(sold, game::Session::kPlayer));
+        const sim::Notice listedNotice =
+            sim::makeNotice(sim::NoticeKind::PlotListed, sim::CompanyId(), listed);
+        CHECK_FALSE(game::AutoPause::defaults().shouldPause(listedNotice, game::Session::kPlayer));
+    }
+}
+
+TEST_CASE("Auto-pause rules round-trip through their text form", "[session]") {
+    game::AutoPause rules = game::AutoPause::defaults();
+    rules.set(game::PauseOn::Insolvency, false);
+    rules.set(game::PauseOn::MineOperational, true);
+    const std::string text = rules.toText();
+    CHECK(text.find("insolvency=0\n") != std::string::npos);
+    CHECK(text.find("mine_operational=1\n") != std::string::npos);
+    CHECK(text.find("survey_complete=0\n") != std::string::npos);
+
+    game::AutoPause restored = game::AutoPause::defaults();
+    CHECK(restored.fromText(text));
+    CHECK(restored.enabled == rules.enabled);
+
+    // Unknown keys and comments are ignored; missing keys keep their value;
+    // a malformed line is reported but the rest still applies.
+    game::AutoPause partial = game::AutoPause::defaults();
+    CHECK(partial.fromText("# settings\nfuture_key=1\nauction_lost=0\r\n"));
+    CHECK_FALSE(partial.isEnabled(game::PauseOn::AuctionLost));
+    CHECK(partial.isEnabled(game::PauseOn::Bankrupt));
+    CHECK_FALSE(partial.fromText("bankrupt=maybe\nidle_mine=0\n"));
+    CHECK(partial.isEnabled(game::PauseOn::Bankrupt));
+    CHECK_FALSE(partial.isEnabled(game::PauseOn::IdleMine));
+    CHECK(game::pauseOnKey(game::PauseOn::IdleMine) == "idle_mine");
 }
