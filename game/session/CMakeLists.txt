@@ -4,8 +4,8 @@
 # can be unit tested.
 find_package(nlohmann_json CONFIG REQUIRED)
 
-add_library(game_session STATIC src/session.cpp src/format.cpp src/trace.cpp src/replay.cpp
-                                src/png.cpp)
+add_library(game_session STATIC src/session.cpp src/format.cpp src/text.cpp src/trace.cpp
+                                src/replay.cpp src/png.cpp)
 add_library(dc::game_session ALIAS game_session)
 target_include_directories(game_session PUBLIC include)
 target_link_libraries(game_session PUBLIC dc::sim PRIVATE nlohmann_json::nlohmann_json
