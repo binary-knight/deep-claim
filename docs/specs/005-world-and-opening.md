@@ -1,6 +1,6 @@
 # 005: A bigger world and a fair opening
 
-Status: draft, awaiting approval. Builds after spec 004 (both touch the
+Status: approved 2026-10-09 as drafted. Builds after spec 004 (both touch the
 plot market and world generation).
 
 ## Goal
