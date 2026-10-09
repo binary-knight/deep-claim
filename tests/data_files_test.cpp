@@ -8,6 +8,7 @@
 #include "test_content.h"
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -95,7 +96,10 @@ TEST_CASE("Shipped regions give every seed a fair opening hand", "[content][data
         const auto regionOf = [&state](std::size_t i) {
             return state.plots[state.listingQueue[i].index()].region;
         };
-        for (std::size_t i = c.balance.plotsListedAtStart + 2; i < state.listingQueue.size(); ++i) {
+        // The last plots of the hand count as predecessors, so start at the
+        // first monthly listing.
+        const std::size_t hand = c.balance.plotsListedAtStart;
+        for (std::size_t i = std::max<std::size_t>(hand, 2); i < state.listingQueue.size(); ++i) {
             if (regionOf(i) != regionOf(i - 1) || regionOf(i) != regionOf(i - 2)) {
                 continue;
             }

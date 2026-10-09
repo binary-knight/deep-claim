@@ -226,6 +226,9 @@ void generateWorld(const Content& content, WorldState& state) {
 RegionStart classifyRegionAtStart(const Content& content, const RegionDef& region) {
     bool hasLocked = false;
     for (const DepositPrior& prior : region.deposits) {
+        if (!prior.resource.valid() || prior.resource.index() >= content.resources.size()) {
+            fatal("classifyRegionAtStart: a deposit names a resource that does not exist");
+        }
         const bool lockedOre = content.resources[prior.resource.index()].unlockedBy.valid();
         if (!lockedOre && prior.presenceProb >= kOpeningPresenceMin) {
             return RegionStart::Mineable;

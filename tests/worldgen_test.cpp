@@ -149,6 +149,20 @@ TEST_CASE("Opening rules give way when the regions cannot meet them", "[worldgen
     CHECK(isPermutation(unopened.listingQueue, unopened.plots.size()));
     CHECK_FALSE(shapeOf(noHand, unopened).avoidableRunOfThree);
 
+    // A cap of zero with only locked land: the cap gives way.
+    sim::Content lockedStrict = lockedOnly;
+    lockedStrict.balance.openingMaxLockedRegion = 0;
+    const sim::WorldState capped = generate(lockedStrict, 5);
+    CHECK(isPermutation(capped.listingQueue, capped.plots.size()));
+    CHECK(shapeOf(lockedStrict, capped).handLocked == 3);
+
+    // No land at all.
+    sim::Content empty = test::makeContent();
+    for (sim::RegionDef& region : empty.regions) {
+        region.plotCount = 0;
+    }
+    CHECK(generate(empty, 5).listingQueue.empty());
+
     // A cap of zero keeps locked land out of the hand entirely.
     sim::Content strict = test::makeContent();
     strict.balance.openingMaxLockedRegion = 0;

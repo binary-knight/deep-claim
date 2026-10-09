@@ -103,6 +103,13 @@ bool parseArgs(std::span<char*> args, Options& out) {
             }
         }
     }
+    if (out.sweep > 0) {
+        // A sweep has its own checks, and its seeds must not wrap round.
+        const sim::Seed lastOffset = out.sweep - 1;
+        if (out.sanity || out.seed > std::numeric_limits<sim::Seed>::max() - lastOffset) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -361,7 +368,8 @@ struct SweepRow {
     std::uint32_t openingMineable = 0;   // opening listings in regions mineable on day one
     std::uint32_t openingLocked = 0;     // opening listings in regions whose main ore is locked
     std::uint32_t longestRegionRun = 0;  // among the monthly listings, after the opening hand
-    sim::Day lastNewListingDay = 0;      // 0 = unlisted land never ran out
+    // 0 = unlisted land never ran out, or the opening hand was the whole world
+    sim::Day lastNewListingDay = 0;
     std::array<std::uint32_t, kSweepYears.size()> unlisted{};
     std::array<std::uint32_t, kSweepYears.size()> withdrawn{};
     sim::Day firstMineStartedDay = 0;    // company 0; 1-based, 0 = never
@@ -430,6 +438,7 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
     row.seed = seed;
     const sim::WorldState& state = simulation.state();
     describeQueue(content, state, row);
+    row.worldValid = sim::validateWorld(content, state);
 
     const std::size_t companyCount = state.companies.size();
     for (sim::Day d = 0; d < options.days; ++d) {
@@ -444,10 +453,26 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
         recordFirstMine(report, row);
         recordLand(content, state, row);
     }
+    row.worldValid = row.worldValid && sim::validateWorld(content, state);
     for (const sim::Company& company : state.companies) {
         row.finalCashCents.push_back(company.cash.cents());
     }
     return row;
+}
+
+// Whether a run of this length reaches the y-th sample year. A year the run
+// stops short of is printed as null (blank in the CSV), never as zero.
+bool yearSampled(sim::Day days, std::size_t y) {
+    return days >= kSweepYears.at(y) * sim::kDaysPerYear;
+}
+
+std::string sampleList(const std::array<std::uint32_t, kSweepYears.size()>& counts, sim::Day days) {
+    std::string out;
+    for (std::size_t y = 0; y < counts.size(); ++y) {
+        out += y == 0 ? "" : ", ";
+        out += yearSampled(days, y) ? std::to_string(counts.at(y)) : "null";
+    }
+    return out;
 }
 
 struct Spread {
@@ -486,7 +511,7 @@ std::int64_t dayOrNever(sim::Day day, sim::Day days) {
     return day == 0 ? std::int64_t{days} + 1 : std::int64_t{day};
 }
 
-void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows) {
+void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows, sim::Day days) {
     csv << "seed,opening_mineable,opening_locked,longest_region_run,last_new_listing_day";
     for (const std::uint32_t year : kSweepYears) {
         csv << ",unlisted_y" << year;
@@ -503,11 +528,13 @@ void writeSweepCsv(std::ostream& csv, const std::vector<SweepRow>& rows) {
     for (const SweepRow& row : rows) {
         csv << row.seed << ',' << row.openingMineable << ',' << row.openingLocked << ','
             << row.longestRegionRun << ',' << row.lastNewListingDay;
-        for (const std::uint32_t count : row.unlisted) {
-            csv << ',' << count;
-        }
-        for (const std::uint32_t count : row.withdrawn) {
-            csv << ',' << count;
+        for (const auto* counts : {&row.unlisted, &row.withdrawn}) {
+            for (std::size_t y = 0; y < counts->size(); ++y) {
+                csv << ',';
+                if (yearSampled(days, y)) {
+                    csv << counts->at(y);
+                }
+            }
         }
         csv << ',' << row.firstMineStartedDay << ',' << row.firstMineOperatingDay << ','
             << (row.worldValid ? 1 : 0);
@@ -556,16 +583,12 @@ std::vector<Check> sweepChecks(const Options& options, const std::vector<SweepRo
          false});
 
     const bool valid = std::ranges::all_of(rows, [](const SweepRow& r) { return r.worldValid; });
-    checks.push_back({"world_valid", valid, "yearly validation in every seed"});
+    checks.push_back(
+        {"world_valid", valid, "validation at the start, every year end and the end, every seed"});
     return checks;
 }
 
-void printSweep(const Options& options, const std::vector<SweepRow>& rows,
-                const std::vector<Check>& checks, bool allPassed) {
-    std::cout << std::format(
-        "{{\n  \"sweep\": {{\"first_seed\": {}, \"seeds\": {}, \"days\": {}, "
-        "\"ai\": {}}},\n  \"rows\": [\n",
-        options.seed, rows.size(), options.days, options.aiCompanies);
+void printSweepRows(const Options& options, const std::vector<SweepRow>& rows) {
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const SweepRow& row = rows[i];
         std::string cash;
@@ -575,14 +598,23 @@ void printSweep(const Options& options, const std::vector<SweepRow>& rows,
         }
         std::cout << std::format(
             "    {{\"seed\": {}, \"opening_mineable\": {}, \"opening_locked\": {}, "
-            "\"longest_region_run\": {}, \"last_new_listing_day\": {}, \"unlisted\": [{}, {}, "
-            "{}], \"withdrawn\": [{}, {}, {}], \"first_mine_started_day\": {}, "
+            "\"longest_region_run\": {}, \"last_new_listing_day\": {}, \"unlisted\": [{}], "
+            "\"withdrawn\": [{}], \"first_mine_started_day\": {}, "
             "\"first_mine_operating_day\": {}, \"final_cash\": [{}]}}{}\n",
             row.seed, row.openingMineable, row.openingLocked, row.longestRegionRun,
-            row.lastNewListingDay, row.unlisted[0], row.unlisted[1], row.unlisted[2],
-            row.withdrawn[0], row.withdrawn[1], row.withdrawn[2], row.firstMineStartedDay,
+            row.lastNewListingDay, sampleList(row.unlisted, options.days),
+            sampleList(row.withdrawn, options.days), row.firstMineStartedDay,
             row.firstMineOperatingDay, cash, i + 1 < rows.size() ? "," : "");
     }
+}
+
+void printSweep(const Options& options, const std::vector<SweepRow>& rows,
+                const std::vector<Check>& checks, bool allPassed) {
+    std::cout << std::format(
+        "{{\n  \"sweep\": {{\"first_seed\": {}, \"seeds\": {}, \"days\": {}, "
+        "\"ai\": {}}},\n  \"rows\": [\n",
+        options.seed, rows.size(), options.days, options.aiCompanies);
+    printSweepRows(options, rows);
     std::cout << "  ],\n  \"sample_years\": [";
     for (std::size_t y = 0; y < kSweepYears.size(); ++y) {
         std::cout << (y == 0 ? "" : ", ") << kSweepYears.at(y);
@@ -598,13 +630,20 @@ void printSweep(const Options& options, const std::vector<SweepRow>& rows,
          spreadOver(rows, [](const SweepRow& r) { return r.longestRegionRun; }));
     line("last_new_listing_day",
          spreadOver(rows, [](const SweepRow& r) { return r.lastNewListingDay; }));
+    const auto sampled = [&](const std::string& name, std::size_t y, const Spread& spread) {
+        if (yearSampled(options.days, y)) {
+            line(name, spread);
+        } else {
+            std::cout << std::format("    {}: null,\n", jsonString(name));
+        }
+    };
     for (std::size_t y = 0; y < kSweepYears.size(); ++y) {
-        line(std::format("unlisted_y{}", kSweepYears.at(y)),
-             spreadOver(rows, [y](const SweepRow& r) { return r.unlisted.at(y); }));
+        sampled(std::format("unlisted_y{}", kSweepYears.at(y)), y,
+                spreadOver(rows, [y](const SweepRow& r) { return r.unlisted.at(y); }));
     }
     for (std::size_t y = 0; y < kSweepYears.size(); ++y) {
-        line(std::format("withdrawn_y{}", kSweepYears.at(y)),
-             spreadOver(rows, [y](const SweepRow& r) { return r.withdrawn.at(y); }));
+        sampled(std::format("withdrawn_y{}", kSweepYears.at(y)), y,
+                spreadOver(rows, [y](const SweepRow& r) { return r.withdrawn.at(y); }));
     }
     line("first_mine_started_day", spreadOver(rows, [&](const SweepRow& r) {
              return dayOrNever(r.firstMineStartedDay, options.days);
@@ -644,7 +683,7 @@ int runSweep(const Options& options, const sim::Content& content) {
     printSweep(options, rows, checks, allPassed);
     if (!options.csvPath.empty()) {
         std::ofstream csv(options.csvPath);
-        writeSweepCsv(csv, rows);
+        writeSweepCsv(csv, rows, options.days);
         csv.flush();
         if (!csv) {
             std::cerr << "error writing " << options.csvPath << '\n';

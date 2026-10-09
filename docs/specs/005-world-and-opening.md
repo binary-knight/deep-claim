@@ -171,3 +171,34 @@ regions or resources; the asteroid phase.
   while laid out and RmlUi logged an out-of-bounds read for a class
   binding on the repeated element (the same fault spec 004 fixed for
   survey estimates and log lines). Found by the layout probe.
+- 2026-10-09 (review): Codex reviewed the diff and this spec. It found the
+  queue construction correct for every edge case asked about, relaxation
+  matching these Decisions, no dependence on hidden deposits and no
+  platform nondeterminism. Applied:
+  - `classifyRegionAtStart` aborts through `sim::fatal` on a deposit
+    naming a resource that does not exist, instead of indexing past the
+    table.
+  - `--sweep` rejects a seed range that would wrap past the largest seed,
+    and rejects `--sanity` (a sweep has its own checks) instead of
+    ignoring it.
+  - A sample year the run stops short of is printed as `null` (blank in
+    the CSV), not as zero.
+  - `world_valid` now validates each world after construction and at the
+    end of the run as well as every year end, so a short run cannot pass
+    without a check.
+  - Tests: only-locked land with a locked cap of zero, and a world with no
+    plots; the shipped-data run check now starts at the first monthly
+    listing, so the boundary with the hand is covered.
+  Declined:
+  - Distinguishing "the opening hand was the whole world" from "land never
+    ran out" in `last_new_listing_day`: both print 0; no shipped or
+    planned world is that small. Noted in the code.
+  - Escaping control characters in the runner's `jsonString`: the sweep
+    prints only fixed strings.
+  - Automated runner tests for short runs, seed wrap and parsed output:
+    checked by hand (2-year sweep prints nulls; both rejected option
+    combinations exit 2). Worth adding if the runner grows.
+  - Rejecting worlds of 2^32 plots: the loader caps `plot_count`.
+  - Noted, not changed: draws are uniform over plots, so a larger region
+    gets more of the hand; the run rule is local, so a forced same-region
+    tail can occur where a different earlier order would have avoided it.
