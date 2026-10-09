@@ -201,62 +201,62 @@ ui.strip_next_auction	{plot} closes day {day}
 ui.strip_research	{tech}, done day {day}
 ui.strip_research_idle	lab idle
 ui.strip_world	{days} days left
-ui.need_insolvent_title	Insolvent: {months} month-ends before bankruptcy
-ui.need_insolvent_sub	Sell ore, take a loan or mothball mines before the month closes.
-ui.need_storage_title	Storage is eating your cash
-ui.need_storage_sub	{amount} a month against {cash} in hand. Sell ore or set a standing order.
-ui.need_idle_title	The mine on plot {plot} has nothing to extract
-ui.need_idle_sub	It pays full opex for nothing. Mothball it, or research what its ore needs.
-ui.need_auction_title	Auction on plot {plot} closes
-ui.need_auction_sub_contested	{bids} bids. You are in at {amount}; someone else is bidding too.
-ui.need_auction_sub_leading	Your bid of {amount} is the only one so far.
-ui.need_auction_sub_rival	{bids} bids in and none of them yours. You surveyed this plot.
-ui.need_auction_sub_open	No bids yet. You surveyed this plot.
-ui.need_mine_opens_title	Plot {plot} mine opens
-ui.need_mine_opens_sub	Footings poured, headframe going up.
-ui.need_event_title	{event} ends
-ui.need_research_title	Research completes
-ui.need_none	Nothing needs you today. Let the clock run.
-ui.rival_line	{company}: {plots} plots, {mines} mines, bidding on {bidding}.
-ui.rival_line_quiet	{company}: {plots} plots, {mines} mines.
+ui.need_insolvent_title	Insolvent: we have {months} month-ends before bankruptcy.
+ui.need_insolvent_sub	Sell ore off the pile, take a loan, or mothball mines before the month closes.
+ui.need_storage_title	Storage fees are eating into company cash.
+ui.need_storage_sub	We're paying {amount} a month against {cash} in hand. Sell ore off the pile or set a standing order.
+ui.need_idle_title	The mine on plot {plot} has nothing the crew can extract.
+ui.need_idle_sub	We're paying full upkeep for no ore. Mothball it, or research what its ore needs.
+ui.need_auction_title	Bidding closes on plot {plot}.
+ui.need_auction_sub_contested	{bids} bids on the board. You are in at {amount}, but another outfit is bidding against you.
+ui.need_auction_sub_leading	Your bid of {amount} is the only one on the board.
+ui.need_auction_sub_rival	{bids} bids on the board, and none of them are yours. Your crew surveyed this plot.
+ui.need_auction_sub_open	No bids on the board yet. Your crew surveyed this plot.
+ui.need_mine_opens_title	The mine on plot {plot} opens.
+ui.need_mine_opens_sub	Footings are poured and the headframe is going up.
+ui.need_event_title	{event} comes to an end.
+ui.need_research_title	Research work is complete.
+ui.need_none	Nothing needs the desk today. Let the clock run.
+ui.rival_line	{company} holds {plots} plots and runs {mines} mines, bidding on {bidding}.
+ui.rival_line_quiet	{company} holds {plots} plots and runs {mines} mines.
 ui.fin_can_borrow	can borrow {amount}
 ui.fin_storage_sub	storage {amount}/month
 ui.fin_instalment	instalment {amount}
 ui.storage_tonnes.one	{tonnes} of one ore
 ui.storage_tonnes.many	{tonnes} across {count} ores
 ui.storage_rate	{percent}% of base price per tonne-month
-ui.storage_note	Standing orders sell before storage builds up. Cover-costs selling is set on the Finance tab.
-ui.survey_blind	Not surveyed. Region odds: {odds}.
+ui.storage_note	Standing orders sell ore before the pile builds up. You can set cover-costs selling on the Finance tab.
+ui.survey_blind	No crew has surveyed this ground. Region odds stand at {odds}.
 ui.flag_bids	{bids} bids
 ui.survey_title	Survey, day {day}
 ui.survey_never	No survey yet
 ui.auction_closes	closes day {day}, {bids} bids
-ui.notice_unsurveyed	No survey on this plot. A mine here is a blind bet; a survey costs {amount}.
-ui.notice_empty	The survey found nothing here. A mine would open on an empty plot.
-ui.notice_locked_only	Everything the survey found here is locked ore. A mine would pay full opex and extract nothing until the research is done: {needs}.
-ui.notice_contested	Another company has a bid in. Contested plots have been clearing 10 to 30% over the ask. Bidding again replaces your bid.
+ui.notice_unsurveyed	No crew has surveyed this plot. Sinking a mine here is a blind bet; a survey costs {amount}.
+ui.notice_empty	The survey crew found no ore here. Raising a headframe would open on an empty plot.
+ui.notice_locked_only	The survey crew logged only locked ore here. A mine would pay full opex and extract nothing until the lab clears {needs}.
+ui.notice_contested	Another outfit has a bid on the table. Contested plots have been clearing 10 to 30% over the ask, and placing another bid replaces your previous one.
 ui.survey_again	Survey again ({amount})
 ui.survey_first	Survey ({amount})
 ui.build_label	Build mine ({amount})
 ui.market_base	base {price}, {ratio}
 ui.market_sub	demand {demand}/day, supply {supply}/day
 ui.stock_sub	stock {tonnes}
-ui.auto_sold_none	Nothing sold by standing order this month.
-ui.chart_note	Demand {demand} a day, supply {supply} a day. The price moves part of the way to its target each day; the base price holds when nobody sells.
+ui.auto_sold_none	No stock moved on standing orders this month.
+ui.chart_note	Demand runs {demand} a day against {supply} a day in supply. The market price moves partway toward its target each day, holding at base price when nobody sells.
 ui.tech_until	until day {day}
 ui.tech_busy	Lab busy until day {day}
 ui.tech_bankrupt	The company is bankrupt
-ui.tech_unaffordable	Needs {amount} in spendable cash
-ui.lab_one	One project at a time
+ui.tech_unaffordable	Needs {amount} in cash on hand.
+ui.lab_one	Only one project on the bench at a time.
 ui.lab_busy	busy until day {day}: {tech}
 ui.lab_idle	idle
-ui.loan_rule	Equal principal instalments plus {ratio} a year on the balance, paid at each month end.
-ui.loan_limits	Up to {amount} more. Minimum {min}, {months} months, {count} loans at most.
-ui.cover_check	Sell at month end to cover costs
-ui.cover_explain	If cash would go below zero after storage and instalments, the company sells just enough stock to stay at zero and logs what it sold.
-ui.cover_last	last month end: sold {amount} of stock
-ui.cover_last_none	last month end: not needed
-ui.solvency_rule	{count} month-ends in the red is bankruptcy
+ui.loan_rule	Repaid in equal principal instalments plus {ratio} a year on the balance, settled at each month end.
+ui.loan_limits	Up to {amount} more available, with a minimum draw of {min}. Terms run {months} months, with {count} loans at most on the ledger.
+ui.cover_check	Sell off the pile at month end to cover costs
+ui.cover_explain	If storage and loan instalments push cash below zero, the company sells just enough stock off the pile to hold at zero and logs the sale in the ledger.
+ui.cover_last	Last month end: sold {amount} of stock off the pile.
+ui.cover_last_none	Last month end: no stock sales needed.
+ui.solvency_rule	Closing {count} month-ends in the red forces bankruptcy.
 ui.pause_on.insolvency	Insolvency warning
 ui.pause_on.bankrupt	Bankruptcy
 ui.pause_on.auction_won	Auction won
@@ -265,5 +265,5 @@ ui.pause_on.survey_complete	Survey complete
 ui.pause_on.mine_operational	Mine opens
 ui.pause_on.mine_found_nothing	Mine found nothing
 ui.pause_on.idle_mine	Idle mine warning
-ui.pause_menu_title	Stop the clock when
+ui.pause_menu_title	Stop the clock when any of these happen.
 status.paused_by	Paused: {text}
