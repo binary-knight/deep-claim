@@ -100,3 +100,33 @@ Strings are not part of the content fingerprint: prose does not change
 simulation state, and a wording fix must not invalidate saves. Tech and
 event names stay in their defs (and therefore in the fingerprint, as
 before), filled from the catalogue by the loader.
+
+## Decisions (build, 2026-10-09)
+
+- The agy pass ran over all 182 draft lines in eight batches of 25; the
+  invariant check passed every line (no numbers or placeholders changed).
+  agy's raw output is kept as `tools/prose/agy-raw.tsv`; `polished.tsv` is
+  the reviewed merge: 152 lines use agy's text, 19 keep the draft and 11
+  were unchanged by agy. Reverted to the draft, with the reason:
+  - every `*.name` key (7 changed): agy renamed techs and events
+    ("Processing Line II", "Rail Sidings and Stockpiles", "Lithium
+    Concentrator", "Battery Boom"). Names are identifiers the player sees
+    across screens and in the playtest notes; the writer may not rename
+    things.
+  - `ui.select_plot`, `ui.price_title`: headings; agy added sentence
+    punctuation.
+  - `ui.survey_none`, `ui.survey_pending`, `ui.survey_pending_again`,
+    `ui.auction.one/.many`, `ui.auction_yours`, `ui.mine_today`,
+    `ui.mine_opex`, `ui.loan_instalment`, `ui.loan_months`: table cells
+    and fragments joined by code; the terse draft fits the column, agy's
+    full sentences did not.
+- Loader validation treats the key table as the contract: a key the code
+  looks up but the table lacks would show as `[key]` in play, which the
+  shipped-data test catches for notices and rejections and the parity test
+  catches for everything in the draft.
+- `Content::strings` is a `std::map`; `game::text` looks up with a
+  temporary `std::string`. About 60 lookups per interface refresh, which
+  happens at most once per simulated day; not worth an interned-key table
+  yet.
+- Short labels on buttons and column headers ("Pause", "Sell all",
+  "Resource") stay literal in the RML, as the spec allows.
