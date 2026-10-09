@@ -180,3 +180,18 @@ tech.bulk_logistics.name	Rail Sidings and Stockpiles
 tech.bulk_logistics.description	Rail sidings and covered stockpiles keep the weather off the pile. Storage costs drop by 40%.
 tech.lithium_processing.name	Lithium Concentrator
 tech.lithium_processing.description	A concentrator plant turns raw lithium ore into saleable concentrate. Without one in place, lithium cannot be mined or sold.
+notice.plot_withdrawn	{plot} found no buyers again and was pulled from the block at {amount}.
+notice.rival_unlocked_resource	Word is {company} has their works set up to process {resource}.
+notice.mine_running_low	The survey crew's low estimate gives the mine on {plot} about {days} days of ore left.
+ui.need_lab_idle_sub.one	{count} project is drawn up and ready to start.
+ui.need_lab_idle_sub.many	{count} projects are drawn up and ready to start.
+ui.need_survey_in_sub	Bidding closes on day {day}.
+ui.survey_depleted	The mine here is worked clean. Another survey won't put ore back in the rock.
+ui.notice_locked_soon.one	We can't pull ore here yet, but the lab unlocks {resource} in {days} day. Buying now gets us in ahead of the unlock.
+ui.notice_locked_soon.many	We can't pull ore here yet, but the lab unlocks {resource} in {days} days. Buying now gets us in ahead of the unlock.
+ui.notice_locked_ready	We can't pull ore here yet, but {resource} is only one project away: {tech}. Buy ahead if the price suits.
+ui.no_unlisted_withdrawn.one	No unlisted land left on the books. {count} withdrawn plot will return to auction.
+ui.no_unlisted_withdrawn.many	No unlisted land left on the books. {count} withdrawn plots will return to auction.
+ui.loan_blocked_credit	Remaining credit is down to {amount}, below the bank's minimum loan of {min}.
+ui.loan_blocked_count	The bank allows {count} open loans, and every one of them is already drawn.
+ui.log_empty	Nothing logged under this heading yet.

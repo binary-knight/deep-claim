@@ -134,8 +134,8 @@ void printMines(const sim::Content& content, const sim::CompanyView& v) {
     }
     std::cout << "\nmines:\n";
     for (const sim::MineView& m : v.mines) {
-        std::cout << std::format("  plot #{} {}, opex {}/day\n", m.plot.value() + 1,
-                                 mineStatus(m), game::formatMoney(m.dailyOpex));
+        std::cout << std::format("  plot #{} {}, opex {}/day\n", m.plot.value() + 1, mineStatus(m),
+                                 game::formatMoney(m.dailyOpex));
         for (std::size_t r = 0; r < m.extractedTonnes.size(); ++r) {
             if (m.extractedTonnes[r] == 0 && m.lastOutputTonnes[r] == 0) {
                 continue;
