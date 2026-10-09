@@ -211,3 +211,70 @@ Market rules.
   withdrawn plots at year 8 needs the two companies to have bought most
   of the hundred plots listed by then. Both rows are reported, not gated;
   the build tunes for the gated rows and reports where these two land.
+- 2026-10-09 (build, step 2): the sixteen constants load from
+  `data/ai.json` into `Content::ai`, and the presence threshold from
+  `balance.json` (`opening_mineable_presence`: it is a rule of world
+  generation, not of the competitor). Both are in the content
+  fingerprint. With the values unchanged the 50-seed sweep is
+  byte-identical to the baseline.
+- 2026-10-09 (build, step 3): **no separate list of settled auctions.**
+  `WorldState::auctions` is never erased and already records the winner
+  and the winning bid, so the history exists; what it lacked was the ask.
+  `Auction::askPrice` (the minimum bid the auction opened with) is the one
+  field added: serialized, hashed, validated (an open auction stands at
+  its plot's ask; a sale is at or above it). The view derives
+  `recentSales` (the sixteen newest, newest first) and each sold plot's
+  own `sale` from that. Golden hash 0x118a72ce0f57d9f7 to
+  0x2a5da3177ab7c69d, the only move in this spec.
+- 2026-10-09 (build, step 4): **the rival's bids were rigged, by
+  accident.** The offset added to every AI bid "so identical competitors
+  do not tie" was `(plot * 7 + company * 13) % 7`. The plot term is a
+  multiple of seven, so the offset was 0 for company 0 and 6 for company
+  1 on every plot: the rival outbid the AI-played company by six points
+  in every auction they both wanted. That is why the rival's winning bids
+  in both playtests were 16%, 16%, 16% and 32% over the ask (10 + 6, 25 +
+  6), why company 1 built 49 mines to company 0's 16, and why company 0
+  bought its first plot in the second round. The offset is now a hash of
+  plot and company (`aiBidJitterPercent`, 0 to 6): over 120 plots each of
+  two companies is ahead on at least 35. Alone, with every knob as it
+  was:
+
+| 50 seeds, 10 years | Baseline | Offset fixed |
+| --- | --- | --- |
+| Median day company 0's first mine operates | 273 | 228 |
+| Seeds with a bankrupt company | 6 | 4 |
+| Mines built, leader over trailer, median seed | 3.06x | 1.27x |
+| Mines built, company 0 / company 1, median | 16 / 49 | 32 / 33 |
+
+  The first-mine target is met by this alone. This is not one of the
+  sixteen knobs and the spec did not ask for it; it is a defect the
+  tuning exposed, fixed in code, and it replaces the draft's diagnosis of
+  the opening ("the return test fails at the opening ask").
+- 2026-10-09 (build, step 4): **valuation.** `aiValuedPrice`: today's
+  price, never above base; then the market's own rule applied to the new
+  mine's output, `(before / (before + added)) ^ elasticity` with `before`
+  = base demand + recent supply, and the same price drop charged on the
+  ore the company's operating mines already sell, per tonne of the new
+  mine. That is the marginal revenue of one more mine, which is what the
+  draft's "each mine it owns lowers the valued price" was reaching for:
+  a company with four copper mines values a fifth well below a newcomer.
+  `supply_discount` (0 to 1) scales the adjustment; shipped at 1. Capping
+  at base alone changes nothing measurable; the supply rule on top of the
+  fixed offset takes bankrupt seeds from 4 to 1 and the ratio from 1.27x
+  to 1.13x.
+- 2026-10-09 (build, step 4): **first-mine terms** exist as two knobs
+  (`first_mine_required_return`, `first_mine_recoverable_share`) and ship
+  at the proposed 1.1 and 0.6. They do not move the median first mine
+  (228 with or without them: the purchase already happens in the first
+  round once the bids are fair). Kept because the rule is cheap and the
+  owner approved it; step 5 checks they do no harm on the final data.
+- 2026-10-09 (build, step 4): **the wind-down rule is not built.** The
+  sim has no order that closes a mine: `SetMineState` switches between
+  operating and mothballed, a depleted mine already costs nothing, and
+  `Closed` is what bankruptcy does. "The AI closes a mine mothballed for
+  a year" would need a new command, a since-day on the mine, and either a
+  control the player does not get (the spec says no new controls) or a
+  player-facing feature this spec does not design. The spec made the
+  rule conditional on the diagnosis, and the diagnosis is that the
+  mothball charge is the last link, not the cause. Step 5 shows whether
+  any bankruptcy is left for it to prevent.

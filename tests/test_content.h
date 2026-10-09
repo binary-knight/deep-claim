@@ -155,6 +155,11 @@ inline sim::Content makeContent() {
     c.ai.loanFloor = sim::Money::fromUnits(750'000);
     c.ai.loanChunk = sim::Money::fromUnits(2'000'000);
     c.ai.bootstrapLoan = sim::Money::fromUnits(4'000'000);
+    // Spec 006 rules switched off: a first mine is valued like any other and
+    // the company's own supply is ignored, as before the spec.
+    c.ai.firstMineRecoverableShare = c.ai.recoverableShare;
+    c.ai.firstMineRequiredReturn = c.ai.requiredReturn;
+    c.ai.supplyDiscount = sim::Fixed::zero();
     return c;
 }
 

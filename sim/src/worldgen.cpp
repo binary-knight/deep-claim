@@ -53,13 +53,12 @@ std::int64_t sampleTonnes(const DepositPrior& prior, const RegionDef& region, st
     // mean area = (min + max) / 2, kept exact by doubling the numerator.
     std::int64_t tonnes =
         mulDiv(scaled, 2 * area, region.plotAreaMinHectares + region.plotAreaMaxHectares);
-    if (tonnes < 1) {
-        tonnes = 1;
-    }
-    if (tonnes > kMaxDepositTonnes) {
-        tonnes = kMaxDepositTonnes;
-    }
-    return tonnes;
+    // The cap applies to what the plot ends up holding, area included.
+    const std::int64_t cap =
+        checkedMulDiv(prior.tonnesMedian, prior.tonnesMaxMult.raw(), Fixed::kScale)
+            .value_or(kMaxDepositTonnes);
+    tonnes = std::min({tonnes, cap, kMaxDepositTonnes});
+    return std::max<std::int64_t>(tonnes, 1);
 }
 
 // The plots not yet placed in the listing queue, grouped by region so a draw

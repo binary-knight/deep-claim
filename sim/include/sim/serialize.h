@@ -278,7 +278,8 @@ void serialize(Archive& ar, TechDef& def) {
 
 template <class Archive>
 void serialize(Archive& ar, DepositPrior& prior) {
-    ar(prior.resource, prior.presenceProb, prior.tonnesMedian, prior.tonnesSpread);
+    ar(prior.resource, prior.presenceProb, prior.tonnesMedian, prior.tonnesSpread,
+       prior.tonnesMaxMult);
 }
 
 template <class Archive>
@@ -317,7 +318,8 @@ void serialize(Archive& ar, AiParams& ai) {
     ar(ai.sellAboveBase, ai.dumpStorageShare, ai.recoverableShare, ai.requiredReturn,
        ai.paybackHorizonDays, ai.bidPremium, ai.bidPremiumHigh, ai.maxOpenProspects,
        ai.reopenMargin, ai.idleMineGraceDays, ai.opexReserveDays, ai.cashReserve,
-       ai.researchFloor, ai.loanFloor, ai.loanChunk, ai.bootstrapLoan);
+       ai.researchFloor, ai.loanFloor, ai.loanChunk, ai.bootstrapLoan,
+       ai.firstMineRecoverableShare, ai.firstMineRequiredReturn, ai.supplyDiscount);
 }
 
 template <class Archive>

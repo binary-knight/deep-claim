@@ -58,11 +58,16 @@ struct TechDef {
 // Log-normal prior for one resource in one region. tonnesSpread is the ratio
 // between the 84th percentile and the median (e^sigma), so a spread of 2.5
 // means roughly a third of deposits are 2.5x bigger or smaller than median.
+// tonnesMaxMult caps a deposit at that multiple of the median, after the
+// plot's area has scaled it (spec 006): the tail of the distribution is
+// what made mines outlive the game. The default never binds (the draw is
+// already clamped to three sigma), which is what in-code fixtures use.
 struct DepositPrior {
     ResourceId resource;
     Fixed presenceProb;
     std::int64_t tonnesMedian = 0;
     Fixed tonnesSpread;
+    Fixed tonnesMaxMult = Fixed::fromInt(1'000'000);
 };
 
 struct RegionDef {
@@ -155,6 +160,14 @@ struct AiParams {
     // Valuing a surveyed plot.
     Fixed recoverableShare;               // haircut on surveyed tonnage
     Fixed requiredReturn;                 // net value must cover the outlay times this
+    // The same two for a company that has no mine yet: easier, so the first
+    // purchase can happen at the opening ask.
+    Fixed firstMineRecoverableShare;
+    Fixed firstMineRequiredReturn;
+    // How much of the market's response to the company's own supply the
+    // valuation counts: 0 values ore at today's price whatever the company
+    // already sells, 1 applies the market's elasticity rule in full.
+    Fixed supplyDiscount;
     std::int64_t paybackHorizonDays = 0;  // value at most this many days of output
     // Bidding.
     Fixed bidPremium;                    // over the ask, for contested or clearly good plots

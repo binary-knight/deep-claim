@@ -34,7 +34,8 @@ content::Sources goodSources() {
       {"id": "north", "name": "North", "plot_count": 10,
        "land_price": {"min": 800000, "max": 2500000},
        "plot_area_hectares": {"min": 200, "max": 1200},
-       "deposits": {"iron": {"presence_prob": 0.8, "tonnes_median": 700000, "tonnes_spread": 2.5}}}
+       "deposits": {"iron": {"presence_prob": 0.8, "tonnes_median": 700000, "tonnes_spread": 2.5,
+                           "tonnes_max_mult": 4}}}
     ])";
     s.events = R"([
       {"id": "boom", "daily_weight": 0.002, "min_year": 2, "duration_days": 180,
@@ -63,7 +64,8 @@ content::Sources goodSources() {
       "bid_premium_high": 1.25, "max_open_prospects": 2, "reopen_margin": 1.25,
       "idle_mine_grace_days": 30, "opex_reserve_days": 60, "cash_reserve": 500000,
       "research_floor": 2500000, "loan_floor": 750000, "loan_chunk": 2000000,
-      "bootstrap_loan": 4000000
+      "bootstrap_loan": 4000000, "first_mine_recoverable_share": 0.6,
+      "first_mine_required_return": 1.1, "supply_discount": 1
     })";
     s.strings = test::fixtureStrings({"boom"}, {"seismic_1", "lithium_processing"});
     return s;
@@ -316,6 +318,9 @@ TEST_CASE("The competitor's knobs load with bounds and are all required", "[cont
     CHECK(ai.loanFloor == sim::Money::fromUnits(750'000));
     CHECK(ai.loanChunk == sim::Money::fromUnits(2'000'000));
     CHECK(ai.bootstrapLoan == sim::Money::fromUnits(4'000'000));
+    CHECK(ai.firstMineRecoverableShare == sim::Fixed::fromRatio(6, 10));
+    CHECK(ai.firstMineRequiredReturn == sim::Fixed::fromRatio(11, 10));
+    CHECK(ai.supplyDiscount == sim::Fixed::one());
 
     content::Sources s = goodSources();
     s.ai = replaceOnce(s.ai, R"("required_return": 1.2)", R"("required_return": 0.9)");
@@ -324,6 +329,11 @@ TEST_CASE("The competitor's knobs load with bounds and are all required", "[cont
     s.ai = replaceOnce(s.ai, R"("bid_premium_high": 1.25)", R"("bid_premium_high": 1.05)");
     s.ai = replaceOnce(s.ai, R"("loan_chunk": 2000000)", R"("loan_chunk": 0)");
     s.ai = replaceOnce(s.ai, R"("cash_reserve": 500000)", R"("cash_reserve": -1, "typo": 1)");
+    s.ai = replaceOnce(s.ai, R"("supply_discount": 1)", R"("supply_discount": 1.5)");
+    s.ai = replaceOnce(s.ai, R"("first_mine_required_return": 1.1)",
+                       R"("first_mine_required_return": 0.5)");
+    s.ai = replaceOnce(s.ai, R"("first_mine_recoverable_share": 0.6)",
+                       R"("first_mine_recoverable_share": -0.1)");
     const auto bad = content::loadFromStrings(s);
     CHECK_FALSE(bad.ok());
     CHECK(hasError(bad, "ai.json", "required_return", "must be between"));
@@ -333,6 +343,9 @@ TEST_CASE("The competitor's knobs load with bounds and are all required", "[cont
     CHECK(hasError(bad, "ai.json", "loan_chunk", "must be at least"));
     CHECK(hasError(bad, "ai.json", "cash_reserve", "must be at least"));
     CHECK(hasError(bad, "ai.json", "typo", "unknown key"));
+    CHECK(hasError(bad, "ai.json", "supply_discount", "must be between"));
+    CHECK(hasError(bad, "ai.json", "first_mine_required_return", "must be between"));
+    CHECK(hasError(bad, "ai.json", "first_mine_recoverable_share", "must be between"));
 
     content::Sources missing = goodSources();
     missing.ai = replaceOnce(missing.ai, R"("reopen_margin": 1.25,)", "");
@@ -343,6 +356,26 @@ TEST_CASE("The competitor's knobs load with bounds and are all required", "[cont
     content::Sources array = goodSources();
     array.ai = "[]";
     CHECK(hasError(content::loadFromStrings(array), "ai.json", "", "expected a top-level object"));
+}
+
+TEST_CASE("A deposit's size cap loads and must be at least the median", "[content]") {
+    const auto good = content::loadFromStrings(goodSources());
+    REQUIRE(good.ok());
+    CHECK(good.content->regions[0].deposits[0].tonnesMaxMult == sim::Fixed::fromInt(4));
+
+    content::Sources s = goodSources();
+    s.regions = replaceOnce(s.regions, R"("tonnes_max_mult": 4)", R"("tonnes_max_mult": 0.5)");
+    const auto bad = content::loadFromStrings(s);
+    CHECK_FALSE(bad.ok());
+    CHECK(hasError(bad, "regions.json", "[0].deposits.iron.tonnes_max_mult", "must be between"));
+
+    content::Sources missing = goodSources();
+    missing.regions = replaceOnce(missing.regions, R"(,
+                           "tonnes_max_mult": 4)", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "regions.json", "[0].deposits.iron.tonnes_max_mult",
+                   "missing required key"));
 }
 
 TEST_CASE("The mineable-region threshold loads from the balance file", "[content]") {

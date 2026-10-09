@@ -4,6 +4,7 @@
 #include "sim/content.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
+#include "sim/math.h"
 #include "sim/money.h"
 #include "sim/tech.h"
 #include "sim/types.h"
@@ -18,6 +19,10 @@
 namespace sim {
 
 namespace {
+
+// Lowest supply ratio the valuation feeds to the power law (the market
+// clamps its own ratio the same way).
+const Fixed kSupplyRatioMin = Fixed::fromRatio(1, 5);
 
 // One projected cash position shared by every rule, so the commands issued
 // on a day are jointly affordable and no rule can starve another.
@@ -60,6 +65,31 @@ bool surveyPending(const CompanyView& view, PlotId plot) {
                                [&](const SurveyView& s) { return s.plot == plot && !s.complete; });
 }
 
+// A company with no mine yet buys on easier terms (spec 006): until it
+// produces it earns nothing, so the first purchase should not wait for a
+// plot to be marked down.
+Fixed requiredReturn(const Content& content, const CompanyView& view) {
+    return view.mines.empty() ? content.ai.firstMineRequiredReturn : content.ai.requiredReturn;
+}
+
+Fixed recoverableShare(const Content& content, const CompanyView& view) {
+    return view.mines.empty() ? content.ai.firstMineRecoverableShare
+                              : content.ai.recoverableShare;
+}
+
+// Zero to six percent added to a bid, fixed for a given plot and company, so
+// identical competitors do not tie on every auction and neither wins them
+// all. (Until spec 006 this was (plot * 7 + company * 13) % 7, in which the
+// plot cancels out: company 1 outbid company 0 by six points every time.)
+std::int64_t bidJitterPercent(PlotId plot, CompanyId company) {
+    std::uint32_t mix = (plot.value() + 1U) * 2654435761U;
+    mix ^= (company.value() + 1U) * 0x9E3779B1U;
+    mix ^= mix >> 15U;
+    mix *= 0x85EBCA6BU;
+    mix ^= mix >> 13U;
+    return static_cast<std::int64_t>(mix % 7U);
+}
+
 // A region is worth prospecting only if some resource it may hold is unlocked.
 bool regionWorthProspecting(const Content& content, const CompanyView& view, RegionId region) {
     return std::ranges::any_of(
@@ -88,18 +118,55 @@ std::size_t openProspects(const Content& content, const CompanyView& view) {
             continue;
         }
         const Money outlay = plot.askPrice + plot.mineCapexQuote;
-        if (surveyedNetValue(content, view, survey) >= outlay.scaled(content.ai.requiredReturn)) {
+        if (surveyedNetValue(content, view, survey) >= outlay.scaled(requiredReturn(content, view))) {
             ++count;
         }
     }
     return count;
 }
 
-// Net value of developing a surveyed plot: unlocked resources only, half the
-// estimated tonnage (survey error haircut), at most five years of output,
-// at today's prices, minus the opex of running the mine for as long as the
-// slowest deposit takes to extract (output declines, so 1.3x the nominal
-// time). A buy must cover land plus capex out of this.
+// The price per tonne the company should expect for a new mine's ore
+// (spec 006). Never above base: a spike is not a business plan. Then the
+// market's own rule is applied to the mine's own output: adding `added`
+// tonnes a day to a market of `before` moves the price by
+// (before / (before + added)) ^ elasticity, and that lower price is also
+// paid for everything the company already sells there. A company with many
+// mines of an ore therefore values one more of them far below a newcomer.
+Money valuedPrice(const Content& content, const CompanyView& view, ResourceId resource) {
+    const ResourceDef& def = content.resources[resource.index()];
+    const MarketView& market = view.markets[resource.index()];
+    const Money today = std::min(market.price, market.basePrice);
+    const std::int64_t added = std::max<std::int64_t>(def.baseOutputTonnesPerDay, 1);
+    const std::int64_t before =
+        market.baseDemandTonnesPerDay + std::max<std::int64_t>(market.recentSupplyTonnesPerDay, 0);
+    if (before <= 0 || today <= Money::zero()) {
+        return std::max(today, Money::zero());
+    }
+    // Clamped like the market's own ratio, so the power stays tame.
+    const Fixed ratio =
+        clampFixed(Fixed::fromRatio(before, before + added), kSupplyRatioMin, Fixed::one());
+    const Money after = today.scaled(fixedPow(ratio, def.elasticity));
+    std::int64_t own = 0;
+    for (const MineView& mine : view.mines) {
+        if (mine.state == MineState::Operating) {
+            own += mine.lastOutputTonnes[resource.index()];
+        }
+    }
+    // What the price drop costs on existing output, per tonne of the new mine.
+    const Money drop = today - after;
+    const std::int64_t lostCents =
+        checkedMulDiv(drop.cents(), own, added).value_or(today.cents());
+    const Money adjustment =
+        (drop + Money::fromCents(std::min(lostCents, today.cents()))).scaled(
+            content.ai.supplyDiscount);
+    return std::max(today - adjustment, Money::zero());
+}
+
+// Net value of developing a surveyed plot: unlocked resources only, a share
+// of the estimated tonnage (survey error haircut), at most the payback
+// horizon of output, at the valued price, minus the opex of running the mine
+// for as long as the slowest deposit takes to extract (output declines, so
+// 1.3x the nominal time). A buy must cover land plus capex out of this.
 Money surveyedNetValue(const Content& content, const CompanyView& view, const SurveyView& survey) {
     Money revenue = Money::zero();
     std::int64_t extractionDays = 0;
@@ -112,10 +179,11 @@ Money surveyedNetValue(const Content& content, const CompanyView& view, const Su
         const std::int64_t horizonTonnes =
             checkedMulDiv(output, content.ai.paybackHorizonDays, 1).value_or(kMaxDepositTonnes);
         const std::int64_t tonnes =
-            std::min(checkedMulDiv(estimate.tonnesEstimate, content.ai.recoverableShare.raw(), Fixed::kScale)
+            std::min(checkedMulDiv(estimate.tonnesEstimate, recoverableShare(content, view).raw(),
+                                   Fixed::kScale)
                          .value_or(kMaxDepositTonnes),
                      horizonTonnes);
-        const Money price = view.markets[estimate.resource.index()].price;
+        const Money price = valuedPrice(content, view, estimate.resource);
         const std::int64_t cents = checkedMulDiv(price.cents(), tonnes, 1).value_or(kMaxCashCents);
         revenue += Money::fromCents(std::min(cents, kMaxCashCents - revenue.cents()));
         const std::int64_t days = (tonnes + output - 1) / output;
@@ -226,7 +294,7 @@ void decideBuilding(const Content& content, const CompanyView& view, Budget& bud
             continue;
         }
         const Money capex = plot.mineCapexQuote;
-        if (surveyedNetValue(content, view, *survey) >= capex.scaled(content.ai.requiredReturn) &&
+        if (surveyedNetValue(content, view, *survey) >= capex.scaled(requiredReturn(content, view)) &&
             budget.canSpend(capex + constructionReserve(content, view))) {
             out.emplace_back(BuildMine{view.me, plot.id});
             budget.spend(capex);
@@ -268,7 +336,7 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
             continue;
         }
         const Money value = surveyedNetValue(content, view, *survey);
-        if (value < (plot.askPrice + capex).scaled(content.ai.requiredReturn)) {
+        if (value < (plot.askPrice + capex).scaled(requiredReturn(content, view))) {
             continue;  // not worth the land plus the mine
         }
         // Bids are sealed and ties go to the earlier bidder, so pay a premium
@@ -280,11 +348,9 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
         } else if (plot.auction->bidCount > 0 || value >= (plot.askPrice + capex) * 2) {
             premium = content.ai.bidPremium;
         }
-        const auto jitterPercent =
-            static_cast<std::int64_t>((plot.id.value() * 7U + view.me.value() * 13U) % 7U);
-        premium = premium + Fixed::fromRatio(jitterPercent, 100);
+        premium = premium + Fixed::fromRatio(bidJitterPercent(plot.id, view.me), 100);
         const Money bid = plot.askPrice.scaled(premium);
-        if (value < (bid + capex).scaled(content.ai.requiredReturn)) {
+        if (value < (bid + capex).scaled(requiredReturn(content, view))) {
             continue;  // the premium would eat the return
         }
         const Money development = capex + constructionReserve(content, view);
@@ -379,6 +445,14 @@ void decideRepayment(const Content& content, const CompanyView& view, Budget& bu
 }
 
 }  // namespace
+
+Money aiValuedPrice(const Content& content, const CompanyView& view, ResourceId resource) {
+    return valuedPrice(content, view, resource);
+}
+
+std::int64_t aiBidJitterPercent(PlotId plot, CompanyId company) {
+    return bidJitterPercent(plot, company);
+}
 
 void HeuristicController::decide(const CompanyView& view, std::vector<Command>& out) {
     if (view.bankrupt) {

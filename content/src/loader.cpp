@@ -664,7 +664,7 @@ void parseDeposits(const Node& region, const sim::Content& content, sim::RegionD
             continue;
         }
         const Node node(item.value(), path, sink);
-        node.allowKeys({"presence_prob", "tonnes_median", "tonnes_spread"});
+        node.allowKeys({"presence_prob", "tonnes_median", "tonnes_spread", "tonnes_max_mult"});
         sim::DepositPrior prior;
         prior.resource = resource;
         prior.presenceProb =
@@ -675,6 +675,9 @@ void parseDeposits(const Node& region, const sim::Content& content, sim::RegionD
         prior.tonnesSpread =
             valueOr(node.fixed("tonnes_spread", true, sim::Fixed::one(), sim::Fixed::fromInt(20)),
                     sim::Fixed::one());
+        prior.tonnesMaxMult = valueOr(
+            node.fixed("tonnes_max_mult", true, sim::Fixed::one(), sim::Fixed::fromInt(1'000'000)),
+            sim::Fixed::one());
         def.deposits.push_back(prior);
     }
 }
@@ -901,7 +904,8 @@ void parseAi(const json& document, sim::AiParams& ai, ErrorSink& sink) {
                     "required_return", "payback_horizon_days", "bid_premium", "bid_premium_high",
                     "max_open_prospects", "reopen_margin", "idle_mine_grace_days",
                     "opex_reserve_days", "cash_reserve", "research_floor", "loan_floor",
-                    "loan_chunk", "bootstrap_loan"});
+                    "loan_chunk", "bootstrap_loan", "first_mine_recoverable_share",
+                    "first_mine_required_return", "supply_discount"});
     const sim::Fixed zero = sim::Fixed::zero();
     const sim::Fixed one = sim::Fixed::one();
     const sim::Fixed ten = sim::Fixed::fromInt(10);
@@ -910,6 +914,11 @@ void parseAi(const json& document, sim::AiParams& ai, ErrorSink& sink) {
     ai.dumpStorageShare = valueOr(node.fixed("dump_storage_share", true, zero, one), one);
     ai.recoverableShare = valueOr(node.fixed("recoverable_share", true, zero, one), one);
     ai.requiredReturn = valueOr(node.fixed("required_return", true, one, ten), one);
+    ai.firstMineRecoverableShare =
+        valueOr(node.fixed("first_mine_recoverable_share", true, zero, one), one);
+    ai.firstMineRequiredReturn =
+        valueOr(node.fixed("first_mine_required_return", true, one, ten), one);
+    ai.supplyDiscount = valueOr(node.fixed("supply_discount", true, zero, one), zero);
     ai.paybackHorizonDays = valueOr(node.integer("payback_horizon_days", true, 1, kMaxDays), 1LL);
     ai.bidPremium = valueOr(node.fixed("bid_premium", true, one, ten), one);
     ai.bidPremiumHigh = valueOr(node.fixed("bid_premium_high", true, one, ten), one);
