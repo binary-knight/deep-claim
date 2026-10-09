@@ -75,3 +75,8 @@ regions or resources; the asteroid phase.
 
 ## Decisions
 - 2026-10-09: drafted from playtest 2; owner chose this as the next spec.
+- 2026-10-09: approved as drafted.
+- 2026-10-09: unsold-land knobs change with this spec (owner's choice
+  after spec 004 showed 23 of 30 plots withdrawn by year 3 in the probe
+  game): `max_unsold_rounds` 3 to 6 (a plot stays for sale 270 days) and
+  `relist_cooldown_days` 360 to 180.
