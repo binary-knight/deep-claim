@@ -1,6 +1,6 @@
 # 004: Playtest 2 fixes
 
-Status: draft, awaiting approval.
+Status: approved 2026-10-09.
 
 ## Goal
 Remove the friction and the noise the second playtest exposed
