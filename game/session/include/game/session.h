@@ -71,6 +71,10 @@ public:
     [[nodiscard]] const std::vector<sim::Money>& priceHistory(sim::ResourceId resource) const {
         return simulation_.priceHistory(resource);
     }
+    // The player's cash at the end of each day of this session, oldest
+    // first, for the header sparkline. Session memory, not sim state: a
+    // load starts it again from the loaded day's cash.
+    [[nodiscard]] const std::vector<sim::Money>& cashHistory() const { return cashHistory_; }
 
     // ---- persistence ----
     [[nodiscard]] std::vector<std::uint8_t> save() const { return simulation_.save(); }
@@ -102,6 +106,7 @@ private:
     TraceWriter* trace_ = nullptr;
     AutoPause autoPause_ = AutoPause::defaults();
     std::optional<sim::Notice> pausedBy_;
+    std::vector<sim::Money> cashHistory_;
 };
 
 }  // namespace game

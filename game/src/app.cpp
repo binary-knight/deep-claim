@@ -90,18 +90,31 @@ App::App(Rml::Context& context, platform::Services& services, const sim::Content
     openTrace();
     newGame(clockSeed());
     bindModel();
-    PriceChartElement::setProvider([this](int resource) {
+    PriceChartElement::setProvider([this](int resource, int days) {
         ChartSeries series;
         if (resource < 0 || resource >= static_cast<int>(content_->resources.size())) {
             return series;
         }
         const sim::ResourceId id(static_cast<std::uint32_t>(resource));
         const std::vector<sim::Money>& history = session_->priceHistory(id);
-        const std::size_t count = std::min<std::size_t>(history.size(), sim::kRecentPriceDays);
+        const std::size_t count =
+            std::min<std::size_t>(history.size(), static_cast<std::size_t>(std::max(days, 2)));
         for (std::size_t i = history.size() - count; i < history.size(); ++i) {
             series.values.push_back(history[i].cents());
         }
         series.baseline = content_->resources[id.index()].basePrice.cents();
+        return series;
+    });
+    PriceChartElement::setCashProvider([this](int days) {
+        ChartSeries series;
+        const std::vector<sim::Money>& history = session_->cashHistory();
+        const std::size_t count =
+            std::min<std::size_t>(history.size(), static_cast<std::size_t>(std::max(days, 2)));
+        for (std::size_t i = history.size() - count; i < history.size(); ++i) {
+            series.values.push_back(history[i].cents());
+        }
+        series.baseline = 0;
+        series.hasBaseline = true;  // the zero line: below it is insolvency
         return series;
     });
 }
@@ -111,6 +124,7 @@ App::~App() {
         trace_->end(session_->day());
     }
     PriceChartElement::setProvider(nullptr);
+    PriceChartElement::setCashProvider(nullptr);
     if (document_ != nullptr) {
         document_->Close();
     }
