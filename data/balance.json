@@ -23,5 +23,7 @@
   "demand_mult_max": 3,
   "price_floor_mult": 0.1,
   "price_cap_mult": 10,
-  "demand_growth_per_year": 0.04
+  "demand_growth_per_year": 0.04,
+  "default_sell_policy": { "enabled": true, "reserve_tonnes": 0, "floor_price": 0 },
+  "default_cover_costs": true
 }

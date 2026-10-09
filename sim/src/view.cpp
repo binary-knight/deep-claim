@@ -181,6 +181,10 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     view.cash = self.cash;
     view.reservedCash = reservedCash(state, company);
     view.inventoryTonnes = self.inventoryTonnes;
+    view.sellPolicies = self.sellPolicies;
+    view.coverCosts = self.coverCosts != 0;
+    view.autoSoldTonnes = self.autoSoldTonnes;
+    view.autoSoldProceeds = self.autoSoldProceeds;
     view.completedTechs = self.completedTechs;
     view.outstandingPrincipal = outstandingPrincipal(state, company);
     view.loanCapacity = content.balance.loanMaxPrincipal - view.outstandingPrincipal;

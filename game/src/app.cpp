@@ -129,6 +129,7 @@ void App::newGame(std::uint64_t seed) {
     model_.selected_plot = -1;
     model_.selected_resource = 0;
     model_.tab = 0;
+    syncPolicyInputs();
     lastRefreshedDay_ = session_->day();
 }
 
@@ -237,6 +238,8 @@ void App::bindModel() {
         h.RegisterMember("supply", &ResourceRow::supply);
         h.RegisterMember("stock", &ResourceRow::stock);
         h.RegisterMember("stock_value", &ResourceRow::stock_value);
+        h.RegisterMember("policy", &ResourceRow::policy);
+        h.RegisterMember("auto_sold", &ResourceRow::auto_sold);
         h.RegisterMember("has_stock", &ResourceRow::has_stock);
         h.RegisterMember("selected", &ResourceRow::selected);
     }
@@ -299,6 +302,13 @@ void App::bindModel() {
     ctor.Bind("techs", &model_.techs);
     ctor.Bind("loans", &model_.loans);
     ctor.Bind("log", &model_.log);
+    ctor.Bind("storage_warning", &model_.storage_warning);
+    ctor.Bind("policy_reserve_input", &model_.policy_reserve_input);
+    ctor.Bind("policy_floor_input", &model_.policy_floor_input);
+    ctor.Bind("policy_enabled", &model_.policy_enabled);
+    ctor.Bind("policy_summary", &model_.policy_summary);
+    ctor.Bind("cover_costs", &model_.cover_costs);
+    ctor.Bind("cover_costs_label", &model_.cover_costs_label);
     ctor.Bind("bid_input", &model_.bid_input);
     ctor.Bind("sell_input", &model_.sell_input);
     ctor.Bind("loan_input", &model_.loan_input);
@@ -353,6 +363,18 @@ void App::bindModel() {
         });
     ctor.BindEventCallback("take_loan", [this](Rml::DataModelHandle, Rml::Event&,
                                                const Rml::VariantList&) { onTakeLoan(); });
+    ctor.BindEventCallback("apply_policy",
+                           [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+                               onApplyPolicy(model_.policy_enabled);
+                           });
+    ctor.BindEventCallback("toggle_policy",
+                           [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+                               onApplyPolicy(!model_.policy_enabled);
+                           });
+    ctor.BindEventCallback("toggle_cover_costs",
+                           [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+                               onToggleCoverCosts();
+                           });
     ctor.BindEventCallback(
         "repay", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
             onRepay(intArg(a, 0));
@@ -500,8 +522,60 @@ void App::onSelectResource(int index) {
     if (index >= 0 && index < static_cast<int>(content_->resources.size())) {
         traceUi("select_resource", content_->resources[static_cast<std::size_t>(index)].id);
     }
+    // Prefill the policy inputs only on an actual change of selection so a
+    // draft is not lost by a click on the already selected row.
+    const bool changed = index != model_.selected_resource;
     model_.selected_resource = index;
+    if (changed) {
+        syncPolicyInputs();
+    }
     refresh();
+}
+
+void App::syncPolicyInputs() {
+    const sim::CompanyView& view = session_->view();
+    const int index = model_.selected_resource;
+    if (index < 0 || index >= static_cast<int>(view.sellPolicies.size())) {
+        return;
+    }
+    const sim::SellPolicy& policy = view.sellPolicies[static_cast<std::size_t>(index)];
+    model_.policy_reserve_input = std::to_string(policy.reserveTonnes);
+    model_.policy_floor_input = exactMoney(policy.floorPrice);
+}
+
+void App::onApplyPolicy(bool enabled) {
+    const int index = model_.selected_resource;
+    if (index < 0 || index >= static_cast<int>(content_->resources.size())) {
+        return;
+    }
+    std::int64_t reserve = 0;
+    sim::Money floor;
+    if (!game::parseTonnes(model_.policy_reserve_input, reserve)) {
+        setStatus("Set the reserve in tonnes to keep on the pile, such as 0 or 2,500.");
+        return;
+    }
+    if (!game::parseMoney(model_.policy_floor_input, floor)) {
+        setStatus("Set the floor price per tonne to accept, such as 0 or 850.");
+        return;
+    }
+    sim::SetSellPolicy command;
+    command.company = Session::kPlayer;
+    command.resource = sim::ResourceId(static_cast<std::uint32_t>(index));
+    command.enabled = enabled ? std::uint8_t{1} : std::uint8_t{0};
+    command.reserveTonnes = reserve;
+    command.floorPrice = floor;
+    session_->submit(command);
+    const std::string& name = content_->resources[static_cast<std::size_t>(index)].name;
+    setStatus(enabled ? "Auto-sell for " + name + " starts tomorrow."
+                      : "Auto-sell for " + name + " shuts off tomorrow.");
+}
+
+void App::onToggleCoverCosts() {
+    const bool enable = !session_->view().coverCosts;
+    session_->submit(
+        sim::SetCoverCosts{Session::kPlayer, enable ? std::uint8_t{1} : std::uint8_t{0}});
+    setStatus(enable ? "Cover costs at month end turns on tomorrow."
+                     : "Cover costs at month end turns off tomorrow.");
 }
 
 void App::onSurvey(int plotIndex) {
@@ -620,6 +694,7 @@ void App::onLoad() {
         return;
     }
     model_.selected_plot = -1;
+    syncPolicyInputs();
     if (trace_) {
         const std::string copy = keepSaveCopy("load", bytes);
         trace_->loaded(session_->day(), copy, session_->stateHash());

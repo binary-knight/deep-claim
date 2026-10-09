@@ -50,6 +50,8 @@ struct ResourceRow {
     std::string supply;  // recent company supply
     std::string stock;   // player's tonnes
     std::string stock_value;
+    std::string policy;     // "Auto-sell: everything", "Auto-sell: keep 500 t", "Manual"
+    std::string auto_sold;  // "Sold 1,850 t this month for $1.6M." or ""
     bool has_stock = false;
     bool selected = false;
 };
@@ -102,6 +104,7 @@ struct UiModel {
     // Dashboard
     std::string loan_capacity;
     std::string storage_cost;
+    std::string storage_warning;  // empty unless storage is a large share of cash
     std::string mine_opex;
     std::string survey_noise;
     std::string mines_summary;
@@ -121,6 +124,15 @@ struct UiModel {
     std::string sell_input;
     std::string loan_input;
     std::string repay_input;
+    // Standing sell policy for the selected resource (spec 001). The inputs
+    // are prefilled from the sim when the selection changes and sent as one
+    // SetSellPolicy order by Apply.
+    std::string policy_reserve_input;
+    std::string policy_floor_input;
+    bool policy_enabled = false;
+    std::string policy_summary;
+    bool cover_costs = false;
+    std::string cover_costs_label;
     int selected_plot = -1;
     int selected_resource = 0;
     std::string selected_plot_title;

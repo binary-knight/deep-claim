@@ -8,6 +8,7 @@
 #include "sim/math.h"
 #include "sim/money.h"
 #include "sim/random.h"
+#include "sim/tech.h"
 #include "sim/types.h"
 #include "sim/world_state.h"
 
@@ -63,22 +64,123 @@ std::optional<RejectReason> validateSell(const WorldState& state, const SellOre&
     return std::nullopt;
 }
 
-void applySell(WorldState& state, const SellOre& command, TickReport& report) {
-    Company& company = state.companies[command.company.index()];
-    Market& market = state.markets[command.resource.index()];
-    const Money proceeds = market.price * command.tonnes;
-    company.inventoryTonnes[command.resource.index()] -= command.tonnes;
+Money executeSale(WorldState& state, CompanyId companyId, ResourceId resource, std::int64_t tonnes,
+                  bool countSupply) {
+    Company& company = state.companies[companyId.index()];
+    Market& market = state.markets[resource.index()];
+    const Money proceeds = market.price * tonnes;
+    company.inventoryTonnes[resource.index()] -= tonnes;
     company.cash += proceeds;
-    // Saturate: beyond this the day's supply no longer moves the average.
-    market.soldToday =
-        std::min(kMaxSupplyPerDay - command.tonnes, market.soldToday) + command.tonnes;
-    if (market.soldToday > kMaxSupplyPerDay) {
-        market.soldToday = kMaxSupplyPerDay;
+    if (countSupply) {
+        // Saturate: beyond this the day's supply no longer moves the average.
+        const std::int64_t counted = std::min(tonnes, kMaxSupplyPerDay);
+        market.soldToday = std::min(kMaxSupplyPerDay - counted, market.soldToday) + counted;
     }
+    return proceeds;
+}
+
+void applySell(WorldState& state, const SellOre& command, TickReport& report) {
+    const Money proceeds = executeSale(state, command.company, command.resource, command.tonnes);
     Notice notice = makeNotice(NoticeKind::OreSold, command.company, PlotId(), proceeds);
     notice.resource = command.resource;
     notice.tonnes = command.tonnes;
     report.notices.push_back(notice);
+}
+
+std::int64_t saleTonnesWithinBounds(const WorldState& state, CompanyId companyId,
+                                    ResourceId resource, std::int64_t tonnes) {
+    const Company& company = state.companies[companyId.index()];
+    const std::int64_t stock = company.inventoryTonnes[resource.index()];
+    const std::int64_t quantity = std::clamp<std::int64_t>(tonnes, 0, stock);
+    const std::int64_t price = state.markets[resource.index()].price.cents();
+    if (quantity == 0 || price <= 0) {
+        return quantity;
+    }
+    // Proceeds may not push cash past the persisted bound.
+    const std::int64_t room = kMaxCashCents - company.cash.cents();
+    if (room <= 0) {
+        return 0;
+    }
+    return std::min(quantity, room / price);
+}
+
+namespace {
+
+std::optional<RejectReason> validatePolicyCompany(const WorldState& state, CompanyId company) {
+    if (!company.valid() || company.index() >= state.companies.size()) {
+        return RejectReason::UnknownCompany;
+    }
+    if (state.companies[company.index()].bankrupt != 0) {
+        return RejectReason::CompanyBankrupt;
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+void recordAutoSale(Company& company, ResourceId resource, std::int64_t tonnes, Money proceeds) {
+    const std::size_t r = resource.index();
+    company.autoSoldTonnes[r] = std::min(kMaxStockTonnes, company.autoSoldTonnes[r] + tonnes);
+    company.autoSoldProceeds[r] = Money::fromCents(
+        std::min(kMaxCashCents, company.autoSoldProceeds[r].cents() + proceeds.cents()));
+}
+
+std::optional<RejectReason> validateSetSellPolicy(const WorldState& state,
+                                                  const SetSellPolicy& command) {
+    if (const auto reason = validatePolicyCompany(state, command.company)) {
+        return reason;
+    }
+    if (!command.resource.valid() || command.resource.index() >= state.markets.size()) {
+        return RejectReason::UnknownResource;
+    }
+    if (command.reserveTonnes < 0 || command.reserveTonnes > kMaxStockTonnes) {
+        return RejectReason::InvalidQuantity;
+    }
+    if (command.floorPrice < Money::zero() || command.floorPrice.cents() > kMaxCashCents) {
+        return RejectReason::InvalidAmount;
+    }
+    return std::nullopt;
+}
+
+void applySetSellPolicy(WorldState& state, const SetSellPolicy& command) {
+    SellPolicy& policy =
+        state.companies[command.company.index()].sellPolicies[command.resource.index()];
+    policy.enabled = command.enabled != 0 ? 1 : 0;
+    policy.reserveTonnes = command.reserveTonnes;
+    policy.floorPrice = command.floorPrice;
+}
+
+std::optional<RejectReason> validateSetCoverCosts(const WorldState& state,
+                                                  const SetCoverCosts& command) {
+    return validatePolicyCompany(state, command.company);
+}
+
+void applySetCoverCosts(WorldState& state, const SetCoverCosts& command) {
+    state.companies[command.company.index()].coverCosts = command.enabled != 0 ? 1 : 0;
+}
+
+void runSellPolicies(const Content& content, WorldState& state) {
+    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
+        Company& company = state.companies[c];
+        if (company.bankrupt != 0) {
+            continue;
+        }
+        for (std::uint32_t r = 0; r < state.markets.size(); ++r) {
+            const SellPolicy& policy = company.sellPolicies[r];
+            if (policy.enabled == 0 || state.markets[r].price < policy.floorPrice ||
+                !resourceUnlocked(content, company, ResourceId(r))) {
+                continue;
+            }
+            const std::int64_t above = company.inventoryTonnes[r] - policy.reserveTonnes;
+            const std::int64_t tonnes =
+                saleTonnesWithinBounds(state, CompanyId(c), ResourceId(r), above);
+            if (tonnes <= 0) {
+                continue;
+            }
+            const Money proceeds = executeSale(state, CompanyId(c), ResourceId(r), tonnes);
+            recordAutoSale(company, ResourceId(r), tonnes, proceeds);
+        }
+    }
 }
 
 // The world economy grows: base demand compounds by demand_growth_per_year,

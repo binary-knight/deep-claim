@@ -128,6 +128,12 @@ struct CompanyView {
     std::uint32_t monthsInsolvent = 0;
     bool bankrupt = false;
     std::vector<std::int64_t> inventoryTonnes;
+    // Standing sell orders (spec 001), indexed by ResourceId, with what they
+    // sold so far this month.
+    std::vector<SellPolicy> sellPolicies;
+    bool coverCosts = false;
+    std::vector<std::int64_t> autoSoldTonnes;
+    std::vector<Money> autoSoldProceeds;
     std::vector<TechId> completedTechs;  // own research only
     std::optional<ResearchView> activeResearch;
     std::vector<PlotView> plots;

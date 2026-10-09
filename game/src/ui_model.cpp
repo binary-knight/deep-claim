@@ -247,8 +247,45 @@ void fillResources(const Session& session, UiModel& model) {
             formatMoney(sim::Money::fromCents(std::min(valueCents, sim::kMaxCashCents)));
         row.has_stock = tonnes > 0;
         row.selected = static_cast<int>(r) == model.selected_resource;
+        const sim::SellPolicy& policy = view.sellPolicies[r];
+        if (policy.enabled == 0) {
+            row.policy = "Manual";
+        } else {
+            row.policy = "Auto-sell";
+            if (policy.reserveTonnes > 0) {
+                row.policy += ", keep " + formatTonnes(policy.reserveTonnes);
+            }
+            if (policy.floorPrice > sim::Money::zero()) {
+                row.policy += ", at " + formatMoney(policy.floorPrice) + "/t or more";
+            }
+        }
+        if (view.autoSoldTonnes[r] > 0) {
+            row.auto_sold =
+                std::format("Sold {} this month for {}.", formatTonnes(view.autoSoldTonnes[r]),
+                            formatMoney(view.autoSoldProceeds[r]));
+        }
         model.resources.push_back(row);
     }
+    if (model.selected_resource >= 0 &&
+        model.selected_resource < static_cast<int>(content.resources.size())) {
+        const auto r = static_cast<std::size_t>(model.selected_resource);
+        const sim::SellPolicy& policy = view.sellPolicies[r];
+        model.policy_enabled = policy.enabled != 0;
+        model.policy_summary =
+            policy.enabled != 0
+                ? std::format(
+                      "Daily auto-sell is active for {}. Everything above {} sells whenever "
+                      "the price hits {}/t or more.",
+                      content.resources[r].name, formatTonnes(policy.reserveTonnes),
+                      formatMoney(policy.floorPrice))
+                : "Auto-sell is off. " + content.resources[r].name + " is sold by hand only.";
+    }
+    model.cover_costs = view.coverCosts;
+    model.cover_costs_label =
+        view.coverCosts ? "On: at each month end, just enough ore is sold to cover storage and "
+                          "loan payments, keeping cash at zero or above."
+                        : "Off: ending the month with cash below zero counts toward bankruptcy, "
+                          "even if the warehouse is full.";
     if (model.selected_resource >= 0 &&
         model.selected_resource < static_cast<int>(content.resources.size())) {
         model.selected_resource_title =
@@ -319,6 +356,17 @@ void fillFinance(const Session& session, UiModel& model) {
     }
     model.loan_capacity = formatMoney(view.loanCapacity);
     model.storage_cost = formatMoney(view.monthlyStorageCost) + "/month";
+    // Presentation only: the sim does not care, but the first playtest lost
+    // games to storage charges nobody noticed.
+    model.storage_warning.clear();
+    if (view.monthlyStorageCost > sim::Money::zero() &&
+        (view.cash <= sim::Money::zero() ||
+         view.monthlyStorageCost.cents() > view.cash.cents() / 10)) {
+        model.storage_warning = std::format(
+            "Storage is running {} a month, eating a large share of your cash. Sell ore "
+            "or set an auto-sell policy on the Market tab.",
+            formatMoney(view.monthlyStorageCost));
+    }
     model.mine_opex = formatMoney(view.mineOpexQuote) + "/day";
     model.survey_noise = formatRatio(view.surveyNoiseQuote);
 }

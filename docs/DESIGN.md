@@ -549,3 +549,33 @@ pieces that need OpenGL.
 - Playtest sessions are written up under `docs/playtests/`, one file per
   session, with the findings ranked and the order of work they imply. The
   first is `docs/playtests/2026-10-08.md`.
+
+## Spec-driven development
+
+From spec 001 onwards every feature starts as `docs/specs/NNN-name.md`
+(goal, player-facing behaviour, sim rules, view, client, tests, out of
+scope, decisions), approved before code is written. The spec is committed
+first, the implementation follows it, and the Codex review is run against
+the spec as well as the code. Decisions made during implementation are
+appended to the spec's Decisions list, and this file keeps the
+architectural summary.
+
+## Standing sell policies (spec 001)
+
+- Each company holds one `SellPolicy {enabled, reserveTonnes, floorPrice}`
+  per resource plus a `coverCosts` flag, set by the `SetSellPolicy` and
+  `SetCoverCosts` commands and seeded from `balance.json`
+  (`default_sell_policy`, `default_cover_costs`; both on in the shipped
+  data because unsold ore was the dominant failure in the first playtest).
+- Pipeline step 4b, `runSellPolicies`, runs after mines and before markets:
+  an enabled policy whose floor is met sells everything above the reserve
+  at today's price through the same path as a manual order
+  (`executeSale`, bounded by `saleTonnesWithinBounds`). No notice per sale;
+  month-to-date totals accumulate in the company and become one
+  `AutoSaleSummary` notice per resource at month end.
+- Month end (`runFinance`): after storage and loan charges and before the
+  solvency check, a company with `coverCosts` and negative cash sells just
+  enough of its most valuable stock to reach zero (`CoverCostsSale`
+  notices), then the summaries are emitted and the totals reset.
+- The AI controller is unchanged for now; it keeps its own daily rule.
+- The golden determinism hash moved once (company state grew).

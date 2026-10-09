@@ -136,10 +136,19 @@ Json commandJson(const sim::Command& command) {
                 j["cmd"] = "RepayLoan";
                 j["loan"] = idJson(c.loan);
                 j["cents"] = c.amount.cents();
-            } else {
-                static_assert(std::is_same_v<T, sim::StartResearch>);
+            } else if constexpr (std::is_same_v<T, sim::StartResearch>) {
                 j["cmd"] = "StartResearch";
                 j["tech"] = idJson(c.tech);
+            } else if constexpr (std::is_same_v<T, sim::SetSellPolicy>) {
+                j["cmd"] = "SetSellPolicy";
+                j["resource"] = idJson(c.resource);
+                j["enabled"] = c.enabled != 0;
+                j["reserve"] = c.reserveTonnes;
+                j["floor_cents"] = c.floorPrice.cents();
+            } else {
+                static_assert(std::is_same_v<T, sim::SetCoverCosts>);
+                j["cmd"] = "SetCoverCosts";
+                j["enabled"] = c.enabled != 0;
             }
         },
         command);
@@ -228,6 +237,36 @@ bool decodeResearch(const Json& j, sim::CompanyId company, sim::Command& out) {
     return true;
 }
 
+bool boolFrom(const Json& object, const char* key, std::uint8_t& out) {
+    const auto it = object.find(key);
+    if (it == object.end() || !it->is_boolean()) {
+        return false;
+    }
+    out = it->get<bool>() ? std::uint8_t{1} : std::uint8_t{0};
+    return true;
+}
+
+bool decodeSellPolicy(const Json& j, sim::CompanyId company, sim::Command& out) {
+    sim::SetSellPolicy c;
+    c.company = company;
+    if (!idFrom(j, "resource", c.resource) || !boolFrom(j, "enabled", c.enabled) ||
+        !int64From(j, "reserve", c.reserveTonnes) || !moneyFrom(j, "floor_cents", c.floorPrice)) {
+        return false;
+    }
+    out = c;
+    return true;
+}
+
+bool decodeCoverCosts(const Json& j, sim::CompanyId company, sim::Command& out) {
+    sim::SetCoverCosts c;
+    c.company = company;
+    if (!boolFrom(j, "enabled", c.enabled)) {
+        return false;
+    }
+    out = c;
+    return true;
+}
+
 using Decoder = bool (*)(const Json&, sim::CompanyId, sim::Command&);
 
 struct NamedDecoder {
@@ -235,7 +274,7 @@ struct NamedDecoder {
     Decoder decode;
 };
 
-constexpr std::array<NamedDecoder, 8> kDecoders = {{
+constexpr std::array<NamedDecoder, 10> kDecoders = {{
     {"BidOnPlot", &decodeBid},
     {"CommissionSurvey", &decodeSurvey},
     {"BuildMine", &decodeBuild},
@@ -244,6 +283,8 @@ constexpr std::array<NamedDecoder, 8> kDecoders = {{
     {"TakeLoan", &decodeLoan},
     {"RepayLoan", &decodeRepay},
     {"StartResearch", &decodeResearch},
+    {"SetSellPolicy", &decodeSellPolicy},
+    {"SetCoverCosts", &decodeCoverCosts},
 }};
 
 bool commandFrom(const Json& j, sim::Command& out) {

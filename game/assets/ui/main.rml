@@ -60,6 +60,7 @@
                         <p>Cash {{cash}}, spendable {{spendable}}</p>
                         <p>Debt {{debt}}, can still borrow {{loan_capacity}}</p>
                         <p>Storage {{storage_cost}}</p>
+                        <p class="warning" data-if="storage_warning != ''">{{storage_warning}}</p>
                         <p class="danger" data-if="insolvency != ''">{{insolvency}}</p>
                     </div>
                     <div class="card">
@@ -123,9 +124,10 @@
             <div data-if="tab == 2">
                 <h1>Market</h1>
                 <table>
-                    <tr><th>Resource</th><th>Price</th><th>Base</th><th>vs base</th><th>Industry sales</th><th>Your stock</th><th>Value</th><th>Sell</th></tr>
+                    <tr><th>Resource</th><th>Price</th><th>Base</th><th>vs base</th><th>Industry sales</th><th>Your stock</th><th>Value</th><th>Selling</th><th>Sell now</th></tr>
                     <tr data-for="r : resources" class="clickable" data-class-selected="r.index == selected_resource" data-event-click="select_resource(r.index)">
                         <td>{{r.name}}</td><td>{{r.price}}</td><td>{{r.base}}</td><td>{{r.ratio}}</td><td>{{r.supply}}</td><td>{{r.stock}}</td><td>{{r.stock_value}}</td>
+                        <td>{{r.policy}}<span class="muted" data-if="r.auto_sold != ''"><br/>{{r.auto_sold}}</span></td>
                         <td>
                             <span data-if="r.has_stock" class="row">
                                 <input class="text" type="text" data-value="sell_input" style="width: 80dp;"/>
@@ -135,6 +137,21 @@
                         </td>
                     </tr>
                 </table>
+                <div class="card">
+                    <h2>Auto-sell policy</h2>
+                    <p>{{policy_summary}}</p>
+                    <div class="row">
+                        <span>Keep</span>
+                        <input class="text" type="text" data-value="policy_reserve_input" style="width: 90dp;"/>
+                        <span>t in the warehouse. Sell only at</span>
+                        <input class="text" type="text" data-value="policy_floor_input" style="width: 90dp;"/>
+                        <span>per tonne or more.</span>
+                        <button class="small primary" data-event-click="apply_policy">Apply</button>
+                        <button class="small" data-if="policy_enabled" data-event-click="toggle_policy">Turn off</button>
+                        <button class="small" data-if="!policy_enabled" data-event-click="toggle_policy">Turn on</button>
+                    </div>
+                    <p class="muted">Zero in either field means no limit. Automatic sales are tallied in the ledger once a month.</p>
+                </div>
                 <h2>{{selected_resource_title}}</h2>
                 <price-chart data-attr-resource="selected_resource"/>
                 <p class="muted">Columns are daily prices; the light line is the base price. Selling into the market lowers tomorrow's price; demand drifts and world events move it too.</p>
@@ -169,6 +186,13 @@
                         <h2>Costs</h2>
                         <p>Storage {{storage_cost}}</p>
                         <p>Each operating mine {{mine_opex}}</p>
+                        <p class="warning" data-if="storage_warning != ''">{{storage_warning}}</p>
+                    </div>
+                    <div class="card">
+                        <h2>Cover costs at month end</h2>
+                        <p>{{cover_costs_label}}</p>
+                        <button class="small" data-if="cover_costs" data-event-click="toggle_cover_costs">Turn off</button>
+                        <button class="small primary" data-if="!cover_costs" data-event-click="toggle_cover_costs">Turn on</button>
                     </div>
                 </div>
                 <h2>Loans</h2>

@@ -140,6 +140,18 @@ public:
         return text;
     }
 
+    [[nodiscard]] std::optional<bool> boolean(std::string_view key, bool required) const {
+        const json* value = get(key, required);
+        if (value == nullptr) {
+            return std::nullopt;
+        }
+        if (!value->is_boolean()) {
+            report(key, "expected true or false, got " + std::string(typeName(*value)));
+            return std::nullopt;
+        }
+        return value->get<bool>();
+    }
+
     [[nodiscard]] std::optional<std::int64_t> integer(std::string_view key, bool required,
                                                       std::int64_t min, std::int64_t max) const {
         const json* value = get(key, required);
@@ -777,7 +789,9 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "price_cap_mult",
                     "demand_growth_per_year",
                     "plots_listed_per_month",
-                    "bankruptcy_grace_months"});
+                    "bankruptcy_grace_months",
+                    "default_sell_policy",
+                    "default_cover_costs"});
     const sim::Money zero = sim::Money::zero();
     balance.startingCapital =
         valueOr(node.money("starting_capital", true, sim::Money::fromCents(1)), zero);
@@ -841,6 +855,17 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     balance.demandGrowthPerYear = valueOr(
         node.fixed("demand_growth_per_year", true, sim::Fixed::zero(), sim::Fixed::fromRatio(1, 2)),
         sim::Fixed::zero());
+    // Spec 001: the standing sell order every company starts with.
+    if (const std::optional<Node> policy = node.object("default_sell_policy", true)) {
+        policy->allowKeys({"enabled", "reserve_tonnes", "floor_price"});
+        balance.defaultSellPolicy.enabled =
+            valueOr(policy->boolean("enabled", true), false) ? 1 : 0;
+        balance.defaultSellPolicy.reserveTonnes =
+            valueOr(policy->integer("reserve_tonnes", true, 0, sim::kMaxStockTonnes), 0LL);
+        balance.defaultSellPolicy.floorPrice =
+            valueOr(policy->money("floor_price", true, zero), zero);
+    }
+    balance.defaultCoverCosts = valueOr(node.boolean("default_cover_costs", true), false);
 }
 
 std::optional<std::string> readFile(const std::filesystem::path& path) {

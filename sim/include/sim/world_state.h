@@ -4,6 +4,7 @@
 #include "sim/ids.h"
 #include "sim/money.h"
 #include "sim/random.h"
+#include "sim/sell_policy.h"
 #include "sim/types.h"
 
 #include <cstdint>
@@ -58,6 +59,12 @@ struct Company {
     std::vector<TechId> completedTechs;
     std::uint32_t monthsInsolvent = 0;  // consecutive month-ends with negative cash
     std::uint8_t bankrupt = 0;
+    // Standing sell orders (spec 001), indexed by ResourceId, and the
+    // month-to-date totals of what they sold (reset at month end).
+    std::vector<SellPolicy> sellPolicies;
+    std::uint8_t coverCosts = 0;  // sell at month end to keep cash at zero or above
+    std::vector<std::int64_t> autoSoldTonnes;
+    std::vector<Money> autoSoldProceeds;
 };
 
 // One commodity market per resource. Everything here is public.
