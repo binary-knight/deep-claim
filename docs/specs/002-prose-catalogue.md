@@ -72,3 +72,31 @@ company names, the sim_runner's output.
   placeholders are invariant and checked mechanically.
 - 2026-10-09: prose lives in `data/strings.json`, not in code, so the
   pipeline runs on a file and a writer can edit without a compiler.
+
+## Plan (2026-10-09)
+
+Files: `data/strings.json` (new), `data/events.json` and `data/techs.json`
+(names removed, ids kept), `sim/include/sim/content.h` (`Content::strings`,
+`TechDef::description`, `EventDef::description`), `content/src/strings.cpp`
+(new: parse, validate, apply names) and `loader.{h,cpp}` (sixth source),
+`game/session/include/game/format.h` and `src/format.cpp` (`fill`, `text`,
+catalogue-driven `describeNotice` and `rejectReasonText`), `game/src/app.cpp`
+(`status.*`), `game/src/ui_model.{h,cpp}` and `game/assets/ui/main.rml`
+(`ui.*` bound through the data model), `tools/prose/draft.tsv`,
+`tools/prose/polished.tsv`, `tools/prose/to_json.py`, `tools/prose/README.md`,
+tests (`strings_test.cpp` new; `data_files_test.cpp`, `content_test.cpp`,
+`session_test.cpp` updated).
+
+Key scheme: `notice.<kind>` with `.plot`, `.plot_amount`, `.sale`,
+`.research`, `.loan`, `.loan_amount`, `.amount` variants for rejections;
+`reject.<reason>`; `status.<name>` for every status line the client sets;
+`ui.<name>` for prose in the model and the RML, with `.one` and `.many`
+variants where English pluralises; `event.<id>.name|description` and
+`tech.<id>.name|description`. Placeholders allowed per key are a static
+table in the loader; every key in the table is required and no other key
+is accepted.
+
+Strings are not part of the content fingerprint: prose does not change
+simulation state, and a wording fix must not invalidate saves. Tech and
+event names stay in their defs (and therefore in the fingerprint, as
+before), filled from the catalogue by the loader.
