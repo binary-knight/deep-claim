@@ -12,9 +12,10 @@ or RML, and `tools/prose/polish.sh` can regenerate the whole catalogue.
 ## Player-facing behaviour
 The player sees the same information as today, written as a foreman's
 note or a month-end ledger line rather than a status-code sentence:
-"Survey crew finished on plot #4. Estimate is ~366,168 t of iron ore
-(error x0.50)." instead of "Survey of plot #4 complete". Numbers, units
-and ids never change between the plain draft and the polished text.
+"Survey crew finished on plot #4. The report is in." instead of "Survey of
+plot #4 complete" (the estimates themselves stay in the Plots table, as
+today; the notice carries only the plot). Numbers, units and ids never
+change between the plain draft and the polished text.
 
 ## Sim rules
 None. The sim emits structured notices (kind, ids, amounts) and knows no
@@ -72,3 +73,80 @@ company names, the sim_runner's output.
   placeholders are invariant and checked mechanically.
 - 2026-10-09: prose lives in `data/strings.json`, not in code, so the
   pipeline runs on a file and a writer can edit without a compiler.
+
+## Plan (2026-10-09)
+
+Files: `data/strings.json` (new), `data/events.json` and `data/techs.json`
+(names removed, ids kept), `sim/include/sim/content.h` (`Content::strings`,
+`TechDef::description`, `EventDef::description`), `content/src/strings.cpp`
+(new: parse, validate, apply names) and `loader.{h,cpp}` (sixth source),
+`game/session/include/game/format.h` and `src/format.cpp` (`fill`, `text`,
+catalogue-driven `describeNotice` and `rejectReasonText`), `game/src/app.cpp`
+(`status.*`), `game/src/ui_model.{h,cpp}` and `game/assets/ui/main.rml`
+(`ui.*` bound through the data model), `tools/prose/draft.tsv`,
+`tools/prose/polished.tsv`, `tools/prose/to_json.py`, `tools/prose/README.md`,
+tests (`strings_test.cpp` new; `data_files_test.cpp`, `content_test.cpp`,
+`session_test.cpp` updated).
+
+Key scheme: `notice.<kind>` with `.plot`, `.plot_amount`, `.sale`,
+`.research`, `.loan`, `.loan_amount`, `.amount` variants for rejections;
+`reject.<reason>`; `status.<name>` for every status line the client sets;
+`ui.<name>` for prose in the model and the RML, with `.one` and `.many`
+variants where English pluralises; `event.<id>.name|description` and
+`tech.<id>.name|description`. Placeholders allowed per key are a static
+table in the loader; every key in the table is required and no other key
+is accepted.
+
+Strings are not part of the content fingerprint: prose does not change
+simulation state, and a wording fix must not invalidate saves. Tech and
+event names stay in their defs (and therefore in the fingerprint, as
+before), filled from the catalogue by the loader.
+
+## Decisions (build, 2026-10-09)
+
+- The agy pass ran over all 182 draft lines in eight batches of 25; the
+  invariant check passed every line (no numbers or placeholders changed).
+  agy's raw output is kept as `tools/prose/agy-raw.tsv`; `polished.tsv` is
+  the reviewed merge: 152 lines use agy's text, 19 keep the draft and 11
+  were unchanged by agy. Reverted to the draft, with the reason:
+  - every `*.name` key (7 changed): agy renamed techs and events
+    ("Processing Line II", "Rail Sidings and Stockpiles", "Lithium
+    Concentrator", "Battery Boom"). Names are identifiers the player sees
+    across screens and in the playtest notes; the writer may not rename
+    things.
+  - `ui.select_plot`, `ui.price_title`: headings; agy added sentence
+    punctuation.
+  - `ui.survey_none`, `ui.survey_pending`, `ui.survey_pending_again`,
+    `ui.auction.one/.many`, `ui.auction_yours`, `ui.mine_today`,
+    `ui.mine_opex`, `ui.loan_instalment`, `ui.loan_months`: table cells
+    and fragments joined by code; the terse draft fits the column, agy's
+    full sentences did not.
+- Loader validation treats the key table as the contract: a key the code
+  looks up but the table lacks would show as `[key]` in play, which the
+  shipped-data test catches for notices and rejections and the parity test
+  catches for everything in the draft.
+- `Content::strings` is a `std::map`; `game::text` looks up with a
+  temporary `std::string`. About 60 lookups per interface refresh, which
+  happens at most once per simulated day; not worth an interned-key table
+  yet.
+- Short labels on buttons and column headers ("Pause", "Sell all",
+  "Resource") stay literal in the RML, as the spec allows.
+- Codex review, applied: a stray `}` outside a placeholder is now a load
+  error (it slipped through before); `notice.command_rejected.loan*` no
+  longer says "request" because a rejected repayment uses the same key;
+  `notice.loan_repaid` no longer claims the whole ledger is clear;
+  `Content::strings` uses `std::less<>` so lookups take a string_view;
+  the polish script protects `*.name` keys, keeps units, signs and
+  currency prefixes with their figures, and falls back to the draft when
+  agy's output is unrecognisable instead of aborting; tests added for
+  balanced braces, every rejection variant with its real arguments, and
+  hash invariance under a prose edit (and the deliberate change under a
+  name edit); `test::addStrings` fails loudly if the shipped data does not
+  load.
+- Codex review, declined: enumerating `NoticeKind`/`RejectReason` until
+  the name table answers "unknown" assumes contiguous enums, which they
+  are (the sim owns those enums and this spec does not touch the sim; a
+  `kCount` can come with the next sim change). Cascading "unknown key"
+  diagnostics when an event or tech id fails to parse are noise on top of
+  a load that already fails. Descriptions are loaded but not yet shown; the
+  Research and World screens will use them in the design pass (sprint 2).

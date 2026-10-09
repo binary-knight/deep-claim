@@ -10,8 +10,10 @@
 #include "sim/view.h"
 
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace game {
 
@@ -34,10 +36,28 @@ std::string formatRatio(sim::Fixed ratio);
 // Exact text for an amount the player can submit unchanged: "1234567.89".
 [[nodiscard]] std::string exactMoney(sim::Money amount);
 
-// Plain-language reason for a rejected order.
-[[nodiscard]] const char* rejectReasonText(sim::RejectReason reason);
+// ---- the prose catalogue (spec 002) ----
+// Named substitution into a template from data/strings.json: every
+// "{name}" whose name is in `args` is replaced; unknown placeholders stay
+// visible as "{name}" so a mismatch shows in play instead of vanishing.
+// Locale-free; a malformed template never raises a formatting error (only
+// allocation can fail, as for any std::string).
+using TextArg = std::pair<std::string_view, std::string>;
+using TextArgs = std::initializer_list<TextArg>;
+[[nodiscard]] std::string fill(std::string_view tmpl, TextArgs args);
+// The template for `key`, or "[key]" when the catalogue lacks it (the
+// loader rejects data without the required keys, so this only shows for
+// in-code test content).
+[[nodiscard]] std::string text(const sim::Content& content, std::string_view key);
+[[nodiscard]] std::string text(const sim::Content& content, std::string_view key, TextArgs args);
+// `key.one` for a count of one, `key.many` otherwise.
+[[nodiscard]] std::string textPlural(const sim::Content& content, std::string_view key,
+                                     std::int64_t count, TextArgs args);
 
-// One-line human description of a notice for the player's log.
+// Plain-language reason for a rejected order (reject.<reason>).
+[[nodiscard]] std::string rejectReasonText(const sim::Content& content, sim::RejectReason reason);
+
+// One-line human description of a notice for the player's log (notice.<kind>).
 std::string describeNotice(const sim::Content& content, const sim::CompanyView& view,
                            const sim::Notice& notice);
 

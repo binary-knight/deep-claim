@@ -1,5 +1,6 @@
 #include "content/loader.h"
 
+#include "sim/commands.h"
 #include "sim/content.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
@@ -514,10 +515,9 @@ void parseTechs(const json& document, sim::Content& content, ErrorSink& sink) {
     std::vector<std::string> seen;
     std::vector<std::vector<std::string>> requiresNames;
     for (const Node& node : *nodes) {
-        node.allowKeys({"id", "name", "cost", "duration_days", "requires", "effects"});
+        node.allowKeys({"id", "cost", "duration_days", "requires", "effects"});
         sim::TechDef def;
-        def.id = readId(node, seen);
-        def.name = valueOr(node.string("name", true), std::string());
+        def.id = readId(node, seen);  // name and description come from the catalogue
         def.cost = valueOr(node.money("cost", true, sim::Money::zero()), sim::Money::zero());
         def.durationDays =
             static_cast<sim::Day>(valueOr(node.integer("duration_days", true, 1, kMaxDays), 1LL));
@@ -739,10 +739,9 @@ void parseEvents(const json& document, sim::Content& content, ErrorSink& sink) {
     }
     std::vector<std::string> seen;
     for (const Node& node : *nodes) {
-        node.allowKeys({"id", "name", "daily_weight", "min_year", "duration_days", "effects"});
+        node.allowKeys({"id", "daily_weight", "min_year", "duration_days", "effects"});
         sim::EventDef def;
-        def.id = readId(node, seen);
-        def.name = valueOr(node.string("name", true), std::string());
+        def.id = readId(node, seen);  // name and description come from the catalogue
         def.dailyWeight =
             valueOr(node.fixed("daily_weight", true, sim::Fixed::zero(), sim::Fixed::one()),
                     sim::Fixed::zero());
@@ -868,6 +867,293 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     balance.defaultCoverCosts = valueOr(node.boolean("default_cover_costs", true), false);
 }
 
+// ---------------------------------------------------------------------------
+// Prose catalogue (strings.json, spec 002)
+// ---------------------------------------------------------------------------
+
+// Every fixed key the client looks up, with the placeholders its template may
+// use. A key missing from the file, a key not in this table (other than the
+// per-id event and tech keys) or a placeholder outside the allowed set is a
+// data error, so a typo in the catalogue fails at load rather than in play.
+struct StringKeySpec {
+    std::string_view key;
+    std::string_view placeholders;  // comma separated, no spaces
+};
+
+constexpr std::array<StringKeySpec, 124> kStringKeys = {{
+    {"notice.command_rejected", "reason"},
+    {"notice.command_rejected.amount", "amount,reason"},
+    {"notice.command_rejected.plot", "plot,reason"},
+    {"notice.command_rejected.plot_amount", "plot,amount,reason"},
+    {"notice.command_rejected.sale", "resource,reason"},
+    {"notice.command_rejected.research", "tech,reason"},
+    {"notice.command_rejected.loan", "reason"},
+    {"notice.command_rejected.loan_amount", "amount,reason"},
+    {"notice.plot_listed", "plot,amount"},
+    {"notice.plot_relisted", "plot,amount"},
+    {"notice.plot_sold", "company,plot,amount"},
+    {"notice.auction_lost", "plot"},
+    {"notice.bid_forfeited", "plot"},
+    {"notice.survey_started", "plot,amount"},
+    {"notice.survey_complete", "plot"},
+    {"notice.mine_started", "company,plot"},
+    {"notice.mine_operational", "plot"},
+    {"notice.mine_depleted", "plot"},
+    {"notice.mine_switched", "plot"},
+    {"notice.ore_sold", "tonnes,resource,amount"},
+    {"notice.cover_costs_sale", "tonnes,resource,amount"},
+    {"notice.auto_sale_summary", "tonnes,resource,amount"},
+    {"notice.storage_charged", "amount"},
+    {"notice.loan_taken", "amount"},
+    {"notice.loan_payment", "amount"},
+    {"notice.loan_repaid", ""},
+    {"notice.insolvency_warning", "months"},
+    {"notice.bankrupt", "company"},
+    {"notice.research_started", "tech"},
+    {"notice.research_complete", "tech"},
+    {"notice.event_started", "event"},
+    {"notice.event_ended", "event"},
+    {"status.screenshot_failed", ""},
+    {"status.screenshot_saved", "name"},
+    {"status.reserve_prompt", ""},
+    {"status.floor_prompt", ""},
+    {"status.policy_starts", "resource"},
+    {"status.policy_stops", "resource"},
+    {"status.cover_on", ""},
+    {"status.cover_off", ""},
+    {"status.survey_queued", ""},
+    {"status.bid_prompt", ""},
+    {"status.bid_queued", "amount"},
+    {"status.build_queued", ""},
+    {"status.mine_reopen", ""},
+    {"status.mine_mothball", ""},
+    {"status.sell_prompt", ""},
+    {"status.sale_queued", "tonnes"},
+    {"status.loan_prompt", ""},
+    {"status.loan_requested", "amount"},
+    {"status.repay_prompt", ""},
+    {"status.repayment_ordered", "amount"},
+    {"status.research_queued", ""},
+    {"status.save_write_failed", "name"},
+    {"status.save_replace_failed", "name,reason"},
+    {"status.saved", "name"},
+    {"status.no_save", "name"},
+    {"status.save_invalid", ""},
+    {"status.loaded_copy_failed", ""},
+    {"status.loaded", ""},
+    {"status.new_game", ""},
+    {"ui.shortcuts", ""},
+    {"ui.how_to_1", ""},
+    {"ui.how_to_2", "survey_cost,survey_days,days,months"},
+    {"ui.how_to_3", ""},
+    {"ui.company_terms", "amount,ratio"},
+    {"ui.finance_cash", "cash,spendable"},
+    {"ui.finance_debt", "debt,amount"},
+    {"ui.finance_storage", "amount"},
+    {"ui.no_events", ""},
+    {"ui.plots_intro", ""},
+    {"ui.plot_odds", "region,odds"},
+    {"ui.plot_costs", "amount,days,survey_cost,survey_days"},
+    {"ui.build_blocked", "amount"},
+    {"ui.select_plot", ""},
+    {"ui.selected_plot_title", "plot,region,area"},
+    {"ui.survey_none", ""},
+    {"ui.survey_pending", ""},
+    {"ui.survey_pending_again", ""},
+    {"ui.auction.one", "day,bids"},
+    {"ui.auction.many", "day,bids"},
+    {"ui.auction_yours", "amount"},
+    {"ui.mine_today", "output"},
+    {"ui.mine_opex", "amount"},
+    {"ui.policy_manual", ""},
+    {"ui.policy_auto", ""},
+    {"ui.policy_auto_keep", "reserve"},
+    {"ui.policy_auto_floor", "price"},
+    {"ui.policy_auto_keep_floor", "reserve,price"},
+    {"ui.auto_sold", "tonnes,amount"},
+    {"ui.policy_summary_on", "resource,reserve,price"},
+    {"ui.policy_summary_off", "resource"},
+    {"ui.policy_form_keep", ""},
+    {"ui.policy_form_mid", ""},
+    {"ui.policy_form_end", ""},
+    {"ui.policy_hint", ""},
+    {"ui.price_title", "resource"},
+    {"ui.chart_hint", ""},
+    {"ui.cover_on", ""},
+    {"ui.cover_off", ""},
+    {"ui.storage_warning", "amount"},
+    {"ui.borrow_capacity", "amount"},
+    {"ui.loan_terms", "months,ratio,amount,count"},
+    {"ui.each_mine_opex", "amount"},
+    {"ui.loan_instalment", "amount"},
+    {"ui.loan_months", "months"},
+    {"ui.insolvency.one", "months,count"},
+    {"ui.insolvency.many", "months,count"},
+    {"ui.mines_summary.one", "count,operating"},
+    {"ui.mines_summary.many", "count,operating"},
+    {"ui.plots_summary.one", "count,listed"},
+    {"ui.plots_summary.many", "count,listed"},
+    {"ui.rival.one", "company,count"},
+    {"ui.rival.many", "company,count"},
+    {"ui.rival_bankrupt", "company"},
+    {"ui.event_active", "event,day"},
+    {"ui.research_active", "tech,day"},
+    {"ui.research_idle", "known,total"},
+    {"ui.tech_known", ""},
+    {"ui.tech_in_progress", "day"},
+    {"ui.tech_needs", "tech"},
+    {"ui.tech_available", ""},
+    {"ui.tech_available_busy", ""},
+    {"ui.game_over", "company"},
+}};
+
+// Names of the {placeholders} a template uses. Braces that do not form a
+// placeholder are reported as a malformed template.
+std::optional<std::vector<std::string>> templatePlaceholders(std::string_view text) {
+    std::vector<std::string> names;
+    std::size_t pos = 0;
+    while (pos < text.size()) {
+        const char c = text[pos];
+        if (c == '}') {
+            return std::nullopt;  // a closing brace outside a placeholder
+        }
+        if (c != '{') {
+            ++pos;
+            continue;
+        }
+        const std::size_t close = text.find('}', pos + 1);
+        if (close == std::string_view::npos || close == pos + 1) {
+            return std::nullopt;
+        }
+        const std::string_view name = text.substr(pos + 1, close - pos - 1);
+        for (const char n : name) {
+            if (n == '{' || n == ' ' || ((n < 'a' || n > 'z') && n != '_')) {
+                return std::nullopt;
+            }
+        }
+        names.emplace_back(name);
+        pos = close + 1;
+    }
+    return names;
+}
+
+bool allowsPlaceholder(std::string_view allowed, std::string_view name) {
+    std::size_t start = 0;
+    while (start <= allowed.size()) {
+        const std::size_t comma = allowed.find(',', start);
+        const std::string_view item = allowed.substr(
+            start, comma == std::string_view::npos ? allowed.size() - start : comma - start);
+        if (!item.empty() && item == name) {
+            return true;
+        }
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return false;
+}
+
+using ExpectedKey = std::pair<std::string, std::string_view>;  // key, allowed placeholders
+
+// Every key the catalogue must contain: the fixed table, the per-id event
+// and tech keys, and one reject key per RejectReason. Each NoticeKind must
+// have a base entry in the fixed table, so a new kind without prose fails.
+std::vector<ExpectedKey> expectedStringKeys(const sim::Content& content, ErrorSink& sink) {
+    std::vector<ExpectedKey> expected;
+    expected.reserve(kStringKeys.size() + 2 * (content.events.size() + content.techs.size()) + 32);
+    for (const StringKeySpec& spec : kStringKeys) {
+        expected.emplace_back(std::string(spec.key), spec.placeholders);
+    }
+    for (const sim::EventDef& event : content.events) {
+        expected.emplace_back("event." + event.id + ".name", "");
+        expected.emplace_back("event." + event.id + ".description", "");
+    }
+    for (const sim::TechDef& tech : content.techs) {
+        expected.emplace_back("tech." + tech.id + ".name", "");
+        expected.emplace_back("tech." + tech.id + ".description", "");
+    }
+    // The enums have no count; their name tables answer "unknown" past the end.
+    for (int i = 0; i < 256; ++i) {
+        const std::string_view name = sim::noticeKindName(static_cast<sim::NoticeKind>(i));
+        if (name == "unknown") {
+            break;
+        }
+        const std::string key = "notice." + std::string(name);
+        if (std::none_of(expected.begin(), expected.end(),
+                         [&](const ExpectedKey& entry) { return entry.first == key; })) {
+            sink.add(key, "no entry in the key table for this notice kind");
+        }
+    }
+    for (int i = 0; i < 256; ++i) {
+        const std::string_view name = sim::rejectReasonName(static_cast<sim::RejectReason>(i));
+        if (name == "unknown") {
+            break;
+        }
+        expected.emplace_back("reject." + std::string(name), "");
+    }
+    return expected;
+}
+
+// Validates one catalogue entry and stores it when it is usable.
+void readStringEntry(const json& document, const ExpectedKey& expected, sim::Content& content,
+                     ErrorSink& sink) {
+    const auto& [key, placeholders] = expected;
+    const auto it = document.find(key);
+    if (it == document.end()) {
+        sink.add(key, "missing");
+        return;
+    }
+    if (!it->is_string()) {
+        sink.add(key, "expected a string, got " + std::string(typeName(*it)));
+        return;
+    }
+    const auto text = it->get<std::string>();
+    if (text.empty()) {
+        sink.add(key, "must not be empty");
+        return;
+    }
+    const auto used = templatePlaceholders(text);
+    if (!used) {
+        sink.add(key, "malformed placeholder braces");
+        return;
+    }
+    for (const std::string& name : *used) {
+        if (!allowsPlaceholder(placeholders, name)) {
+            sink.add(key, "placeholder {" + name + "} is not available for this key");
+        }
+    }
+    content.strings[key] = text;
+}
+
+// Reads the flat key -> template object, checks it against the key table,
+// and fills in event and tech names and descriptions. Runs after techs and
+// events are parsed because their ids define the per-id keys.
+void parseStrings(const json& document, sim::Content& content, ErrorSink& sink) {
+    if (!document.is_object()) {
+        sink.add("", "expected a top-level object, got " + std::string(typeName(document)));
+        return;
+    }
+    const std::vector<ExpectedKey> expected = expectedStringKeys(content, sink);
+    for (const ExpectedKey& entry : expected) {
+        readStringEntry(document, entry, content, sink);
+    }
+    for (const auto& item : document.items()) {
+        if (std::none_of(expected.begin(), expected.end(),
+                         [&](const ExpectedKey& entry) { return entry.first == item.key(); })) {
+            sink.add(item.key(), "unknown key");
+        }
+    }
+    for (sim::EventDef& event : content.events) {
+        event.name = content.strings["event." + event.id + ".name"];
+        event.description = content.strings["event." + event.id + ".description"];
+    }
+    for (sim::TechDef& tech : content.techs) {
+        tech.name = content.strings["tech." + tech.id + ".name"];
+        tech.description = content.strings["tech." + tech.id + ".description"];
+    }
+}
+
 std::optional<std::string> readFile(const std::filesystem::path& path) {
     const std::ifstream stream(path, std::ios::binary);
     if (!stream) {
@@ -889,6 +1175,7 @@ LoadResult loadFromStrings(const Sources& sources) {
     ErrorSink regionSink(result.errors, kRegionsFile);
     ErrorSink eventSink(result.errors, kEventsFile);
     ErrorSink balanceSink(result.errors, kBalanceFile);
+    ErrorSink stringsSink(result.errors, kStringsFile);
 
     std::vector<std::string> unlockedByNames;
     if (const auto document = parseDocument(sources.resources, resourceSink)) {
@@ -907,6 +1194,10 @@ LoadResult loadFromStrings(const Sources& sources) {
     }
     if (const auto document = parseDocument(sources.balance, balanceSink)) {
         parseBalance(*document, content.balance, balanceSink);
+    }
+    // Last: the per-id keys depend on the event and tech ids parsed above.
+    if (const auto document = parseDocument(sources.strings, stringsSink)) {
+        parseStrings(*document, content, stringsSink);
     }
 
     if (result.errors.empty()) {
@@ -931,6 +1222,7 @@ LoadResult loadFromDirectory(const std::filesystem::path& directory) {
     read(kRegionsFile, sources.regions);
     read(kEventsFile, sources.events);
     read(kBalanceFile, sources.balance);
+    read(kStringsFile, sources.strings);
     if (!errors.empty()) {
         LoadResult result;
         result.errors = std::move(errors);

@@ -11,6 +11,7 @@
 #include "sim/types.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,7 +47,8 @@ struct TechEffect {
 
 struct TechDef {
     std::string id;
-    std::string name;
+    std::string name;         // from the prose catalogue (tech.<id>.name)
+    std::string description;  // from the prose catalogue; not part of the content hash
     Money cost;
     Day durationDays = 0;
     std::vector<TechId> prerequisites;
@@ -88,8 +90,9 @@ struct EventEffect {
 
 struct EventDef {
     std::string id;
-    std::string name;
-    Fixed dailyWeight;  // probability of firing on any given day once eligible
+    std::string name;         // from the prose catalogue (event.<id>.name)
+    std::string description;  // from the prose catalogue; not part of the content hash
+    Fixed dailyWeight;        // probability of firing on any given day once eligible
     std::uint32_t minYear = 1;
     Day durationDays = 0;
     std::vector<EventEffect> effects;
@@ -133,6 +136,11 @@ struct Content {
     std::vector<RegionDef> regions;
     std::vector<EventDef> events;
     BalanceParams balance;
+    // Every sentence a player reads, keyed as in docs/specs/002-prose-catalogue.md
+    // (data/strings.json). Prose only: it is not serialized and not part of
+    // the content hash, so a wording fix never invalidates a save. The sim
+    // never reads it; the client looks keys up through game::text.
+    std::map<std::string, std::string, std::less<>> strings;  // heterogeneous lookup by view
 
     // Lookups by string id. Return an invalid id when absent.
     [[nodiscard]] ResourceId findResource(std::string_view id) const;

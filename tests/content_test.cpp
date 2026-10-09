@@ -4,6 +4,7 @@
 #include "sim/money.h"
 
 #include "content/loader.h"
+#include "test_strings.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -24,9 +25,9 @@ content::Sources goodSources() {
        "storage_cost_per_tonne_month": 8, "unlocked_by": "lithium_processing"}
     ])";
     s.techs = R"([
-      {"id": "seismic_1", "name": "Seismic I", "cost": 600000, "duration_days": 90,
+      {"id": "seismic_1", "cost": 600000, "duration_days": 90,
        "requires": [], "effects": [{"type": "survey_noise_mult", "value": 0.8}]},
-      {"id": "lithium_processing", "name": "Lithium", "cost": 4000000, "duration_days": 240,
+      {"id": "lithium_processing", "cost": 4000000, "duration_days": 240,
        "requires": ["seismic_1"], "effects": [{"type": "unlock_resource", "resource": "lithium"}]}
     ])";
     s.regions = R"([
@@ -36,7 +37,7 @@ content::Sources goodSources() {
        "deposits": {"iron": {"presence_prob": 0.8, "tonnes_median": 700000, "tonnes_spread": 2.5}}}
     ])";
     s.events = R"([
-      {"id": "boom", "name": "Boom", "daily_weight": 0.002, "min_year": 2, "duration_days": 180,
+      {"id": "boom", "daily_weight": 0.002, "min_year": 2, "duration_days": 180,
        "effects": [{"type": "demand_mult", "resource": "lithium", "value": 1.6},
                    {"type": "opex_mult", "value": 1.3}]}
     ])";
@@ -53,6 +54,7 @@ content::Sources goodSources() {
       "default_sell_policy": {"enabled": true, "reserve_tonnes": 0, "floor_price": 0},
       "default_cover_costs": true
     })";
+    s.strings = test::fixtureStrings({"boom"}, {"seismic_1", "lithium_processing"});
     return s;
 }
 
@@ -292,6 +294,6 @@ TEST_CASE("All errors are collected in one pass", "[content]") {
 TEST_CASE("Missing directory reports unreadable files", "[content]") {
     const auto result = content::loadFromDirectory("/definitely/not/a/real/dir");
     CHECK_FALSE(result.ok());
-    CHECK(result.errors.size() == 5);
+    CHECK(result.errors.size() == 6);  // one per data file, the catalogue included
     CHECK(result.errors[0].message.find("cannot read") != std::string::npos);
 }

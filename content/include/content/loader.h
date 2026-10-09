@@ -14,6 +14,7 @@ inline constexpr const char* kTechsFile = "techs.json";
 inline constexpr const char* kRegionsFile = "regions.json";
 inline constexpr const char* kEventsFile = "events.json";
 inline constexpr const char* kBalanceFile = "balance.json";
+inline constexpr const char* kStringsFile = "strings.json";
 
 struct LoadError {
     std::string file;     // e.g. "resources.json"
@@ -28,6 +29,7 @@ struct Sources {
     std::string regions;
     std::string events;
     std::string balance;
+    std::string strings;  // the prose catalogue (spec 002)
 };
 
 struct LoadResult {
@@ -37,7 +39,7 @@ struct LoadResult {
     [[nodiscard]] bool ok() const { return content.has_value(); }
 };
 
-// Parses and validates all five documents. Every problem found is reported,
+// Parses and validates all six documents. Every problem found is reported,
 // not just the first. Decimal values are parsed as doubles, rejected if not
 // finite or if they carry more precision than Fixed or Money can hold, then
 // rounded to nearest.

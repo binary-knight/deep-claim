@@ -1,82 +1,136 @@
 [
   {
     "id": "seismic_survey_1",
-    "name": "Seismic Survey I",
     "cost": 600000,
     "duration_days": 90,
     "requires": [],
-    "effects": [ { "type": "survey_noise_mult", "value": 0.8 } ]
+    "effects": [
+      {
+        "type": "survey_noise_mult",
+        "value": 0.8
+      }
+    ]
   },
   {
     "id": "seismic_survey_2",
-    "name": "Seismic Survey II",
     "cost": 1500000,
     "duration_days": 120,
-    "requires": ["seismic_survey_1"],
-    "effects": [ { "type": "survey_noise_mult", "value": 0.7 } ]
+    "requires": [
+      "seismic_survey_1"
+    ],
+    "effects": [
+      {
+        "type": "survey_noise_mult",
+        "value": 0.7
+      }
+    ]
   },
   {
     "id": "core_sampling",
-    "name": "Core Sampling",
     "cost": 3000000,
     "duration_days": 180,
-    "requires": ["seismic_survey_2"],
-    "effects": [ { "type": "survey_noise_mult", "value": 0.6 } ]
+    "requires": [
+      "seismic_survey_2"
+    ],
+    "effects": [
+      {
+        "type": "survey_noise_mult",
+        "value": 0.6
+      }
+    ]
   },
   {
     "id": "efficient_extraction_1",
-    "name": "Efficient Extraction I",
     "cost": 1200000,
     "duration_days": 120,
     "requires": [],
-    "effects": [ { "type": "extraction_capex_mult", "value": 0.85 } ]
+    "effects": [
+      {
+        "type": "extraction_capex_mult",
+        "value": 0.85
+      }
+    ]
   },
   {
     "id": "efficient_extraction_2",
-    "name": "Efficient Extraction II",
     "cost": 2800000,
     "duration_days": 180,
-    "requires": ["efficient_extraction_1"],
-    "effects": [ { "type": "extraction_capex_mult", "value": 0.8 } ]
+    "requires": [
+      "efficient_extraction_1"
+    ],
+    "effects": [
+      {
+        "type": "extraction_capex_mult",
+        "value": 0.8
+      }
+    ]
   },
   {
     "id": "automation_1",
-    "name": "Mine Automation",
     "cost": 2000000,
     "duration_days": 150,
-    "requires": ["efficient_extraction_1"],
-    "effects": [ { "type": "opex_mult", "value": 0.8 } ]
+    "requires": [
+      "efficient_extraction_1"
+    ],
+    "effects": [
+      {
+        "type": "opex_mult",
+        "value": 0.8
+      }
+    ]
   },
   {
     "id": "high_throughput_1",
-    "name": "High-Throughput Processing I",
     "cost": 1800000,
     "duration_days": 150,
     "requires": [],
-    "effects": [ { "type": "output_mult", "value": 1.25 } ]
+    "effects": [
+      {
+        "type": "output_mult",
+        "value": 1.25
+      }
+    ]
   },
   {
     "id": "high_throughput_2",
-    "name": "High-Throughput Processing II",
     "cost": 4000000,
     "duration_days": 210,
-    "requires": ["high_throughput_1", "automation_1"],
-    "effects": [ { "type": "output_mult", "value": 1.3 } ]
+    "requires": [
+      "high_throughput_1",
+      "automation_1"
+    ],
+    "effects": [
+      {
+        "type": "output_mult",
+        "value": 1.3
+      }
+    ]
   },
   {
     "id": "bulk_logistics",
-    "name": "Bulk Logistics",
     "cost": 900000,
     "duration_days": 90,
     "requires": [],
-    "effects": [ { "type": "storage_cost_mult", "value": 0.6 } ]
+    "effects": [
+      {
+        "type": "storage_cost_mult",
+        "value": 0.6
+      }
+    ]
   },
   {
     "id": "lithium_processing",
-    "name": "Lithium Processing",
     "cost": 4000000,
     "duration_days": 240,
-    "requires": ["core_sampling", "high_throughput_1"],
-    "effects": [ { "type": "unlock_resource", "resource": "lithium" } ]
+    "requires": [
+      "core_sampling",
+      "high_throughput_1"
+    ],
+    "effects": [
+      {
+        "type": "unlock_resource",
+        "resource": "lithium"
+      }
+    ]
   }
 ]

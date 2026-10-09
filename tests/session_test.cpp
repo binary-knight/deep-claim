@@ -9,6 +9,7 @@
 
 #include "game/format.h"
 #include "test_content.h"
+#include "test_strings.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -52,7 +53,8 @@ TEST_CASE("A session advances with real time at the chosen speed", "[session]") 
 }
 
 TEST_CASE("Player orders are bound to the player and show up in the log", "[session]") {
-    const sim::Content content = test::makeContent();
+    sim::Content content = test::makeContent();
+    test::addStrings(content);  // the log text comes from the shipped catalogue
     game::Session session(content, 1, test::setup());
     // Day-0 listings are already in the log.
     CHECK(std::any_of(session.log().begin(), session.log().end(), [](const game::LogEntry& e) {
@@ -72,7 +74,8 @@ TEST_CASE("Player orders are bound to the player and show up in the log", "[sess
     CHECK(session.view().surveys.size() == 1);
     CHECK(session.view().cash == content.balance.startingCapital - content.balance.surveyCost);
     CHECK(std::any_of(session.log().begin(), session.log().end(), [](const game::LogEntry& e) {
-        return e.notice.kind == sim::NoticeKind::SurveyStarted && e.text.find("Survey") == 0;
+        return e.notice.kind == sim::NoticeKind::SurveyStarted &&
+               e.text.find("plot #") != std::string::npos && e.text.front() != '[';
     }));
 }
 
