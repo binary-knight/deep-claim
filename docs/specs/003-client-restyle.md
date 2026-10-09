@@ -132,3 +132,80 @@ animations.
 - 2026-10-09: playtest fixes ride inside the restyle (owner's choice:
   "restyle first").
 - 2026-10-09: idle mines keep full opex and warn monthly (owner's choice).
+- 2026-10-09: `MineFoundNothing` replaces the operational+depleted pair on
+  the opening day only; the mine still goes `Depleted` when nothing is
+  left and `Operating` when only locked ore is left (state logic unchanged,
+  as the spec asks).
+- 2026-10-09: the idle-mine warning fires at month end only and skips
+  bankrupt companies; `MineView::bestEstimateTonnes` comes from the
+  viewer's latest complete survey of the plot (zero when unsurveyed).
+- 2026-10-09: the "log line a month before the estimate runs out" is a sim
+  notice, `MineRunningLow`, emitted at month end when the owner's latest
+  survey estimate less tonnes extracted lasts 30 days or fewer at the last
+  output. It is private, carries the day count in `tonnes`, never fires for
+  unsurveyed mines, and does not pause the clock.
+- 2026-10-09: cash history for the header sparkline lives in the session
+  (not the sim): it is session memory, reset on load, and never serialized.
+- 2026-10-09: `price-chart` keeps its `columns` mode; the new default
+  `line` mode scales to the data range and takes `days`, `series="cash"`
+  and `mode` attributes. The compact sparkline is 24dp tall in the header
+  and 26dp in the Prices panel rather than the spec's 20dp: 20dp left no
+  room for the 1.5dp line plus the endpoint mark.
+- 2026-10-09: `tokens.rcss` is a generated lookup table plus utility
+  classes; `main.rcss` uses literal values (RCSS has no custom properties
+  and no `@import` of variables), and the tokens test checks every token
+  appears in the generated file.
+- 2026-10-09: the rail icons are a procedurally drawn 144x24 TGA sprite
+  sheet (`tools/design/icons.py`, no image library); labels appear on hover
+  and are the text fallback when the sheet fails to load.
+- 2026-10-09: the Market standing-order form is one sheet for the selected
+  resource (row click selects) instead of a form in every row: the two
+  inputs are two-way bound to single model strings, and per-row inputs
+  cannot be verified headless. Rows show the auto-sell pill, the policy
+  summary and the month-to-date line.
+- 2026-10-09: the status line shows the keyboard shortcuts when it has
+  nothing else to say, since the rail has no room for the hint.
+- 2026-10-09: agy pass over the 87 new catalogue lines: 38 sentence-length
+  lines take the polished text; 49 keep the draft because they fill strip
+  items, table cells, chips, buttons or nowrap sub-lines where a sentence
+  does not fit, or because the hand-off fixes their wording ("needs
+  <tech>", "in N days"). `status.paused_by` keeps the draft because its
+  `{text}` is already a full sentence.
+- 2026-10-09: the probe also fails on any RmlUi warning or error logged
+  while loading or laying out a tab (unknown property, unbound variable,
+  bad table child), which is how the `.row` display clash was caught.
+- 2026-10-09: auto-pause rules persist in `autopause.txt` (key=0/1 lines)
+  in the per-user save directory; a malformed line keeps that rule's
+  default.
+- 2026-10-09: the status strip shows on every tab, as this spec says; the
+  hand-off's "Dashboard only" note is superseded here.
+- 2026-10-09, Codex review (gpt-6.1-sol), all seven findings and the three
+  spec gaps applied:
+  - Table columns: RmlUi shares unspecified column widths equally and does
+    not size them from content, so mine output overran its cell. Every
+    fixed column now states its width on the header cell, output and
+    remaining wrap, and the owned table shows area as a sub-line of region.
+  - Step day now applies the auto-pause through the same path as the
+    running clock (`Session::stopIfPaused`).
+  - Remaining ore no longer subtracts lifetime extraction from a survey
+    taken after the mine opened. `sim::estimatedRemainingTonnes` is shared
+    by the view (`MineView::estimatedRemainingTonnes`) and the running-low
+    notice. For a survey that postdates the opening the state keeps no
+    extraction baseline, so extraction since is approximated as last daily
+    output times days since, capped at the lifetime total. An exact figure
+    needs the baseline stored on the survey, which is a save-format change
+    and is left for a later spec.
+  - The auto-pause popover rows are flex rows again and 40dp on the Deck.
+  - The plot panel carries two independent warnings, build risk and
+    contested auction; a survey still out counts as no survey
+    (`ui.notice_survey_pending`).
+  - `.sub.warn` and its siblings restore the state colour on sub-lines.
+  - The company name is cut on a UTF-8 character boundary.
+  - A surveyed listing with nothing else to flag gets a "surveyed" chip.
+  - The probe also plays a fixed-seed game to a working mine, a loan and a
+    research project, opens the auto-pause menu, and checks every tab
+    again in both frames; it fails when a no-wrap text is wider than the
+    block or cell that holds it. That check found six more overflows
+    (table heads squeezed to nothing, no-wrap sub-lines in the side
+    column), all fixed.
+  Declined: none.

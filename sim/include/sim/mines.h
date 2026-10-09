@@ -41,4 +41,34 @@ void applySetMineState(WorldState& state, const SetMineState& command, TickRepor
 // Finishes construction, extracts, charges opex, marks depletion.
 void runMines(const Content& content, WorldState& state, TickReport& report);
 
+// True when the plot under `mine` still holds ore its owner can extract
+// today: a remaining deposit of an unlocked resource.
+[[nodiscard]] bool mineHasExtractable(const Content& content, const WorldState& state,
+                                      const Mine& mine);
+
+// Month end: an IdleMineWarning for every operating mine of a solvent
+// company that has nothing extractable (empty, or only locked ore). The
+// mine keeps paying full opex; the warning is the player's cue to mothball.
+void warnIdleMines(const Content& content, const WorldState& state, TickReport& report);
+
+// The owner's latest completed survey of the mine's plot, or null.
+[[nodiscard]] const Survey* latestOwnSurvey(const WorldState& state, const Mine& mine);
+
+// Tonnes the owner should expect to be left of one surveyed resource: the
+// survey's estimate (of what was in the ground when it completed) less what
+// the mine has taken since. A survey that completed before the mine opened
+// predates all extraction. For a later survey the state keeps no baseline,
+// so extraction since is taken as the last daily output times the days
+// since, capped at the lifetime total; output declines slowly, so this errs
+// a little high.
+[[nodiscard]] std::int64_t estimatedRemainingTonnes(const WorldState& state, const Mine& mine,
+                                                    const Survey& survey,
+                                                    const SurveyEstimate& estimate);
+
+// Month end: a MineRunningLow notice (tonnes = days) for every operating
+// mine of a solvent company whose estimatedRemainingTonnes lasts kRunningLowDays or fewer at the
+// current output. Surveys are estimates, so this is a cue, not a fact; unsurveyed mines never warn.
+constexpr Day kRunningLowDays = 30;
+void warnRunningLow(const Content& content, const WorldState& state, TickReport& report);
+
 }  // namespace sim

@@ -152,6 +152,101 @@ void applySetMineState(WorldState& state, const SetMineState& command, TickRepor
     report.notices.push_back(mineNotice(NoticeKind::MineSwitched, mine, command.mine));
 }
 
+bool mineHasExtractable(const Content& content, const WorldState& state, const Mine& mine) {
+    const Company& owner = state.companies[mine.owner.index()];
+    return std::ranges::any_of(
+        state.hidden.plotDeposits[mine.plot.index()].deposits, [&](const DepositTruth& truth) {
+            return truth.tonnesRemaining > 0 && resourceUnlocked(content, owner, truth.resource);
+        });
+}
+
+// One day of extraction: every unlocked deposit with ore left yields its
+// daily output into the owner's inventory. Returns whether any ore remains
+// (locked ore counts: the mine is not depleted).
+bool extractDay(const Content& content, WorldState& state, Company& owner, Mine& mine) {
+    bool anythingLeft = false;
+    for (DepositTruth& truth : state.hidden.plotDeposits[mine.plot.index()].deposits) {
+        if (truth.tonnesRemaining > 0 && resourceUnlocked(content, owner, truth.resource)) {
+            const std::int64_t output = mineDailyOutput(content, owner, truth.resource,
+                                                        truth.tonnesTotal, truth.tonnesRemaining);
+            truth.tonnesRemaining -= output;
+            std::int64_t& stock = owner.inventoryTonnes[truth.resource.index()];
+            stock = checkedAdd(stock, output);
+            std::int64_t& lifetime = mine.extractedTonnes[truth.resource.index()];
+            lifetime = checkedAdd(lifetime, output);
+            mine.lastDayTonnes[truth.resource.index()] = output;
+        }
+        anythingLeft = anythingLeft || truth.tonnesRemaining > 0;
+    }
+    return anythingLeft;
+}
+
+void warnIdleMines(const Content& content, const WorldState& state, TickReport& report) {
+    for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
+        const Mine& mine = state.mines[i];
+        if (mine.state != MineState::Operating ||
+            state.companies[mine.owner.index()].bankrupt != 0 ||
+            mineHasExtractable(content, state, mine)) {
+            continue;
+        }
+        report.notices.push_back(mineNotice(NoticeKind::IdleMineWarning, mine, MineId(i)));
+    }
+}
+
+const Survey* latestOwnSurvey(const WorldState& state, const Mine& mine) {
+    // Surveys are appended in commission order: the last complete one of the
+    // owner for this plot is the latest.
+    const Survey* latest = nullptr;
+    for (const Survey& survey : state.surveys) {
+        if (survey.company == mine.owner && survey.plot == mine.plot && survey.complete != 0) {
+            latest = &survey;
+        }
+    }
+    return latest;
+}
+
+std::int64_t estimatedRemainingTonnes(const WorldState& state, const Mine& mine,
+                                      const Survey& survey, const SurveyEstimate& estimate) {
+    const std::size_t r = estimate.resource.index();
+    std::int64_t since = mine.extractedTonnes[r];
+    if (mine.state != MineState::Building && survey.completesDay >= mine.operationalDay) {
+        const std::int64_t days = state.day > survey.completesDay
+                                      ? static_cast<std::int64_t>(state.day) -
+                                            static_cast<std::int64_t>(survey.completesDay)
+                                      : 0;
+        since = std::min(since, checkedMulDiv(mine.lastOutputTonnes[r], days, 1).value_or(since));
+    }
+    return std::max<std::int64_t>(0, estimate.tonnesEstimate - since);
+}
+
+void warnRunningLow(const Content& /*content*/, const WorldState& state, TickReport& report) {
+    for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
+        const Mine& mine = state.mines[i];
+        if (mine.state != MineState::Operating ||
+            state.companies[mine.owner.index()].bankrupt != 0) {
+            continue;
+        }
+        const Survey* latest = latestOwnSurvey(state, mine);
+        if (latest == nullptr) {
+            continue;
+        }
+        std::int64_t daysLeft = -1;
+        for (const SurveyEstimate& estimate : latest->estimates) {
+            const std::int64_t output = mine.lastOutputTonnes[estimate.resource.index()];
+            if (output > 0) {
+                daysLeft = std::max(
+                    daysLeft, estimatedRemainingTonnes(state, mine, *latest, estimate) / output);
+            }
+        }
+        if (daysLeft < 0 || daysLeft > kRunningLowDays) {
+            continue;
+        }
+        Notice notice = mineNotice(NoticeKind::MineRunningLow, mine, MineId(i));
+        notice.tonnes = daysLeft;
+        report.notices.push_back(notice);
+    }
+}
+
 void runMines(const Content& content, WorldState& state, TickReport& report) {
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         Mine& mine = state.mines[i];
@@ -162,31 +257,24 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
         if (mine.state == MineState::Closed || mine.state == MineState::Depleted) {
             continue;
         }
+        // A mine that opens on a plot with nothing it can extract (no deposit,
+        // or only locked ore) says so once instead of "operational" followed
+        // by "depleted" on the same day.
+        bool foundNothing = false;
         if (mine.state == MineState::Building) {
             if (mine.operationalDay <= state.day) {
                 mine.state = MineState::Operating;
-                report.notices.push_back(mineNotice(NoticeKind::MineOperational, mine, id));
+                foundNothing = !mineHasExtractable(content, state, mine);
+                report.notices.push_back(mineNotice(
+                    foundNothing ? NoticeKind::MineFoundNothing : NoticeKind::MineOperational, mine,
+                    id));
             } else {
                 continue;
             }
         }
 
         if (mine.state == MineState::Operating) {
-            bool anythingLeft = false;
-            for (DepositTruth& truth : state.hidden.plotDeposits[mine.plot.index()].deposits) {
-                if (truth.tonnesRemaining > 0 && resourceUnlocked(content, owner, truth.resource)) {
-                    const std::int64_t output = mineDailyOutput(
-                        content, owner, truth.resource, truth.tonnesTotal, truth.tonnesRemaining);
-                    truth.tonnesRemaining -= output;
-                    std::int64_t& stock = owner.inventoryTonnes[truth.resource.index()];
-                    stock = checkedAdd(stock, output);
-                    std::int64_t& lifetime = mine.extractedTonnes[truth.resource.index()];
-                    lifetime = checkedAdd(lifetime, output);
-                    mine.lastDayTonnes[truth.resource.index()] = output;
-                }
-                // Locked ore counts as remaining: the mine is not depleted.
-                anythingLeft = anythingLeft || truth.tonnesRemaining > 0;
-            }
+            const bool anythingLeft = extractDay(content, state, owner, mine);
             // The whole vector is replaced so a resource that ran out reads zero.
             mine.lastOutputTonnes = mine.lastDayTonnes;
             // Today's production day is paid for even if it emptied the mine.
@@ -194,7 +282,9 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
                 debitCash(owner.cash, mineDailyOpex(content, state, owner, MineState::Operating));
             if (!anythingLeft) {
                 mine.state = MineState::Depleted;
-                report.notices.push_back(mineNotice(NoticeKind::MineDepleted, mine, id));
+                if (!foundNothing) {
+                    report.notices.push_back(mineNotice(NoticeKind::MineDepleted, mine, id));
+                }
             }
             continue;
         }

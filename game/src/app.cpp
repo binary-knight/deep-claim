@@ -9,6 +9,7 @@
 #include "sim/view.h"
 
 #include "chart_element.h"
+#include "game/auto_pause.h"
 #include "game/format.h"
 #include "game/session.h"
 #include "game/trace.h"
@@ -35,6 +36,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -46,8 +48,10 @@ namespace game {
 namespace {
 
 constexpr double kStatusSeconds = 6.0;
-constexpr int kMaxScreenshots = 200;  // about 3.4 MB each, uncompressed
+constexpr int kMaxScreenshots = 200;   // about 3.4 MB each, uncompressed
+constexpr float kDeckWidth = 1300.0F;  // narrower windows get the Steam Deck sizes
 const char* const kSaveFile = "autosave.dcsave";
+const char* const kPauseFile = "autopause.txt";
 constexpr std::array<const char*, 6> kTabNames = {"dashboard", "plots",   "market",
                                                   "research",  "finance", "log"};
 
@@ -77,6 +81,21 @@ bool writeFile(const std::filesystem::path& path, const std::vector<std::uint8_t
     return static_cast<bool>(file);
 }
 
+// Notices the status line shows in the danger colour.
+bool noticeIsDanger(sim::NoticeKind kind) {
+    switch (kind) {
+        case sim::NoticeKind::CommandRejected:
+        case sim::NoticeKind::InsolvencyWarning:
+        case sim::NoticeKind::Bankrupt:
+        case sim::NoticeKind::MineFoundNothing:
+        case sim::NoticeKind::IdleMineWarning:
+        case sim::NoticeKind::BidForfeited:
+            return true;
+        default:
+            return false;
+    }
+}
+
 }  // namespace
 
 App::App(Rml::Context& context, platform::Services& services, const sim::Content& content,
@@ -88,20 +107,34 @@ App::App(Rml::Context& context, platform::Services& services, const sim::Content
       playtestDir_(std::move(playtestDir)),
       buildId_(std::move(buildId)) {
     openTrace();
+    loadPauseRules();
     newGame(clockSeed());
     bindModel();
-    PriceChartElement::setProvider([this](int resource) {
+    PriceChartElement::setProvider([this](int resource, int days) {
         ChartSeries series;
         if (resource < 0 || resource >= static_cast<int>(content_->resources.size())) {
             return series;
         }
         const sim::ResourceId id(static_cast<std::uint32_t>(resource));
         const std::vector<sim::Money>& history = session_->priceHistory(id);
-        const std::size_t count = std::min<std::size_t>(history.size(), sim::kRecentPriceDays);
+        const std::size_t count =
+            std::min<std::size_t>(history.size(), static_cast<std::size_t>(std::max(days, 2)));
         for (std::size_t i = history.size() - count; i < history.size(); ++i) {
             series.values.push_back(history[i].cents());
         }
         series.baseline = content_->resources[id.index()].basePrice.cents();
+        return series;
+    });
+    PriceChartElement::setCashProvider([this](int days) {
+        ChartSeries series;
+        const std::vector<sim::Money>& history = session_->cashHistory();
+        const std::size_t count =
+            std::min<std::size_t>(history.size(), static_cast<std::size_t>(std::max(days, 2)));
+        for (std::size_t i = history.size() - count; i < history.size(); ++i) {
+            series.values.push_back(history[i].cents());
+        }
+        series.baseline = 0;
+        series.hasBaseline = true;  // the zero line: below it is insolvency
         return series;
     });
 }
@@ -111,6 +144,7 @@ App::~App() {
         trace_->end(session_->day());
     }
     PriceChartElement::setProvider(nullptr);
+    PriceChartElement::setCashProvider(nullptr);
     if (document_ != nullptr) {
         document_->Close();
     }
@@ -123,6 +157,7 @@ void App::newGame(std::uint64_t seed) {
     setup.aiNames = {"Northfield Minerals"};
     session_ = std::make_unique<Session>(*content_, seed, setup);
     session_->setTrace(trace_.get());
+    session_->setAutoPause(pauseRules_);
     if (trace_) {
         trace_->newGame(seed, setup, sim::hashContent(*content_), buildId_);
     }
@@ -131,6 +166,23 @@ void App::newGame(std::uint64_t seed) {
     model_.tab = 0;
     syncPolicyInputs();
     lastRefreshedDay_ = session_->day();
+}
+
+void App::loadPauseRules() {
+    const std::ifstream file(services_->saveDirectory() / kPauseFile);
+    if (!file) {
+        return;
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    AutoPause rules = AutoPause::defaults();
+    rules.fromText(buffer.str());  // malformed lines keep their defaults
+    pauseRules_ = rules;
+}
+
+void App::savePauseRules() {
+    std::ofstream file(services_->saveDirectory() / kPauseFile, std::ios::trunc);
+    file << pauseRules_.toText();
 }
 
 void App::openTrace() {
@@ -191,7 +243,7 @@ std::optional<std::filesystem::path> App::takeScreenshotRequest() {
 
 void App::screenshotDone(const std::filesystem::path& file, bool ok) {
     if (!ok) {
-        setStatus(text(*content_, "status.screenshot_failed"));
+        setStatus(text(*content_, "status.screenshot_failed"), true);
         return;
     }
     if (trace_) {
@@ -207,56 +259,117 @@ void App::bindModel() {
         Rml::Log::Message(Rml::Log::LT_ERROR, "Could not create the game data model");
         return;
     }
-    if (auto h = ctor.RegisterStruct<PlotRow>()) {
-        h.RegisterMember("index", &PlotRow::index);
-        h.RegisterMember("name", &PlotRow::name);
-        h.RegisterMember("region", &PlotRow::region);
-        h.RegisterMember("area", &PlotRow::area);
-        h.RegisterMember("status", &PlotRow::status);
-        h.RegisterMember("ask", &PlotRow::ask);
-        h.RegisterMember("auction", &PlotRow::auction);
-        h.RegisterMember("survey", &PlotRow::survey);
-        h.RegisterMember("mine", &PlotRow::mine);
-        h.RegisterMember("capex", &PlotRow::capex);
-        h.RegisterMember("odds", &PlotRow::odds);
-        h.RegisterMember("odds_line", &PlotRow::odds_line);
-        h.RegisterMember("costs_line", &PlotRow::costs_line);
-        h.RegisterMember("build_blocked", &PlotRow::build_blocked);
-        h.RegisterMember("can_afford_mine", &PlotRow::can_afford_mine);
-        h.RegisterMember("listed", &PlotRow::listed);
-        h.RegisterMember("mine_here", &PlotRow::mine_here);
-        h.RegisterMember("owned", &PlotRow::owned);
-        h.RegisterMember("can_survey", &PlotRow::can_survey);
-        h.RegisterMember("can_build", &PlotRow::can_build);
-        h.RegisterMember("can_toggle_mine", &PlotRow::can_toggle_mine);
-        h.RegisterMember("mine_operating", &PlotRow::mine_operating);
-        h.RegisterMember("mine_index", &PlotRow::mine_index);
+    if (auto h = ctor.RegisterStruct<NeedRow>()) {
+        h.RegisterMember("number", &NeedRow::number);
+        h.RegisterMember("title", &NeedRow::title);
+        h.RegisterMember("sub", &NeedRow::sub);
+        h.RegisterMember("days", &NeedRow::days);
+        h.RegisterMember("action", &NeedRow::action);
+        h.RegisterMember("target", &NeedRow::target);
+        h.RegisterMember("act_label", &NeedRow::act_label);
+    }
+    if (auto h = ctor.RegisterStruct<SaleRow>()) {
+        h.RegisterMember("index", &SaleRow::index);
+        h.RegisterMember("name", &SaleRow::name);
+        h.RegisterMember("region", &SaleRow::region);
+        h.RegisterMember("area", &SaleRow::area);
+        h.RegisterMember("ask", &SaleRow::ask);
+        h.RegisterMember("bids", &SaleRow::bids);
+        h.RegisterMember("closes", &SaleRow::closes);
+        h.RegisterMember("survey", &SaleRow::survey);
+        h.RegisterMember("error", &SaleRow::error);
+        h.RegisterMember("flag", &SaleRow::flag);
+        h.RegisterMember("flag_class", &SaleRow::flag_class);
+        h.RegisterMember("has_flag", &SaleRow::has_flag);
+    }
+    if (auto h = ctor.RegisterStruct<OwnedRow>()) {
+        h.RegisterMember("index", &OwnedRow::index);
+        h.RegisterMember("name", &OwnedRow::name);
+        h.RegisterMember("region", &OwnedRow::region);
+        h.RegisterMember("area", &OwnedRow::area);
+        h.RegisterMember("mine", &OwnedRow::mine);
+        h.RegisterMember("mine_class", &OwnedRow::mine_class);
+        h.RegisterMember("output", &OwnedRow::output);
+        h.RegisterMember("remaining", &OwnedRow::remaining);
+        h.RegisterMember("can_toggle", &OwnedRow::can_toggle);
+        h.RegisterMember("mine_operating", &OwnedRow::mine_operating);
+        h.RegisterMember("can_build", &OwnedRow::can_build);
+        h.RegisterMember("mine_index", &OwnedRow::mine_index);
+    }
+    if (auto h = ctor.RegisterStruct<EstimateRow>()) {
+        h.RegisterMember("resource", &EstimateRow::resource);
+        h.RegisterMember("tonnes", &EstimateRow::tonnes);
+        h.RegisterMember("error", &EstimateRow::error);
+        h.RegisterMember("needs", &EstimateRow::needs);
+        h.RegisterMember("locked", &EstimateRow::locked);
+    }
+    ctor.RegisterArray<std::vector<EstimateRow>>();
+    if (auto h = ctor.RegisterStruct<PlotPanel>()) {
+        h.RegisterMember("any", &PlotPanel::any);
+        h.RegisterMember("index", &PlotPanel::index);
+        h.RegisterMember("title", &PlotPanel::title);
+        h.RegisterMember("area", &PlotPanel::area);
+        h.RegisterMember("ask", &PlotPanel::ask);
+        h.RegisterMember("auction", &PlotPanel::auction);
+        h.RegisterMember("capex", &PlotPanel::capex);
+        h.RegisterMember("odds", &PlotPanel::odds);
+        h.RegisterMember("owner", &PlotPanel::owner);
+        h.RegisterMember("survey_title", &PlotPanel::survey_title);
+        h.RegisterMember("estimates", &PlotPanel::estimates);
+        h.RegisterMember("value", &PlotPanel::value);
+        h.RegisterMember("notice", &PlotPanel::notice);
+        h.RegisterMember("notice_class", &PlotPanel::notice_class);
+        h.RegisterMember("contest", &PlotPanel::contest);
+        h.RegisterMember("listed", &PlotPanel::listed);
+        h.RegisterMember("owned", &PlotPanel::owned);
+        h.RegisterMember("can_survey", &PlotPanel::can_survey);
+        h.RegisterMember("survey_label", &PlotPanel::survey_label);
+        h.RegisterMember("can_build", &PlotPanel::can_build);
+        h.RegisterMember("can_afford_mine", &PlotPanel::can_afford_mine);
+        h.RegisterMember("build_label", &PlotPanel::build_label);
+        h.RegisterMember("build_blocked", &PlotPanel::build_blocked);
+        h.RegisterMember("can_toggle_mine", &PlotPanel::can_toggle_mine);
+        h.RegisterMember("mine_operating", &PlotPanel::mine_operating);
+        h.RegisterMember("mine_index", &PlotPanel::mine_index);
     }
     if (auto h = ctor.RegisterStruct<ResourceRow>()) {
         h.RegisterMember("index", &ResourceRow::index);
         h.RegisterMember("name", &ResourceRow::name);
         h.RegisterMember("price", &ResourceRow::price);
-        h.RegisterMember("base", &ResourceRow::base);
-        h.RegisterMember("ratio", &ResourceRow::ratio);
-        h.RegisterMember("supply", &ResourceRow::supply);
+        h.RegisterMember("price_unit", &ResourceRow::price_unit);
+        h.RegisterMember("base_line", &ResourceRow::base_line);
+        h.RegisterMember("market_sub", &ResourceRow::market_sub);
         h.RegisterMember("stock", &ResourceRow::stock);
+        h.RegisterMember("stock_sub", &ResourceRow::stock_sub);
         h.RegisterMember("stock_value", &ResourceRow::stock_value);
+        h.RegisterMember("ratio", &ResourceRow::ratio);
         h.RegisterMember("policy", &ResourceRow::policy);
         h.RegisterMember("auto_sold", &ResourceRow::auto_sold);
+        h.RegisterMember("locked_note", &ResourceRow::locked_note);
+        h.RegisterMember("locked", &ResourceRow::locked);
+        h.RegisterMember("ratio_warn", &ResourceRow::ratio_warn);
         h.RegisterMember("has_stock", &ResourceRow::has_stock);
+        h.RegisterMember("policy_on", &ResourceRow::policy_on);
         h.RegisterMember("selected", &ResourceRow::selected);
     }
     if (auto h = ctor.RegisterStruct<TechRow>()) {
         h.RegisterMember("index", &TechRow::index);
         h.RegisterMember("name", &TechRow::name);
+        h.RegisterMember("needs", &TechRow::needs);
         h.RegisterMember("cost", &TechRow::cost);
-        h.RegisterMember("duration", &TechRow::duration);
+        h.RegisterMember("days", &TechRow::days);
         h.RegisterMember("effects", &TechRow::effects);
-        h.RegisterMember("status", &TechRow::status);
+        h.RegisterMember("chip", &TechRow::chip);
+        h.RegisterMember("chip_class", &TechRow::chip_class);
+        h.RegisterMember("until", &TechRow::until);
+        h.RegisterMember("blocked", &TechRow::blocked);
         h.RegisterMember("can_start", &TechRow::can_start);
+        h.RegisterMember("researching", &TechRow::researching);
     }
     if (auto h = ctor.RegisterStruct<LoanRow>()) {
         h.RegisterMember("index", &LoanRow::index);
+        h.RegisterMember("name", &LoanRow::name);
+        h.RegisterMember("principal", &LoanRow::principal);
         h.RegisterMember("remaining", &LoanRow::remaining);
         h.RegisterMember("instalment", &LoanRow::instalment);
         h.RegisterMember("months", &LoanRow::months);
@@ -267,154 +380,166 @@ void App::bindModel() {
         h.RegisterMember("text", &LogRow::text);
         h.RegisterMember("warning", &LogRow::warning);
     }
-    ctor.RegisterArray<std::vector<PlotRow>>();
+    if (auto h = ctor.RegisterStruct<PauseRow>()) {
+        h.RegisterMember("index", &PauseRow::index);
+        h.RegisterMember("label", &PauseRow::label);
+        h.RegisterMember("on", &PauseRow::on);
+    }
+    ctor.RegisterArray<std::vector<NeedRow>>();
+    ctor.RegisterArray<std::vector<SaleRow>>();
+    ctor.RegisterArray<std::vector<OwnedRow>>();
     ctor.RegisterArray<std::vector<ResourceRow>>();
     ctor.RegisterArray<std::vector<TechRow>>();
     ctor.RegisterArray<std::vector<LoanRow>>();
     ctor.RegisterArray<std::vector<LogRow>>();
-    ctor.RegisterArray<std::vector<std::string>>();
+    ctor.RegisterArray<std::vector<PauseRow>>();
 
+    // Header and strip
     ctor.Bind("company", &model_.company);
     ctor.Bind("day", &model_.day);
     ctor.Bind("cash", &model_.cash);
     ctor.Bind("spendable", &model_.spendable);
     ctor.Bind("debt", &model_.debt);
-    ctor.Bind("insolvency", &model_.insolvency);
-    ctor.Bind("show_intro", &model_.show_intro);
-    ctor.Bind("survey_cost", &model_.survey_cost);
-    ctor.Bind("survey_days", &model_.survey_days);
-    ctor.Bind("mine_build_days", &model_.mine_build_days);
-    ctor.Bind("grace_months", &model_.grace_months);
-    ctor.Bind("loan_terms", &model_.loan_terms);
-    ctor.Bind("ui_shortcuts", &model_.ui_shortcuts);
-    ctor.Bind("ui_how_to_1", &model_.ui_how_to_1);
-    ctor.Bind("ui_how_to_2", &model_.ui_how_to_2);
-    ctor.Bind("ui_how_to_3", &model_.ui_how_to_3);
-    ctor.Bind("ui_company_terms", &model_.ui_company_terms);
-    ctor.Bind("ui_finance_cash", &model_.ui_finance_cash);
-    ctor.Bind("ui_finance_debt", &model_.ui_finance_debt);
-    ctor.Bind("ui_finance_storage", &model_.ui_finance_storage);
-    ctor.Bind("ui_no_events", &model_.ui_no_events);
-    ctor.Bind("ui_plots_intro", &model_.ui_plots_intro);
-    ctor.Bind("ui_policy_form_keep", &model_.ui_policy_form_keep);
-    ctor.Bind("ui_policy_form_mid", &model_.ui_policy_form_mid);
-    ctor.Bind("ui_policy_form_end", &model_.ui_policy_form_end);
-    ctor.Bind("ui_policy_hint", &model_.ui_policy_hint);
-    ctor.Bind("ui_chart_hint", &model_.ui_chart_hint);
-    ctor.Bind("ui_borrow_line", &model_.ui_borrow_line);
-    ctor.Bind("ui_each_mine_opex", &model_.ui_each_mine_opex);
-    ctor.Bind("ui_game_over", &model_.ui_game_over);
     ctor.Bind("speed_label", &model_.speed_label);
     ctor.Bind("speed", &model_.speed);
     ctor.Bind("tab", &model_.tab);
     ctor.Bind("game_over", &model_.game_over);
+    ctor.Bind("deck", &model_.deck);
     ctor.Bind("status_line", &model_.status_line);
-    ctor.Bind("loan_capacity", &model_.loan_capacity);
-    ctor.Bind("storage_cost", &model_.storage_cost);
-    ctor.Bind("mine_opex", &model_.mine_opex);
-    ctor.Bind("survey_noise", &model_.survey_noise);
-    ctor.Bind("mines_summary", &model_.mines_summary);
-    ctor.Bind("plots_summary", &model_.plots_summary);
-    ctor.Bind("research_summary", &model_.research_summary);
-    ctor.Bind("rivals", &model_.rivals);
-    ctor.Bind("events", &model_.events);
-    ctor.Bind("plots", &model_.plots);
-    ctor.Bind("resources", &model_.resources);
+    ctor.Bind("status_danger", &model_.status_danger);
+    ctor.Bind("show_pause_menu", &model_.show_pause_menu);
+    ctor.Bind("pause_rows", &model_.pause_rows);
+    ctor.Bind("month_net", &model_.month_net);
+    ctor.Bind("month_good", &model_.month_good);
+    ctor.Bind("storage_month", &model_.storage_month);
+    ctor.Bind("storage_month_long", &model_.storage_month_long);
+    ctor.Bind("solvency", &model_.solvency);
+    ctor.Bind("solvency_sub", &model_.solvency_sub);
+    ctor.Bind("solvent", &model_.solvent);
+    ctor.Bind("next_auction", &model_.next_auction);
+    ctor.Bind("mines_operating", &model_.mines_operating);
+    ctor.Bind("mines_building", &model_.mines_building);
+    ctor.Bind("mines_mothballed", &model_.mines_mothballed);
+    ctor.Bind("mines_depleted", &model_.mines_depleted);
+    ctor.Bind("research_strip", &model_.research_strip);
+    ctor.Bind("world_event", &model_.world_event);
+    ctor.Bind("world_sub", &model_.world_sub);
+    ctor.Bind("has_world", &model_.has_world);
+    // Dashboard
+    ctor.Bind("needs", &model_.needs);
+    ctor.Bind("needs_none", &model_.needs_none);
+    ctor.Bind("owned", &model_.owned);
+    ctor.Bind("rival_line", &model_.rival_line);
+    ctor.Bind("capacity_sub", &model_.capacity_sub);
+    ctor.Bind("warehouse_value", &model_.warehouse_value);
+    ctor.Bind("storage_sub", &model_.storage_sub);
+    ctor.Bind("instalment_sub", &model_.instalment_sub);
+    ctor.Bind("recent", &model_.recent);
+    // Plots
+    ctor.Bind("for_sale", &model_.for_sale);
+    ctor.Bind("panel", &model_.panel);
     ctor.Bind("techs", &model_.techs);
-    ctor.Bind("loans", &model_.loans);
-    ctor.Bind("log", &model_.log);
-    ctor.Bind("storage_warning", &model_.storage_warning);
+    // Market
+    ctor.Bind("resources", &model_.resources);
+    ctor.Bind("chart_title", &model_.chart_title);
+    ctor.Bind("chart_note", &model_.chart_note);
+    ctor.Bind("storage_tonnes", &model_.storage_tonnes);
+    ctor.Bind("storage_rate", &model_.storage_rate);
+    ctor.Bind("storage_note", &model_.storage_note);
+    ctor.Bind("standing_title", &model_.standing_title);
+    ctor.Bind("policy_summary", &model_.policy_summary);
     ctor.Bind("policy_reserve_input", &model_.policy_reserve_input);
     ctor.Bind("policy_floor_input", &model_.policy_floor_input);
     ctor.Bind("policy_enabled", &model_.policy_enabled);
-    ctor.Bind("policy_summary", &model_.policy_summary);
+    ctor.Bind("ui_policy_hint", &model_.ui_policy_hint);
+    // Research
+    ctor.Bind("lab_line", &model_.lab_line);
+    ctor.Bind("lab_sub", &model_.lab_sub);
+    // Finance
+    ctor.Bind("loans", &model_.loans);
+    ctor.Bind("loan_rule", &model_.loan_rule);
+    ctor.Bind("loan_limits", &model_.loan_limits);
     ctor.Bind("cover_costs", &model_.cover_costs);
-    ctor.Bind("cover_costs_label", &model_.cover_costs_label);
+    ctor.Bind("cover_check", &model_.cover_check);
+    ctor.Bind("cover_explain", &model_.cover_explain);
+    ctor.Bind("cover_last", &model_.cover_last);
+    ctor.Bind("solvency_rule", &model_.solvency_rule);
+    // Log and inputs
+    ctor.Bind("log", &model_.log);
     ctor.Bind("bid_input", &model_.bid_input);
     ctor.Bind("sell_input", &model_.sell_input);
     ctor.Bind("loan_input", &model_.loan_input);
     ctor.Bind("repay_input", &model_.repay_input);
     ctor.Bind("selected_plot", &model_.selected_plot);
     ctor.Bind("selected_resource", &model_.selected_resource);
-    ctor.Bind("selected_plot_title", &model_.selected_plot_title);
-    ctor.Bind("selected_resource_title", &model_.selected_resource_title);
+    ctor.Bind("ui_shortcuts", &model_.ui_shortcuts);
+    ctor.Bind("ui_game_over", &model_.ui_game_over);
+    ctor.Bind("ui_pause_menu_title", &model_.ui_pause_menu_title);
 
     const auto intArg = [](const Rml::VariantList& args, std::size_t i) {
         return i < args.size() ? args[i].Get<int>() : 0;
     };
-    ctor.BindEventCallback(
-        "set_tab", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onSetTab(intArg(a, 0));
-        });
-    ctor.BindEventCallback(
-        "set_speed", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onSetSpeed(intArg(a, 0));
-        });
-    ctor.BindEventCallback(
-        "step", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { onStep(); });
-    ctor.BindEventCallback(
-        "select_plot", [this, intArg](Rml::DataModelHandle, Rml::Event&,
-                                      const Rml::VariantList& a) { onSelectPlot(intArg(a, 0)); });
-    ctor.BindEventCallback("select_resource", [this, intArg](Rml::DataModelHandle, Rml::Event&,
-                                                             const Rml::VariantList& a) {
-        onSelectResource(intArg(a, 0));
+    using Args = const Rml::VariantList&;
+    ctor.BindEventCallback("set_tab", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onSetTab(intArg(a, 0));
+    });
+    ctor.BindEventCallback("set_speed", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onSetSpeed(intArg(a, 0));
+    });
+    ctor.BindEventCallback("step", [this](Rml::DataModelHandle, Rml::Event&, Args) { onStep(); });
+    ctor.BindEventCallback("select_plot", [this, intArg](Rml::DataModelHandle, Rml::Event&,
+                                                         Args a) { onSelectPlot(intArg(a, 0)); });
+    ctor.BindEventCallback("select_resource",
+                           [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+                               onSelectResource(intArg(a, 0));
+                           });
+    ctor.BindEventCallback("need_action",
+                           [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+                               onNeedAction(intArg(a, 0), intArg(a, 1));
+                           });
+    ctor.BindEventCallback("toggle_pause_menu", [this](Rml::DataModelHandle, Rml::Event&, Args) {
+        model_.show_pause_menu = !model_.show_pause_menu;
+        handle_.DirtyVariable("show_pause_menu");
+    });
+    ctor.BindEventCallback("toggle_pause", [this, intArg](Rml::DataModelHandle, Rml::Event&,
+                                                          Args a) { onTogglePause(intArg(a, 0)); });
+    ctor.BindEventCallback("survey", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onSurvey(intArg(a, 0));
     });
     ctor.BindEventCallback(
-        "survey", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onSurvey(intArg(a, 0));
-        });
-    ctor.BindEventCallback(
-        "bid", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onBid(intArg(a, 0));
-        });
-    ctor.BindEventCallback(
-        "build", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onBuild(intArg(a, 0));
-        });
-    ctor.BindEventCallback(
-        "toggle_mine", [this, intArg](Rml::DataModelHandle, Rml::Event&,
-                                      const Rml::VariantList& a) { onToggleMine(intArg(a, 0)); });
-    ctor.BindEventCallback(
-        "sell", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onSell(intArg(a, 0), false);
-        });
-    ctor.BindEventCallback(
-        "sell_all", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onSell(intArg(a, 0), true);
-        });
-    ctor.BindEventCallback("take_loan", [this](Rml::DataModelHandle, Rml::Event&,
-                                               const Rml::VariantList&) { onTakeLoan(); });
-    ctor.BindEventCallback("apply_policy",
-                           [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
-                               onApplyPolicy(model_.policy_enabled);
-                           });
-    ctor.BindEventCallback("toggle_policy",
-                           [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
-                               onApplyPolicy(!model_.policy_enabled);
-                           });
-    ctor.BindEventCallback("toggle_cover_costs",
-                           [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
-                               onToggleCoverCosts();
-                           });
-    ctor.BindEventCallback(
-        "repay", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onRepay(intArg(a, 0));
-        });
-    ctor.BindEventCallback(
-        "research", [this, intArg](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
-            onResearch(intArg(a, 0));
-        });
-    ctor.BindEventCallback(
-        "save", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { onSave(); });
-    ctor.BindEventCallback(
-        "load", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { onLoad(); });
-    ctor.BindEventCallback("hide_intro",
-                           [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
-                               model_.show_intro = false;
-                               handle_.DirtyVariable("show_intro");
-                           });
-    ctor.BindEventCallback("new_game", [this](Rml::DataModelHandle, Rml::Event&,
-                                              const Rml::VariantList&) { onNewGame(); });
+        "bid", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) { onBid(intArg(a, 0)); });
+    ctor.BindEventCallback("build", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onBuild(intArg(a, 0));
+    });
+    ctor.BindEventCallback("toggle_mine", [this, intArg](Rml::DataModelHandle, Rml::Event&,
+                                                         Args a) { onToggleMine(intArg(a, 0)); });
+    ctor.BindEventCallback("sell", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onSell(intArg(a, 0), false);
+    });
+    ctor.BindEventCallback("sell_all", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onSell(intArg(a, 0), true);
+    });
+    ctor.BindEventCallback("take_loan",
+                           [this](Rml::DataModelHandle, Rml::Event&, Args) { onTakeLoan(); });
+    ctor.BindEventCallback("apply_policy", [this](Rml::DataModelHandle, Rml::Event&, Args) {
+        onApplyPolicy(model_.policy_enabled);
+    });
+    ctor.BindEventCallback("toggle_policy", [this](Rml::DataModelHandle, Rml::Event&, Args) {
+        onApplyPolicy(!model_.policy_enabled);
+    });
+    ctor.BindEventCallback("toggle_cover_costs", [this](Rml::DataModelHandle, Rml::Event&, Args) {
+        onToggleCoverCosts();
+    });
+    ctor.BindEventCallback("repay", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onRepay(intArg(a, 0));
+    });
+    ctor.BindEventCallback("research", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onResearch(intArg(a, 0));
+    });
+    ctor.BindEventCallback("save", [this](Rml::DataModelHandle, Rml::Event&, Args) { onSave(); });
+    ctor.BindEventCallback("load", [this](Rml::DataModelHandle, Rml::Event&, Args) { onLoad(); });
+    ctor.BindEventCallback("new_game",
+                           [this](Rml::DataModelHandle, Rml::Event&, Args) { onNewGame(); });
     handle_ = ctor.GetModelHandle();
     refresh();
 }
@@ -429,6 +554,7 @@ bool App::loadDocument() {
         return false;
     }
     document_->Show();
+    applyDeck(model_.deck);
     return true;
 }
 
@@ -443,6 +569,7 @@ void App::refresh() {
         if (log[i].notice.kind == sim::NoticeKind::CommandRejected) {
             traceUi("status", log[i].text);
             model_.status_line = log[i].text;
+            model_.status_danger = true;
             statusAge_ = 0.0;
         }
     }
@@ -455,23 +582,76 @@ void App::refresh() {
     lastRefreshedDay_ = session_->day();
 }
 
-void App::setStatus(std::string text) {
+void App::setStatus(std::string text, bool danger) {
     traceUi("status", text);
     model_.status_line = std::move(text);
+    model_.status_danger = danger;
     statusAge_ = 0.0;
     if (handle_) {
         handle_.DirtyVariable("status_line");
+        handle_.DirtyVariable("status_danger");
     }
+}
+
+void App::applyDeck(bool on) {
+    model_.deck = on;
+    if (document_ != nullptr) {
+        document_->SetClass("deck", on);
+    }
+    if (handle_) {
+        handle_.DirtyVariable("deck");
+    }
+}
+
+void App::forceDeck(bool on) {
+    deckForced_ = on;
+    applyDeck(on || static_cast<float>(context_->GetDimensions().x) < kDeckWidth);
+}
+
+void App::setTab(int tab) {
+    onSetTab(tab);
+}
+
+void App::startGame(std::uint64_t seed) {
+    newGame(seed);
+    refresh();
+}
+
+void App::selectPlot(int index) {
+    onSelectPlot(index);
+}
+
+void App::showPauseMenu(bool on) {
+    model_.show_pause_menu = on;
+    if (handle_) {
+        handle_.DirtyVariable("show_pause_menu");
+    }
+}
+
+void App::refreshNow() {
+    refresh();
 }
 
 void App::update(double seconds) {
     const int ticked = session_->advance(seconds);
     statusAge_ += seconds;
+    if (const std::optional<sim::Notice> why = session_->takePausedBy()) {
+        // The clock stopped for this: say so and keep it on screen longer.
+        const std::string line = describeNotice(*content_, session_->view(), *why);
+        setStatus(text(*content_, "status.paused_by", {{"text", line}}), noticeIsDanger(why->kind));
+        statusAge_ = -kStatusSeconds;
+    }
     if (statusAge_ > kStatusSeconds && !model_.status_line.empty()) {
         model_.status_line.clear();
+        model_.status_danger = false;
         if (handle_) {
             handle_.DirtyVariable("status_line");
+            handle_.DirtyVariable("status_danger");
         }
+    }
+    const bool deck = deckForced_ || static_cast<float>(context_->GetDimensions().x) < kDeckWidth;
+    if (deck != model_.deck) {
+        applyDeck(deck);
     }
     if (ticked > 0 || session_->day() != lastRefreshedDay_) {
         refresh();
@@ -515,7 +695,11 @@ void App::onSetTab(int tab) {
         traceUi("tab", kTabNames.at(static_cast<std::size_t>(tab)));
     }
     model_.tab = tab;
-    handle_.DirtyVariable("tab");
+    model_.show_pause_menu = false;
+    if (handle_) {
+        handle_.DirtyVariable("tab");
+        handle_.DirtyVariable("show_pause_menu");
+    }
 }
 
 void App::onSetSpeed(int speed) {
@@ -553,6 +737,39 @@ void App::onSelectResource(int index) {
     refresh();
 }
 
+void App::onNeedAction(int action, int target) {
+    switch (action) {
+        case 1:  // open the plot
+            onSetTab(1);
+            onSelectPlot(target);
+            return;
+        case 2:  // mothball the idle mine
+            onToggleMine(target);
+            return;
+        case 3:  // sell: the Market tab
+            onSetTab(2);
+            return;
+        case 4:  // the Finance tab
+            onSetTab(4);
+            return;
+        default:
+            return;
+    }
+}
+
+void App::onTogglePause(int index) {
+    if (index < 0 || index >= static_cast<int>(kPauseOnCount)) {
+        return;
+    }
+    const auto reason = static_cast<PauseOn>(index);
+    pauseRules_.set(reason, !pauseRules_.isEnabled(reason));
+    session_->setAutoPause(pauseRules_);
+    savePauseRules();
+    traceUi("pause_on",
+            std::string(pauseOnKey(reason)) + (pauseRules_.isEnabled(reason) ? "=1" : "=0"));
+    refresh();
+}
+
 void App::syncPolicyInputs() {
     const sim::CompanyView& view = session_->view();
     const int index = model_.selected_resource;
@@ -572,11 +789,11 @@ void App::onApplyPolicy(bool enabled) {
     std::int64_t reserve = 0;
     sim::Money floor;
     if (!game::parseTonnes(model_.policy_reserve_input, reserve)) {
-        setStatus(text(*content_, "status.reserve_prompt"));
+        setStatus(text(*content_, "status.reserve_prompt"), true);
         return;
     }
     if (!game::parseMoney(model_.policy_floor_input, floor)) {
-        setStatus(text(*content_, "status.floor_prompt"));
+        setStatus(text(*content_, "status.floor_prompt"), true);
         return;
     }
     sim::SetSellPolicy command;
@@ -607,7 +824,7 @@ void App::onSurvey(int plotIndex) {
 void App::onBid(int plotIndex) {
     sim::Money amount;
     if (!game::parseMoney(model_.bid_input, amount)) {
-        setStatus(text(*content_, "status.bid_prompt"));
+        setStatus(text(*content_, "status.bid_prompt"), true);
         return;
     }
     session_->submit(sim::BidOnPlot{Session::kPlayer,
@@ -641,7 +858,7 @@ void App::onSell(int resourceIndex, bool all) {
     }
     std::int64_t tonnes = session_->view().inventoryTonnes[static_cast<std::size_t>(resourceIndex)];
     if (!all && !game::parseTonnes(model_.sell_input, tonnes)) {
-        setStatus(text(*content_, "status.sell_prompt"));
+        setStatus(text(*content_, "status.sell_prompt"), true);
         return;
     }
     // The sim decides whether the quantity is valid; its reason shows in the log.
@@ -653,7 +870,7 @@ void App::onSell(int resourceIndex, bool all) {
 void App::onTakeLoan() {
     sim::Money amount;
     if (!game::parseMoney(model_.loan_input, amount)) {
-        setStatus(text(*content_, "status.loan_prompt"));
+        setStatus(text(*content_, "status.loan_prompt"), true);
         return;
     }
     session_->submit(sim::TakeLoan{Session::kPlayer, amount});
@@ -663,7 +880,7 @@ void App::onTakeLoan() {
 void App::onRepay(int loanIndex) {
     sim::Money amount;
     if (!game::parseMoney(model_.repay_input, amount)) {
-        setStatus(text(*content_, "status.repay_prompt"));
+        setStatus(text(*content_, "status.repay_prompt"), true);
         return;
     }
     session_->submit(sim::RepayLoan{Session::kPlayer,
@@ -682,7 +899,7 @@ void App::onSave() {
     const std::filesystem::path temp = path.string() + ".tmp";
     const std::vector<std::uint8_t> bytes = session_->save();
     if (!writeFile(temp, bytes)) {
-        setStatus(text(*content_, "status.save_write_failed", {{"name", temp.string()}}));
+        setStatus(text(*content_, "status.save_write_failed", {{"name", temp.string()}}), true);
         return;
     }
     // Replace the previous save only once the new one is fully on disk.
@@ -690,7 +907,8 @@ void App::onSave() {
     std::filesystem::rename(temp, path, error);
     if (error) {
         setStatus(text(*content_, "status.save_replace_failed",
-                       {{"name", path.string()}, {"reason", error.message()}}));
+                       {{"name", path.string()}, {"reason", error.message()}}),
+                  true);
         return;
     }
     setStatus(text(*content_, "status.saved", {{"name", path.string()}}));
@@ -703,13 +921,13 @@ void App::onLoad() {
     const std::filesystem::path path = services_->saveDirectory() / kSaveFile;
     std::ifstream file(path, std::ios::binary);
     if (!file) {
-        setStatus(text(*content_, "status.no_save", {{"name", path.string()}}));
+        setStatus(text(*content_, "status.no_save", {{"name", path.string()}}), true);
         return;
     }
     const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)),
                                           std::istreambuf_iterator<char>());
     if (!session_->load(bytes)) {
-        setStatus(text(*content_, "status.save_invalid"));
+        setStatus(text(*content_, "status.save_invalid"), true);
         return;
     }
     model_.selected_plot = -1;
@@ -718,7 +936,7 @@ void App::onLoad() {
         const std::string copy = keepSaveCopy("load", bytes);
         trace_->loaded(session_->day(), copy, session_->stateHash());
         if (copy.empty()) {
-            setStatus(text(*content_, "status.loaded_copy_failed"));
+            setStatus(text(*content_, "status.loaded_copy_failed"), true);
             refresh();
             return;
         }

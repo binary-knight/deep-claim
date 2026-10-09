@@ -14,8 +14,11 @@
 #include "sim/types.h"
 #include "sim/view.h"
 
+#include "game/auto_pause.h"
+
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -45,10 +48,18 @@ public:
     [[nodiscard]] Speed speed() const { return speed_; }
     void togglePause();
     // Advances real time; ticks whole in-game days as they accrue. Returns
-    // how many days were ticked. Stops ticking once the player is bankrupt.
+    // how many days were ticked. Stops ticking once the player is bankrupt,
+    // and pauses the moment a notice in the auto-pause rule set reaches the
+    // player (that notice is then available from takePausedBy).
     int advance(double seconds);
     // One day forward regardless of speed (used by a "step" button).
     void stepOneDay();
+
+    // ---- auto-pause ----
+    [[nodiscard]] const AutoPause& autoPause() const { return autoPause_; }
+    void setAutoPause(const AutoPause& rules) { autoPause_ = rules; }
+    // The notice that last stopped the clock, handed over once.
+    [[nodiscard]] std::optional<sim::Notice> takePausedBy();
 
     // ---- player ----
     void submit(sim::Command command);  // always bound to the player
@@ -60,6 +71,10 @@ public:
     [[nodiscard]] const std::vector<sim::Money>& priceHistory(sim::ResourceId resource) const {
         return simulation_.priceHistory(resource);
     }
+    // The player's cash at the end of each day of this session, oldest
+    // first, for the header sparkline. Session memory, not sim state: a
+    // load starts it again from the loaded day's cash.
+    [[nodiscard]] const std::vector<sim::Money>& cashHistory() const { return cashHistory_; }
 
     // ---- persistence ----
     [[nodiscard]] std::vector<std::uint8_t> save() const { return simulation_.save(); }
@@ -78,6 +93,8 @@ public:
 
 private:
     void tickOnce();
+    // Pauses the clock when the last tick raised a pausing notice.
+    bool stopIfPaused();
     void refreshView();
     void appendLog(sim::Day day, const sim::Notice& notice);
 
@@ -89,6 +106,9 @@ private:
     Speed speed_ = Speed::Paused;
     double accumulator_ = 0.0;  // real seconds not yet turned into days
     TraceWriter* trace_ = nullptr;
+    AutoPause autoPause_ = AutoPause::defaults();
+    std::optional<sim::Notice> pausedBy_;
+    std::vector<sim::Money> cashHistory_;
 };
 
 }  // namespace game

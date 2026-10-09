@@ -90,6 +90,15 @@ void addOwnMines(const Content& content, const WorldState& state, CompanyId view
         mineView.extractedTonnes = mine.extractedTonnes;
         mineView.lastDayTonnes = mine.lastDayTonnes;
         mineView.lastOutputTonnes = mine.lastOutputTonnes;
+        mineView.bestEstimateTonnes.assign(content.resources.size(), 0);
+        mineView.estimatedRemainingTonnes.assign(content.resources.size(), -1);
+        if (const Survey* survey = latestOwnSurvey(state, mine)) {
+            for (const SurveyEstimate& estimate : survey->estimates) {
+                mineView.bestEstimateTonnes[estimate.resource.index()] = estimate.tonnesEstimate;
+                mineView.estimatedRemainingTonnes[estimate.resource.index()] =
+                    estimatedRemainingTonnes(state, mine, *survey, estimate);
+            }
+        }
         mineView.dailyOpex = mineDailyOpex(content, state, self, mine.state);
         view.mines.push_back(mineView);
     }

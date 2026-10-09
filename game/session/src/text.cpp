@@ -152,7 +152,8 @@ std::string describeNotice(const sim::Content& content, const sim::CompanyView& 
                  {"event", eventName(content, n.event)},
                  {"amount", formatMoney(n.amount)},
                  {"tonnes", formatTonnes(n.tonnes)},
-                 {"months", std::to_string(n.tonnes)}});
+                 {"months", std::to_string(n.tonnes)},
+                 {"days", std::to_string(n.tonnes)}});
 }
 
 }  // namespace game

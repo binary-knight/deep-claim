@@ -36,6 +36,7 @@ int daysPerSecond(Speed speed) {
 Session::Session(const sim::Content& content, sim::Seed seed, const sim::GameSetup& setup)
     : content_(&content), simulation_(content, seed, setup), ai_(content) {
     refreshView();
+    cashHistory_.push_back(view_.cash);
     for (const sim::Notice& notice : simulation_.reportFor(kPlayer)) {
         appendLog(0, notice);
     }
@@ -65,6 +66,9 @@ int Session::advance(double seconds) {
         tickOnce();
         accumulator_ -= 1.0;
         ++ticked;
+        if (stopIfPaused()) {
+            break;
+        }
     }
     if (ticked == rate * 2) {
         accumulator_ = 0.0;
@@ -75,7 +79,24 @@ int Session::advance(double seconds) {
 void Session::stepOneDay() {
     if (!gameOver()) {
         tickOnce();
+        stopIfPaused();
     }
+}
+
+bool Session::stopIfPaused() {
+    if (!pausedBy_.has_value()) {
+        return false;
+    }
+    // Something the player wants to see: stop here, on this day.
+    setSpeed(Speed::Paused);
+    accumulator_ = 0.0;
+    return true;
+}
+
+std::optional<sim::Notice> Session::takePausedBy() {
+    std::optional<sim::Notice> notice;
+    notice.swap(pausedBy_);
+    return notice;
 }
 
 void Session::submit(sim::Command command) {
@@ -91,6 +112,8 @@ bool Session::load(std::span<const std::uint8_t> bytes) {
         return false;
     }
     refreshView();
+    cashHistory_.assign(1, view_.cash);
+    pausedBy_.reset();
     log_.clear();
     sim::Notice marker;
     marker.kind = sim::NoticeKind::EventEnded;  // placeholder kind; text is what matters
@@ -114,11 +137,15 @@ void Session::tickOnce() {
     const sim::Day processed = view_.day;
     simulation_.tick();
     refreshView();
+    cashHistory_.push_back(view_.cash);
     if (trace_ != nullptr) {
         trace_->dayTicked(view_.day, simulation_.stateHash());
     }
     for (const sim::Notice& notice : simulation_.reportFor(kPlayer)) {
         appendLog(processed, notice);
+        if (!pausedBy_.has_value() && autoPause_.shouldPause(notice, kPlayer)) {
+            pausedBy_ = notice;
+        }
     }
     if (trace_ != nullptr && view_.day % sim::kDaysPerMonth == 0) {
         trace_->state(*content_, view_);

@@ -130,6 +130,12 @@ const char* noticeKindName(NoticeKind kind) {
             return "cover_costs_sale";
         case NoticeKind::AutoSaleSummary:
             return "auto_sale_summary";
+        case NoticeKind::IdleMineWarning:
+            return "idle_mine_warning";
+        case NoticeKind::MineFoundNothing:
+            return "mine_found_nothing";
+        case NoticeKind::MineRunningLow:
+            return "mine_running_low";
     }
     return "unknown";
 }
@@ -162,6 +168,9 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::ResearchComplete:
         case NoticeKind::CoverCostsSale:
         case NoticeKind::AutoSaleSummary:
+        case NoticeKind::IdleMineWarning:
+        case NoticeKind::MineFoundNothing:
+        case NoticeKind::MineRunningLow:
             return false;
     }
     return false;

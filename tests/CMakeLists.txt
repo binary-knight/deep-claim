@@ -1,6 +1,6 @@
 find_package(Catch2 3 CONFIG REQUIRED)
 
-add_executable(sim_tests ai_test.cpp archive_test.cpp content_test.cpp data_files_test.cpp
+add_executable(sim_tests ai_test.cpp archive_test.cpp content_test.cpp data_files_test.cpp design_tokens_test.cpp
                          determinism_test.cpp events_test.cpp finance_test.cpp fixed_test.cpp
                          ids_test.cpp markets_test.cpp math_test.cpp mines_test.cpp money_test.cpp
                          plot_market_test.cpp random_test.cpp research_test.cpp rng_test.cpp

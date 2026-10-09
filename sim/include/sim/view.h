@@ -104,6 +104,13 @@ struct MineView {
     std::vector<std::int64_t> extractedTonnes;   // indexed by ResourceId
     std::vector<std::int64_t> lastDayTonnes;     // output on the last processed day
     std::vector<std::int64_t> lastOutputTonnes;  // output on the most recent operating day
+    // The owner's most recent completed survey estimate per resource for this
+    // plot, zero where never surveyed; the interface shows remaining tonnes
+    // and days from it. Indexed by ResourceId.
+    std::vector<std::int64_t> bestEstimateTonnes;
+    // What that survey implies is left today (sim::estimatedRemainingTonnes),
+    // -1 for a resource the survey did not report or with no survey at all.
+    std::vector<std::int64_t> estimatedRemainingTonnes;
     Money dailyOpex;
 };
 
