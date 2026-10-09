@@ -1,6 +1,6 @@
 # 003: Client restyle (Control Room) with the playtest fixes
 
-Status: draft, awaiting approval.
+Status: approved 2026-10-09.
 
 ## Goal
 The client looks and behaves like the locked design (`docs/design/ui-design.md`,
