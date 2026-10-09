@@ -1,0 +1,1072 @@
+<title>Deep Claim Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout concept: a dark workshop floor; fixed-size game frames sit on it like
+   lit benches; a floating deck switches direction, screen and frame. */
+:root {
+  --bench: #0b0d11;
+  --bench-2: #15181f;
+  --bench-line: #2a2f3a;
+  --bench-fg: #e8ebf0;
+  --bench-fg-2: #a9b1be;
+  --bench-accent: #4f8fdc;
+  --bench-font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --bench-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bench: #0b0d11; --bench-2: #15181f; --bench-line: #2a2f3a;
+    --bench-fg: #e8ebf0; --bench-fg-2: #a9b1be; --bench-accent: #4f8fdc;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="light"] {
+  --bench: #0b0d11; --bench-2: #15181f; --bench-line: #2a2f3a;
+  --bench-fg: #e8ebf0; --bench-fg-2: #a9b1be; --bench-accent: #4f8fdc;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bench); color: var(--bench-fg);
+  font: 14px/1.45 var(--bench-font); padding-block: 0 24px; padding-inline: 16px;
+  min-height: 100%;
+}
+button, input { font: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--bench-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---------- bench chrome ---------- */
+.bench-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 24px;
+  padding: 16px 0 12px; border-bottom: 1px solid var(--bench-line); margin-bottom: 16px;
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--bench);
+}
+.window .viewport { max-height: calc(100dvh - 140px); overflow: auto; }
+.bench-head h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.bench-head .sub { color: var(--bench-fg-2); font-size: 14px; }
+.bench-head .kbd { font-family: var(--bench-mono); font-size: 12px; color: var(--bench-fg-2); border: 1px solid var(--bench-line); border-radius: 4px; padding: 1px 6px; }
+.stage { display: block; overflow-x: auto; padding-bottom: 8px; }
+.window {
+  background: var(--bench-2); border: 1px solid var(--bench-line); border-radius: 8px;
+  overflow: hidden; width: max-content; margin: 0 auto; position: relative;
+}
+[hidden] { display: none !important; }
+.window .titlebar {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--bench-line); color: var(--bench-fg-2); font-size: 13px;
+}
+.window .titlebar .dots { display: inline-flex; gap: 6px; }
+.window .titlebar .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--bench-line); display: inline-block; }
+.window .titlebar .name { color: var(--bench-fg); font-weight: 500; }
+.window .titlebar .meta { margin-left: auto; font-family: var(--bench-mono); font-size: 12px; }
+.frame { position: relative; overflow: hidden; }
+.frame.desktop { width: 1366px; height: 820px; }
+.frame.deck { width: 1280px; height: 800px; }
+.triptych { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; width: 100%; }
+.tri-cell { width: 615px; }
+.tri-cell .scaler { width: 615px; height: 369px; overflow: hidden; border: 1px solid var(--bench-line); border-radius: 6px; background: var(--bench-2); }
+.tri-cell .scaler .frame { transform: scale(0.45); transform-origin: 0 0; }
+.tri-cell .scaler .frame.deck { margin: 0 auto; }
+.tri-cell .caption { padding: 10px 2px 0; font-size: 14px; }
+.tri-cell .caption b { font-weight: 600; }
+.tri-cell .caption span { color: var(--bench-fg-2); }
+.note { max-width: 1366px; margin: 12px auto 0; color: var(--bench-fg-2); font-size: 14px; }
+
+/* legibility ruler overlay for the Deck frame */
+.ruler {
+  position: absolute; right: 16px; bottom: 16px; z-index: 5; width: 300px;
+  background: #0b0d11; color: #e8ebf0; border: 1px solid #4f8fdc; border-radius: 6px;
+  padding: 12px 14px; font-family: var(--bench-font);
+}
+.ruler h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #a9b1be; }
+.ruler .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 4px 0; border-top: 1px solid #2a2f3a; }
+.ruler .row:first-of-type { border-top: 0; }
+.ruler .px { font-family: var(--bench-mono); font-size: 12px; color: #a9b1be; }
+.ruler .fail { color: #ff8a8a; }
+.ruler .pass { color: #8fd49a; }
+.ruler .bar { height: 40px; border: 1px dashed #4f8fdc; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #a9b1be; margin-top: 8px; }
+
+/* ---------- atelier deck ---------- */
+.deck {
+  position: fixed; right: 16px; top: 16px; z-index: 1000; width: 420px; pointer-events: auto;
+  background: var(--bench-2); color: var(--bench-fg); border: 1px solid var(--bench-line);
+  border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); font-size: 13px;
+}
+.deck[hidden] { display: none; }
+.deck .dh {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: grab;
+  border-bottom: 1px solid var(--bench-line); user-select: none;
+}
+.deck .dh:active { cursor: grabbing; }
+.deck .dh .grip { color: var(--bench-fg-2); font-family: var(--bench-mono); letter-spacing: -1px; }
+.deck .dh b { font-weight: 600; letter-spacing: 0.02em; }
+.deck .dh .sp { margin-left: auto; display: flex; gap: 6px; }
+.deck .dh button { background: transparent; color: var(--bench-fg-2); border: 1px solid var(--bench-line); border-radius: 4px; padding: 2px 8px; font-size: 12px; min-height: 24px; }
+.deck .dh .dirs { display: inline-flex; gap: 4px; margin-left: 6px; }
+.deck .dh .dirs button { color: var(--bench-fg); min-width: 28px; justify-content: center; }
+.deck .dh .dirs button.on { background: var(--bench-accent); border-color: var(--bench-accent); color: #fff; }
+.deck.collapsed .db { display: none; }
+.deck .db { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.deck .grp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.deck .grp .lbl { width: 72px; color: var(--bench-fg-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.deck .grp button, .deck .tog {
+  background: #1c2029; color: var(--bench-fg); border: 1px solid var(--bench-line); border-radius: 4px;
+  padding: 6px 10px; min-height: 32px; font-size: 13px;
+}
+.deck .grp button:hover { border-color: var(--bench-fg-2); }
+.deck .grp button.on { background: var(--bench-accent); border-color: var(--bench-accent); color: #fff; }
+.deck .tog.on { border-color: var(--bench-accent); color: var(--bench-accent); }
+.deck .legend { border-top: 1px solid var(--bench-line); padding-top: 8px; color: var(--bench-fg-2); font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.deck .legend b { color: var(--bench-fg); font-weight: 600; }
+.deck .toast { color: #8fd49a; font-size: 12px; min-height: 16px; }
+.deck .tokens pre { margin: 0; max-height: 320px; overflow: auto; font: 11px/1.5 var(--bench-mono); color: var(--bench-fg); background: #0b0d11; border: 1px solid var(--bench-line); border-radius: 4px; padding: 8px 10px; white-space: pre; }
+.deck-launcher {
+  position: fixed; right: 16px; top: 16px; z-index: 999; background: var(--bench-2); color: var(--bench-fg);
+  border: 1px solid var(--bench-line); border-radius: 6px; padding: 8px 12px; min-height: 36px;
+}
+
+/* =========================================================
+   THE GAME. One structure, three directions, one inverse scheme.
+   Each direction defines its tokens on .game.dir-x; components use tokens only.
+   ========================================================= */
+.game {
+  width: 100%; height: 100%; display: flex; flex-direction: column;
+  background: var(--canvas); color: var(--text);
+  font-family: var(--font-ui); font-size: var(--fs); line-height: var(--lh-14);
+  position: relative; overflow: hidden;
+}
+.game .sub, .game .subline, .game .stat .label, .game .needs .n, .game .log .d, .game th, .game .pill, .game .chip { line-height: var(--lh-12); }
+.game .statusbar, .game .strip, .game .btn.sm, .game .field label, .game .rivalline, .game .needs .t .sub { line-height: var(--lh-13); }
+.game .num, .game .figure, .game td.n, .game .val { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.game .muted { color: var(--muted); }
+.game .warn { color: var(--warn); }
+.game .danger { color: var(--danger); }
+.game .good { color: var(--good); }
+
+/* Direction A "Drill Core" was retired after Sprint 1 (operator: too generic). Tokens kept for the record:
+ ---- Direction A: Drill Core (clarity-first) ---- 
+.game.dir-a {
+  --canvas: #0e1218; --panel: #151a22; --panel-2: #1b212b; --line: #273040; --line-2: #33405a;
+  --text: #f2f4f7; --text-2: #c3cad6; --muted: #8b95a6;
+  --accent: #3a7bd5; --accent-hover: #4b8be6; --accent-text: #ffffff; --select: #1a2c45;
+  --warn: #d9a441; --danger: #ef6b6b; --good: #6fcf8a;
+  --font-ui: "Inter", system-ui, sans-serif; --font-num: "JetBrains Mono", ui-monospace, monospace; --font-display: "Inter", system-ui, sans-serif;
+  --fs: 14px; --radius: 4px; --pad: 16px; --gap: 16px; --row: 40px;
+}
+*/
+/* Direction B "Field Office" was retired after Sprint 1 round 2 (C won the plate). Tokens kept for the record:
+ ---- Direction B: Field Office (atmosphere-first) ---- 
+.game.dir-b {
+  --canvas: #0f1420; --panel: #161c2a; --panel-2: #1c2434; --line: #2b3448; --line-2: #3a4660;
+  --text: #f5f1e8; --text-2: #cfc9bd; --muted: #948f85;
+  --accent: #4d8fd6; --accent-hover: #5e9fe3; --accent-text: #ffffff; --select: #3b2e14;
+  --stake: #d9a441; --stake-text: #1a1408;
+  --warn: #d9a441; --danger: #ef6b6b; --good: #7fcf8a;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif; --font-num: "IBM Plex Mono", ui-monospace, monospace; --font-display: "Barlow Condensed", "IBM Plex Sans", sans-serif;
+  --fs: 14px; --radius: 2px; --pad: 16px; --gap: 16px; --row: 40px;
+}
+*/
+/* ---- Direction C: Control Room (speed-first) ---- */
+.game.dir-c {
+  /* colour */
+  --canvas: #0a0f17; --panel: #111826; --panel-2: #172031; --line: #243249; --line-2: #2f4160;
+  --text: #ffffff; --text-2: #c9d4e6; --muted: #8fa0ba; --text-3: #8fa0ba;
+  --accent: #2f8cff; --accent-hover: #4a9cff; --accent-text: #ffffff; --select: #163058;
+  --warn: #f0b340; --danger: #ff6e6e; --good: #5fd98a;
+  /* type */
+  --font-ui: "Barlow", system-ui, sans-serif; --font-num: "JetBrains Mono", ui-monospace, monospace; --font-display: "Barlow Condensed", "Barlow", sans-serif;
+  --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-16: 16px; --fs-17: 17px; --fs-20: 20px;
+  --lh-12: 16px; --lh-13: 18px; --lh-14: 20px; --lh-16: 22px; --lh-17: 22px; --lh-20: 24px;
+  --fs: var(--fs-14);
+  /* space, radius, control heights */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
+  --radius: 2px; --pad: 16px; --gap: 12px; --row: 36px; --control: 36px;
+}
+.frame.deck .game { --control: 40px; }
+/* Direction D "Core Shack" was retired after Sprint 1 round 2; its title blocks were imported into C. Tokens kept for the record:
+ ---- Direction D: Core Shack (B's world with more mass, less decoration) ---- 
+.game.dir-d {
+  --canvas: #0f1420; --panel: #161c2a; --panel-2: #1c2434; --line: #2b3448; --line-2: #4a5670;
+  --text: #f7f3ea; --text-2: #d6d0c4; --muted: #9a958b;
+  --accent: #4d8fd6; --accent-hover: #5e9fe3; --accent-text: #ffffff; --select: #3b2e14;
+  --stake: #d9a441; --stake-text: #1a1408;
+  --warn: #e8dcc0; --danger: #ef6b6b; --good: #f7f3ea;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif; --font-num: "IBM Plex Mono", ui-monospace, monospace; --font-display: "Barlow Condensed", "IBM Plex Sans", sans-serif;
+  --fs: 14px; --radius: 0px; --pad: 20px; --gap: 24px; --row: 40px;
+}
+.game.dir-d .sheet, .game.dir-d .card {
+  border: 1px solid var(--line-2); border-radius: 0;
+  box-shadow: inset 0 0 0 2px var(--panel), inset 0 0 0 3px var(--line);
+  padding: calc(var(--pad) + 3px);
+}
+.game.dir-d h2 {
+  font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  border-bottom: 2px solid var(--line-2); padding-bottom: 6px; margin-bottom: 4px; display: flex; align-items: baseline; gap: 10px;
+}
+.game.dir-d .stat .label, .game.dir-d .kv .k, .game.dir-d th, .game.dir-d .field label, .game.dir-d .statusbar .lbl, .game.dir-d .log .d, .game.dir-d .strip .k {
+  font-variant: small-caps; letter-spacing: 0.08em; text-transform: lowercase;
+}
+
+ sheet strip shared by B and D: hairline above and below, no chips, mono figures 
+
+*/
+/* ---- Inverse (daylight) check: same structure, light values ---- */
+.game.hc {
+  --canvas: #f3f5f8; --panel: #ffffff; --panel-2: #eef1f5; --line: #cfd6e0; --line-2: #b7c1cf;
+  --text: #121820; --text-2: #2f3a4a; --muted: #4f5c6d; --text-3: #4f5c6d;
+  --accent: #1f5fb8; --accent-hover: #2a6fcc; --accent-text: #ffffff; --select: #dbe7f8;
+  --stake: #a56f0d; --stake-text: #ffffff;
+  --warn: #8a5a00; --danger: #b42626; --good: #1b6f35;
+  background-image: none;
+}
+
+/* ---- header ---- */
+.game .hdr {
+  display: flex; align-items: center; flex-wrap: nowrap; gap: 16px; padding: 8px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--line); min-height: 60px; flex: 0 0 auto;
+}
+.game .stat { display: flex; flex-direction: column; min-width: 0; }
+.game .stat .label { font-size: 12px; color: var(--muted); letter-spacing: 0.02em; }
+.game .stat .value { font-size: 17px; font-weight: 600; line-height: var(--lh-17); white-space: nowrap; }
+.game .stat.company { flex: 0 1 auto; min-width: 0; }
+.game .stat.company .value { font-family: var(--font-display); font-size: 19px; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.game .hdr .spacer { flex: 1 1 0; min-width: 8px; }
+.game .btn .short { display: none; }
+.frame.deck .game .btn { padding: 0 10px; }
+.frame.deck .game .sub, .frame.deck .game .subline, .frame.deck .game .stat .label, .frame.deck .game th, .frame.deck .game .chip, .frame.deck .game .pill, .frame.deck .game .log .d, .frame.deck .game .statusbar, .frame.deck .game .strip, .frame.deck .game .needs .n, .frame.deck .game .needs .t .sub, .frame.deck .game .finrow .stat .sub, .frame.deck .game .notice, .frame.deck .game .field label, .frame.deck .game .rivalline { font-size: 14px; line-height: var(--lh-14); }
+.frame.deck .game .chip, .frame.deck .game .pill { height: 24px; }
+.frame.deck .game .nav .hint { font-size: 14px; line-height: var(--lh-14); }
+.frame.deck .game .btn .long { display: none; }
+.frame.deck .game .btn .short { display: inline; }
+.frame.deck .game .stat.company .value { max-width: 190px; }
+.frame.deck .game .hdr { gap: 12px; }
+.game.dir-c .hdr { min-height: 52px; padding: 6px var(--pad); }
+.game .speed { display: flex; gap: 4px; }
+.game .btn {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: var(--radius);
+  padding: 0 12px; height: var(--control); font-size: 14px; line-height: var(--lh-14); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.game .btn:hover { border-color: var(--text-2); }
+.game .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.game .btn.primary:hover { background: var(--accent-hover); }
+.game .btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.game .btn.sm { padding: 0 10px; font-size: 14px; }
+.game .btn.disabled { opacity: 0.55; cursor: default; }
+.game .hdr .sys { display: flex; gap: 4px; }
+
+/* ---- status strip (C only) ---- */
+.game .strip {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; padding: 4px 16px; min-height: 32px;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--text-2); flex: 0 0 auto;
+}
+.game .strip > span { white-space: nowrap; }
+.game .strip .brk { display: none; }
+.frame.deck .game .strip .brk { display: block; flex-basis: 100%; height: 0; }
+.game .strip .k { color: var(--muted); margin-right: 6px; }
+.game .chip {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 20px; padding: 0 8px; border-radius: var(--radius); font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  border: 1px solid currentColor; white-space: nowrap;
+}
+.game .chip.accent { color: var(--accent); }
+.game .chip.good { color: var(--good); }
+.game .chip.warn { color: var(--warn); }
+.game .chip.danger { color: var(--danger); }
+.game .chip.muted { color: var(--muted); }
+
+/* ---- body: nav + content ---- */
+.game .body { display: flex; flex: 1 1 auto; min-height: 0; }
+.game .nav { flex: 0 0 180px; padding: 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--line); background: var(--canvas); }
+.game .nav .tab {
+  display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 12px; border-radius: var(--radius);
+  color: var(--text-2); background: transparent; border: 1px solid transparent; font-weight: 500; text-align: left;
+}
+.game .nav .tab:hover { background: var(--panel); color: var(--text); }
+.game .nav .tab.on { background: var(--select); color: var(--text); border-color: var(--line-2); }
+.game .nav .hint { margin-top: auto; color: var(--muted); font-size: 12px; line-height: 1.5; }
+/* C: icon rail */
+.game.dir-c .nav { flex: 0 0 56px; padding: 8px 6px; gap: 2px; align-items: stretch; overflow: hidden; }
+.game.dir-c .nav:hover { flex-basis: 160px; }
+.game.dir-c .nav .tab { padding: 0 11px; justify-content: flex-start; gap: 12px; min-height: 44px; }
+.game.dir-c .nav .tab .tl { display: none; font-size: 14px; white-space: nowrap; }
+.game.dir-c .nav:hover .tab .tl { display: inline; }
+.game.dir-c .nav .tab.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.game.dir-c .nav .tab svg { width: 22px; height: 22px; flex: 0 0 22px; }
+.game.dir-c .nav .hint { display: none; }
+
+.game .content { flex: 1 1 auto; min-width: 0; padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+.game h1 { font-family: var(--font-display); font-size: 20px; font-weight: 600; margin: 0; line-height: var(--lh-20); }
+.game.dir-c h1 { font-size: 20px; letter-spacing: 0.02em; }
+.game h2 { font-size: 15px; font-weight: 600; margin: 0; color: var(--text); }
+.game.dir-c h2 {
+  font-family: var(--font-display); font-size: 17px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text);
+  border-bottom: 2px solid var(--line-2); padding-bottom: 5px; margin-bottom: 2px; display: flex; align-items: baseline; gap: 10px;
+}
+.game.dir-c h2 .idx { font-family: var(--font-num); font-size: 12px; color: var(--muted); letter-spacing: 0; font-weight: 400; }
+/* hierarchy variants */
+.game .needs { display: flex; flex-direction: column; }
+.game .needs .row { display: flex; align-items: center; gap: 16px; min-height: 44px; padding: 4px 0; border-top: 1px solid var(--line); }
+.game .needs .row:first-child { border-top: 0; }
+.game .needs .n { font-family: var(--font-num); color: var(--muted); font-size: 12px; width: 20px; }
+.game .needs .t { flex: 1 1 auto; min-width: 0; }
+.game .needs .t .sub { font-size: 12px; }
+.game .needs .days { font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); width: 92px; text-align: right; }
+.game .needs .act { width: 110px; text-align: right; }
+.game .finrow { display: flex; gap: 0; }
+.game .finrow .stat { flex: 1 1 0; padding: 0 16px; border-left: 1px solid var(--line); min-width: 0; }
+.game .finrow .stat:first-child { padding-left: 0; border-left: 0; }
+.game .finrow .stat .value { font-size: 17px; line-height: var(--lh-17); }
+.game .finrow .stat .sub { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.game .rivalline { font-size: 13px; color: var(--text-2); }
+.game .prices { display: flex; flex-direction: column; gap: 10px; }
+.game .prices .pr { display: flex; align-items: center; gap: 10px; }
+.game .prices .pr .nm { flex: 1 1 auto; min-width: 0; font-weight: 600; }
+.game .prices .pr .nm .sub { font-weight: 400; }
+.game .prices .pr .num { white-space: nowrap; text-align: right; }
+.game .sheet, .game .card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px;
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+}
+.game .cards { display: flex; gap: var(--gap); flex-wrap: wrap; }
+.game .cards .card { flex: 1 1 260px; }
+.game .kv { display: flex; justify-content: space-between; column-gap: 12px; row-gap: 2px; align-items: baseline; min-height: 20px; }
+.game .kv .k { color: var(--text-2); flex: 0 0 auto; min-width: 104px; }
+.game .kv .v { font-weight: 500; min-width: 0; text-align: right; flex: 1 1 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.game .kv .v .line { white-space: nowrap; }
+.game .kv .v .subline { font-size: 12px; color: var(--muted); font-weight: 400; white-space: nowrap; }
+.game .kv .v.wrapok .line { white-space: normal; text-align: right; }
+.game .kv.stack { flex-direction: column; align-items: flex-start; gap: 2px; }
+.game .kv.stack .v { text-align: left; }
+.game .kv.stack .k { white-space: nowrap; font-weight: 600; color: var(--text); min-width: 0; }
+.game .kv.stack .v { align-items: flex-start; }
+.game .kv.big .v { font-size: 20px; font-weight: 600; }
+.game .meter { height: 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.game .meter i { display: block; height: 100%; background: var(--accent); }
+.game .meter.good i { background: var(--good); }
+.game .meter.warn i { background: var(--warn); }
+
+/* tables */
+.game table { width: 100%; border-collapse: collapse; }
+.game th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; padding: 8px; border-bottom: 1px solid var(--line-2); }
+.game td { padding: 0 8px; height: var(--row); border-bottom: 1px solid var(--line); vertical-align: middle; }
+.game td.n { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.game td .btn, .game td input.text { vertical-align: middle; }
+.game tr.sel td { background: var(--select); }
+.game td.n, .game th.n { text-align: right; }
+.game td.n .num, .game td.n .sub, .game td.num, .game td.nw, .game td.name, .game td.act { white-space: nowrap; }
+.game td.wrap { white-space: normal; }
+.frame.deck .game th, .frame.deck .game td { padding-left: 8px; padding-right: 8px; }
+.frame.deck .game .split .side { flex-basis: 320px; }
+.frame.deck .game .content { padding: 16px; gap: 12px; }
+.game td .sub { display: block; }
+.game td.act { text-align: right; white-space: nowrap; }
+.game tr.row:hover td { background: var(--panel-2); }
+.game tr.sel:hover td { background: var(--select); }
+.game .name { font-weight: 600; }
+.game .sub { font-size: 12px; color: var(--muted); display: block; }
+
+/* two-column screens */
+.game .split { display: flex; gap: var(--gap); flex: 0 0 auto; align-items: flex-start; }
+.game .content > * { flex-shrink: 0; }
+.game .split .main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--gap); }
+.game .split .side { flex: 0 0 380px; display: flex; flex-direction: column; gap: var(--gap); }
+.game.dir-c .split .side { flex-basis: 340px; }
+.game .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.game .field { display: flex; align-items: center; gap: 6px; }
+.game .field label { color: var(--text-2); font-size: 13px; }
+.game input.text {
+  background: var(--canvas); color: var(--text); border: 1px solid var(--line-2); border-radius: var(--radius);
+  height: var(--control); padding: 0 10px; width: 110px; font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 14px;
+}
+.game .check { display: inline-flex; align-items: center; gap: 8px; height: var(--control); }
+.game .check i { width: 18px; height: 18px; border: 1px solid var(--line-2); border-radius: 3px; display: inline-block; background: var(--canvas); position: relative; }
+.game .check.on i { background: var(--accent); border-color: var(--accent); }
+.game .check.on i::after { content: ""; position: absolute; left: 5px; top: 2px; width: 5px; height: 9px; border: solid var(--accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.game .pill { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 20px; font-size: 12px; font-weight: 600; padding: 0 7px; border-radius: var(--radius); border: 1px solid var(--line-2); color: var(--text-2); letter-spacing: 0.02em; white-space: nowrap; }
+.game .pill.warn { color: var(--warn); border-color: var(--warn); }
+.game .pill.danger { color: var(--danger); border-color: var(--danger); }
+.game .pill.good { color: var(--good); border-color: var(--good); }
+.game .pill.accent { color: var(--accent); border-color: var(--accent); }
+
+/* log */
+.game .log { display: flex; flex-direction: column; }
+.game .log .line { display: flex; gap: 16px; padding: 8px 0; border-top: 1px solid var(--line); }
+.game .log .line:first-child { border-top: 0; }
+.game .log .d { flex: 0 0 96px; color: var(--muted); font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 13px; padding-top: 1px; }
+.game .log .t { flex: 1; min-width: 0; }
+.game .log .line.warn .t { color: var(--warn); }
+
+/* sparklines */
+.game svg.spark { display: block; }
+.game svg.spark .base { stroke: var(--line-2); stroke-width: 1; stroke-dasharray: 3 3; }
+.game svg.spark .ln { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+.game svg.spark .ar { fill: var(--accent); opacity: 0.12; }
+.game svg.spark .pt { fill: var(--accent); }
+
+/* status line */
+.game .statusbar {
+  flex: 0 0 auto; min-height: 36px; display: flex; align-items: center; gap: 12px; padding: 0 16px;
+  background: var(--panel); border-top: 1px solid var(--line); color: var(--text-2); font-size: 13px;
+}
+.game .statusbar .lbl { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; }
+.game .statusbar.danger { color: var(--danger); }
+
+/* research tiles */
+.game .research { display: flex; gap: 8px; flex-wrap: wrap; }
+.game .research .tile { border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 8px; font-size: 13px; line-height: var(--lh-13); color: var(--text-2); }
+.game .research .tile.done { color: var(--good); border-color: var(--good); }
+.game .research .tile.now { color: var(--accent); border-color: var(--accent); }
+
+/* warehouse warning */
+.game .notice { display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; border: 1px solid var(--warn); border-radius: var(--radius); color: var(--text); font-size: 13px; line-height: var(--lh-13); }
+.game .notice .ic { color: var(--warn); font-weight: 700; }
+</style>
+
+<div class="bench-head">
+  <h1>Deep Claim Studio</h1>
+  <span class="sub" id="benchSub">Dashboard · Desktop 1366×820</span>
+  <span class="sub"><span class="kbd">`</span> toggles the deck</span>
+</div>
+<div class="stage" id="stage"></div>
+<div class="note" id="stageNote"></div>
+
+<button class="deck-launcher" id="deckLauncher" hidden>Open deck</button>
+<aside class="deck collapsed" id="deck" aria-label="Atelier deck">
+  <div class="dh" id="deckHandle">
+    <span class="grip">::</span><b>DECK</b>
+    <span class="dirs" data-group="screen"><button data-v="dashboard" title="Dashboard">Dash</button><button data-v="plots" title="Plots">Plots</button><button data-v="market" title="Market">Mkt</button><button data-v="research" title="Research">Res</button><button data-v="finance" title="Finance">Fin</button></span>
+    <span class="sp">
+      <button id="btnDock" title="Move to the next corner">Corner</button>
+      <button id="btnCollapse" title="Expand or collapse">More</button>
+      <button id="btnTokens" title="Copy the active direction's tokens">Tokens</button>
+      <button id="btnHide" title="Hide (backtick)">Hide</button>
+    </span>
+  </div>
+  <div class="db">
+    <div class="grp" data-group="screen"><span class="lbl">Screen</span>
+      <button data-v="dashboard">Dashboard</button><button data-v="plots">Plots</button><button data-v="market">Market</button><button data-v="research">Research</button><button data-v="finance">Finance</button>
+    </div>
+    <div class="grp" data-group="frame"><span class="lbl">Frame</span>
+      <button data-v="desktop">Desktop</button><button data-v="deck">Steam Deck</button><button data-v="triptych">Triptych</button>
+    </div>
+    <div class="grp"><span class="lbl">Checks</span>
+      <button class="tog" id="togHc">Inverse scheme</button><button class="tog" id="togRuler">14px ruler</button><button class="tog" id="togTokens">Tokens</button>
+    </div>
+    <div class="tokens" id="tokensView" hidden><pre id="tokensPre"></pre></div>
+    <div class="toast" id="toast"></div>
+    <div class="legend">
+      <div>Locked: plate <b>C · Control Room</b> with D's title blocks; dashboard <b>H4</b>, what needs you first, then what you own, then the money.</div>
+      <div>Sprint 4: spatial calibration on five screens and the hand-off package (Tokens view here; handoff.md beside this file).</div>
+      <div>Retired: A, B, D (Sprint 1); H1, H2, H3 (Sprint 2). Their markup and tokens stay in the file behind comments.</div>
+      <div>Copy and data are identical in all three; only the design varies.</div>
+    </div>
+  </div>
+</aside>
+
+<script>
+(function () {
+  'use strict';
+
+  // ------------------------------------------------------------
+  // Mock data (game 3 of the first playtest, day 1350). Identical across directions.
+  // ------------------------------------------------------------
+  const D = {
+    company: 'Deep Claim Mining', date: 'Y4 M10 D1', day: 1350,
+    cash: '$20.07M', spendable: '$20.07M', debt: '$1.16M', capacity: '$8.84M',
+    storage: '$12k', warehouseValue: '$0.8M', net: '+$1.9M', instalment: '$53k',
+    rival: { name: 'Northfield Minerals', plots: 11, mines: 7 },
+    owned: [
+      { id: 14, region: 'Copper Belt', ha: 436, mine: 'Depleted', output: '—', left: 'exhausted', state: 'muted' },
+      { id: 13, region: 'Copper Belt', ha: 377, mine: 'Operating', output: 'Cu 60 t/day', left: '~41,000 t · ~690 days', state: 'good' },
+      { id: 12, region: 'Copper Belt', ha: 800, mine: 'Operating', output: 'Cu 60 + Fe 400 t/day', left: '~387,000 t Fe', state: 'good' },
+      { id: 22, region: 'Salt Flats', ha: 1052, mine: 'Building', output: '—', left: '173 days to open', state: 'warn' },
+    ],
+    listed: [
+      { id: 18, region: 'Copper Belt', ha: 501, ask: '$1.07M', bids: 2, closes: 1380, survey: 'Copper ~185,330 t · Iron ~717,212 t', err: 'x0.28', surveyed: true, flag: 'contested' },
+      { id: 9,  region: 'Northern Shield', ha: 1060, ask: '$2.53M', bids: 1, closes: 1395, survey: 'Not surveyed · region odds: iron 85%', err: '', surveyed: false, flag: 'blind' },
+      { id: 21, region: 'Salt Flats', ha: 1222, ask: '$550k', bids: 0, closes: 1410, survey: 'Nothing found', err: '', surveyed: true, flag: 'empty' },
+      { id: 25, region: 'Salt Flats', ha: 1768, ask: '$1.37M', bids: 0, closes: 1425, survey: 'Lithium ~3,952 t', err: 'x0.28', surveyed: true, flag: 'locked' },
+    ],
+    market: [
+      { id: 'iron',    name: 'Iron ore', price: '$37.41', base: '$60.00', ratio: 0.62, demand: '1,600', supply: '1,704', stock: '3,633 t', value: '$136k', auto: true, reserve: '0', floor: '$30', sold: 'sold this month: 11,400 t for $430k', locked: false, seed: 11, last: 37.41, baseN: 60 },
+      { id: 'copper',  name: 'Copper ore', price: '$575.60', base: '$900.00', ratio: 0.64, demand: '200', supply: '154', stock: '1,217 t', value: '$700k', auto: true, reserve: '500', floor: '$550', sold: 'sold this month: 1,850 t for $1.6M', locked: false, seed: 7, last: 575.6, baseN: 900 },
+      { id: 'nickel',  name: 'Nickel ore', price: '$1,623', base: '$2,200', ratio: 0.74, demand: '60', supply: '15', stock: '0 t', value: '$0', auto: false, reserve: '0', floor: '$0', sold: 'nothing sold this month', locked: false, seed: 3, last: 1623, baseN: 2200 },
+      { id: 'lithium', name: 'Lithium concentrate', price: '$13,640', base: '$14,000', ratio: 0.97, demand: '16', supply: '0', stock: '0 t', value: '$0', auto: false, reserve: '0', floor: '$0', sold: 'locked: needs Lithium Processing', locked: true, seed: 5, last: 13640, baseN: 14000 },
+    ],
+    research: [
+      { name: 'Seismic Survey I', s: 'done' }, { name: 'Seismic Survey II', s: 'done' }, { name: 'Core Sampling', s: 'done' },
+      { name: 'High Throughput I', s: 'now', note: 'until day 1420' }, { name: 'Lithium Processing', s: '' }, { name: 'Deep Shaft', s: '' },
+    ],
+    events: 'Construction slump, 40 days left: iron demand down.',
+    log: [
+      { d: 'Y4 M9 D30', t: 'Month closed. Storage ran $12k. Instalment paid, $53k. Net +$1.9M.' },
+      { d: 'Y4 M9 D22', t: 'Northfield took plot #16 at auction, $2.55M. That makes eleven for them.' },
+      { d: 'Y4 M9 D15', t: 'Survey crew back from plot #18: copper, a lot of it, iron under it. Northfield has a bid in.' },
+      { d: 'Y4 M9 D3',  t: 'Plot #22: footings poured, headframe going up. 173 days.' },
+      { d: 'Y4 M8 D30', t: 'Month closed. Storage ran $9k. Net +$1.7M.' },
+      { d: 'Y4 M8 D17', t: 'Sold 8,721 t of copper at $590. Cleared the yard before the slump.', },
+    ],
+    status: 'Order on plot #18 for $1.07M rejected: below the asking price.',
+    cashSeries: 'cash', statusKind: 'danger',
+  };
+
+  // ------------------------------------------------------------
+  // helpers
+  // ------------------------------------------------------------
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // Deterministic 90-day series ending at `last`, drifting from base.
+  function series(seed, base, last, n) {
+    let x = seed * 9301 + 49297; const out = []; let v = base;
+    for (let i = 0; i < n; i++) {
+      x = (x * 1103515245 + 12345) % 2147483648; const r = (x / 2147483648) - 0.5;
+      v = v + (last - v) * 0.06 + base * r * 0.03; out.push(v);
+    }
+    out[n - 1] = last; return out;
+  }
+  function spark(seed, base, last, w, h, showBase) {
+    const n = 60, pts = series(seed, base, last, n);
+    const lo = Math.min(base, ...pts) * 0.96, hi = Math.max(base, ...pts) * 1.04;
+    const X = i => (i / (n - 1)) * (w - 4) + 2, Y = v => h - 2 - ((v - lo) / (hi - lo)) * (h - 4);
+    let d = ''; pts.forEach((v, i) => { d += (i ? ' L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); });
+    const area = d + ' L' + X(n - 1).toFixed(1) + ' ' + (h - 1) + ' L2 ' + (h - 1) + ' Z';
+    const baseY = Y(base).toFixed(1);
+    return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">` +
+      (showBase ? `<line class="base" x1="2" y1="${baseY}" x2="${w - 2}" y2="${baseY}"/>` : '') +
+      `<path class="ar" d="${area}"/><path class="ln" d="${d}"/><circle class="pt" cx="${X(n - 1).toFixed(1)}" cy="${Y(last).toFixed(1)}" r="2.5"/></svg>`;
+  }
+
+  const ICONS = {
+    dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="5" rx="1"/><rect x="13" y="10" width="8" height="11" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/></svg>',
+    plots: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3z"/><path d="M9 4v13M15 7v13"/></svg>',
+    market: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l5-6 4 3 4-7 5 4"/><path d="M3 21h18"/></svg>',
+    research: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/></svg>',
+    finance: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg>',
+    log: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+  };
+  const TABS = [['dashboard', 'Dashboard'], ['plots', 'Plots'], ['market', 'Market'], ['research', 'Research'], ['finance', 'Finance'], ['log', 'Log']];
+
+  // ------------------------------------------------------------
+  // rendering: one structure, direction-aware where structure differs
+  // ------------------------------------------------------------
+  function idx(dir, n) { return `<span class="idx">${String(n).padStart(2, '0')}</span>`; }
+  function h2(dir, n, text) { return `<h2>${idx(dir, n)}${esc(text)}</h2>`; }
+
+  function header(dir) {
+    const stat = (l, v, cls) => `<div class="stat ${cls || ''}"><span class="label">${l}</span><span class="value ${cls === 'company' ? '' : 'num'}">${v}</span></div>`;
+    return `<div class="hdr">
+      ${stat('Company', esc(D.company), 'company')}
+      ${stat('Date', D.date)}
+      ${stat('Cash', D.cash)}
+      ${stat('Spendable', D.spendable)}
+      ${stat('Debt', D.debt)}
+      ${dir === 'c' ? `<div class="stat"><span class="label">Cash, 90 days</span>${spark(21, 9, 20, 120, 24, false)}</div>` : ''}
+      <span class="spacer"></span>
+      <div class="speed"><button class="btn active">Pause</button><button class="btn">1x</button><button class="btn">5x</button><button class="btn">20x</button><button class="btn"><span class="long">Step day</span><span class="short">Step</span></button></div>
+      <div class="sys"><button class="btn">Save</button><button class="btn">Load</button><button class="btn"><span class="long">New game</span><span class="short">New</span></button></div>
+    </div>`;
+  }
+  function strip(withEvent) {
+    return `<div class="strip">
+      <span><span class="k">Month</span><span class="num good">+$1.9M</span></span>
+      <span><span class="k">Storage</span><span class="num">$12k/mo</span></span>
+      <span><span class="k">Solvency</span><span class="chip good">solvent</span></span>
+      <span><span class="k">Next auction</span><span class="num">#18 closes day 1380</span></span>
+      <span><span class="k">Mines</span><span class="chip good">2 operating</span> <span class="chip warn">1 building</span> <span class="chip muted">1 depleted</span></span>
+      <span class="brk" aria-hidden="true"></span>
+      <span><span class="k">Research</span><span class="num">High Throughput I · day 1420</span></span>
+      ${withEvent ? '<span><span class="k">World</span><span class="chip warn">Construction slump</span> <span class="num">40 days · iron demand down</span></span>' : ''}
+    </div>`;
+  }
+  function stripSheet(dir) {
+    const lead = dir === 'd' ? '<span class="tb"><span class="idx">00</span>Status</span>' : '<span class="idx">00</span>';
+    return `<div class="strip">${lead}
+      <span><span class="k">Month</span><span class="num">+$1.9M</span></span>
+      <span><span class="k">Storage</span><span class="num">$12k/mo</span></span>
+      <span><span class="k">Solvency</span><span class="num">solvent</span></span>
+      <span><span class="k">Next auction</span><span class="num">#18 · day 1380</span></span>
+      <span><span class="k">Mines</span><span class="num">2 operating · 1 building · 1 depleted</span></span>
+      <span class="brk" aria-hidden="true"></span>
+      <span><span class="k">Research</span><span class="num">High Throughput I · day 1420</span></span>
+    </div>`;
+  }
+  function nav(dir, screen) {
+    const items = TABS.map(([id, label], i) => {
+      const on = id === screen ? ' on' : '';
+      if (dir === 'c') return `<button class="tab${on}" title="${label}">${ICONS[id]}<span class="tl">${label}</span></button>`;
+      return `<button class="tab${on}">${(dir === 'b' || dir === 'd') ? `<span class="idx">${String(i + 1).padStart(2, '0')}</span>` : ''}${label}</button>`;
+    }).join('');
+    return `<nav class="nav">${items}<div class="hint">Space pauses · 1 2 3 set speed · period steps a day · F9 marks the trace</div></nav>`;
+  }
+  function statusbar() {
+    return `<div class="statusbar ${D.statusKind}"><span class="lbl">Status</span><span>${esc(D.status)}</span></div>`;
+  }
+
+  // ---- Dashboard: shared pieces ----
+  function finrow(n) {
+    const st = (l, v, sub, cls) => `<div class="stat"><span class="label">${l}</span><span class="value num ${cls || ''}">${v}</span>${sub ? `<span class="sub num">${sub}</span>` : ''}</div>`;
+    return `<div class="sheet">${h2('c', n || 2, 'Finance')}<div class="finrow">
+      ${st('Cash', D.cash)}${st('Spendable', D.spendable)}${st('Debt', D.debt, 'can borrow ' + D.capacity)}
+      ${st('Warehouse', D.warehouseValue, 'storage ' + D.storage + '/month')}${st('This month', D.net, 'instalment ' + D.instalment, 'good')}
+      ${st('Solvency', '<span class="chip good">solvent</span>', '3 months grace')}
+    </div></div>`;
+  }
+  function warehouse(n) {
+    return `<div class="sheet">${h2('c', n, 'Warehouse')}
+      <table>
+        <tr><th>Resource</th><th class="n">Stock</th><th class="n">Price</th><th class="n">Value</th><th>Policy</th><th>90 days</th></tr>
+        ${D.market.map(m => `<tr class="row"><td class="name">${m.name}${m.locked ? ' <span class="pill warn">locked</span>' : ''}</td><td class="n num">${m.stock}</td><td class="n num">${m.price}/t</td><td class="n num">${m.value}</td><td>${m.locked ? '<span class="muted">needs Lithium Processing</span>' : (m.auto ? `<span class="pill accent">auto-sell</span><span class="sub">reserve ${m.reserve} t, floor ${m.floor}</span>` : '<span class="muted">hold</span>')}</td><td>${spark(m.seed, m.baseN, m.last, 120, 22, true)}</td></tr>`).join('')}
+      </table>
+    </div>`;
+  }
+  function recent(n, count) {
+    return `<div class="sheet">${h2('c', n, 'Recent')}
+      <div class="log">${D.log.slice(0, count).map(l => `<div class="line"><span class="d">${l.d}</span><span class="t">${esc(l.t)}</span></div>`).join('')}</div>
+    </div>`;
+  }
+  // "Needs you": the things that want a decision, in order.
+  function needsYou(n) {
+    const rows = [
+      { t: 'Auction on plot #18 closes', sub: '2 bids · you are at the ask · Northfield is bidding', days: 'in 30 days', act: '<button class="btn sm primary">Raise bid</button>' },
+      { t: 'Plot #22 mine opens', sub: 'footings poured, headframe going up', days: 'in 173 days', act: '' },
+      { t: 'Construction slump ends', sub: 'iron demand down while it lasts', days: 'in 40 days', act: '' },
+      { t: 'Research completes', sub: 'High Throughput I', days: 'in 70 days', act: '' },
+    ];
+    return `<div class="sheet">${h2('c', n, 'Needs you')}
+      <div class="needs">${rows.map((r, i) => `<div class="row"><span class="n">${i + 1}</span><span class="t">${esc(r.t)}<span class="sub">${esc(r.sub)}</span></span><span class="days">${r.days}</span><span class="act">${r.act}</span></div>`).join('')}</div>
+    </div>`;
+  }
+  /* H1 "Decision desk" was retired in Sprint 2 round 2 (H4 won). Markup kept for the record:
+  // H1 Decision desk: what wants a decision, then finance, warehouse, log.
+  function dashboardH1() {
+    return `<h1>Dashboard</h1>
+    ${needsYou(1)}
+    ${finrow(2)}
+    ${warehouse(3)}
+    ${recent(4, 4)}`;
+  }
+  */
+  // The mine board: owned plots and mines beside the prices panel.
+  function mineBoard(n) {
+    return `<div class="split">
+      <div class="main">
+        <div class="sheet">${h2('c', n, 'Plots and mines')}
+          <table>
+            <tr><th>Plot</th><th>Region</th><th>Mine</th><th>Output</th><th>Remaining</th><th class="act"></th></tr>
+            ${D.owned.map(p => `<tr class="row"><td class="name">#${p.id}</td><td class="nw">${p.region} <span class="muted num">${p.ha} ha</span></td><td class="nw"><span class="chip ${p.state}">${p.mine}</span></td><td class="num">${p.output}</td><td class="wrap figure">${p.left.replace(/ t\b/g, '&nbsp;t').replace(/(\d) days/g, '$1&nbsp;days')}</td><td class="act">${p.mine === 'Operating' ? '<button class="btn sm">Mothball</button>' : ''}</td></tr>`).join('')}
+          </table>
+          <div class="rivalline">Northfield Minerals: 11 plots, 7 mines, bidding on #18.</div>
+        </div>
+      </div>
+      <div class="side">
+        <div class="sheet">${h2('c', n + 1, 'Prices')}
+          <div class="prices">${D.market.map(m => `<div class="pr"><span class="nm">${m.name}${m.locked ? ' <span class="pill warn">locked</span>' : ''}<span class="sub num">stock ${m.stock}</span></span>${spark(m.seed, m.baseN, m.last, 90, 26, true)}<span class="num">${m.price}<span class="sub ${m.ratio < 0.7 ? 'warn' : ''}">x${m.ratio.toFixed(2)}</span></span></div>`).join('')}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+  /* H3 "Operations board" was retired in Sprint 2 round 2 (H4 won). Markup kept for the record:
+  // H3 Operations board: assets first.
+  function dashboardH3() {
+    return `<h1>Dashboard</h1>
+    ${mineBoard(1)}
+    ${finrow(3)}
+    ${recent(4, 3)}`;
+  }
+  */
+  // H4 Decision desk over the mine board: what needs you, then what you own, then the money.
+  function dashboard() {
+    return `<h1>Dashboard</h1>
+    ${needsYou(1)}
+    ${mineBoard(2)}
+    ${finrow(4)}
+    ${recent(5, 3)}`;
+  }
+  /* H2 "Ledger" was retired in Sprint 2 (operator: "cards make me hunt"). Markup kept for the record:
+  // H2 Ledger: the current layout.
+  function dashboardH2(dir) {
+    const c = dir === 'c';
+    return `<h1>Dashboard</h1>
+    <div class="cards">
+      <div class="card">${h2(dir, 1, 'Company')}
+        <div class="kv"><span class="k">Plots owned</span><span class="v"><span class="line num">4</span><span class="subline num">4 for sale</span></span></div>
+        <div class="kv"><span class="k">Mines</span><span class="v">${c ? '<span class="line"><span class="chip good">2 operating</span> <span class="chip warn">1 building</span></span>' : '<span class="line num">2 operating, 1 building</span><span class="subline num">1 depleted</span>'}</span></div>
+        <div class="kv"><span class="k">Research</span><span class="v"><span class="line">High Throughput I</span><span class="subline num">until day 1420</span></span></div>
+        <div class="kv"><span class="k">Survey error</span><span class="v num">x0.28</span></div>
+      </div>
+      <div class="card">${h2(dir, 2, 'Finance')}
+        <div class="kv big"><span class="k">This month</span><span class="v num good">${D.net}</span></div>
+        <div class="kv"><span class="k">Debt</span><span class="v"><span class="line num">${D.debt}</span><span class="subline num">can borrow ${D.capacity}</span></span></div>
+        <div class="kv"><span class="k">Warehouse</span><span class="v"><span class="line num">${D.warehouseValue}</span><span class="subline num">storage ${D.storage}/month</span></span></div>
+        <div class="kv"><span class="k">Solvency</span><span class="v">${c ? '<span class="line"><span class="chip good">solvent</span></span>' : '<span class="line good">Solvent</span>'}<span class="subline">3 months grace</span></span></div>
+        ${c ? '' : '<div class="meter good" style="margin-top:-2px"><i style="width:100%"></i></div>'}
+      </div>
+      <div class="card">${h2(dir, 3, 'Competitors')}
+        <div class="kv stack"><span class="k">${esc(D.rival.name)}</span><span class="v"><span class="line num">11 plots · 7 mines</span></span></div>
+        <div class="kv"><span class="k">Bidding against you</span><span class="v">plot #18</span></div>
+        ${c ? `<div class="kv"><span class="k">Plots, 90 days</span>${spark(4, 8, 11, 120, 24, false)}</div>` : ''}
+      </div>
+      <div class="card">${h2(dir, 4, 'World')}
+        <div class="kv"><span class="k">Event</span><span class="v"><span class="${c ? 'chip warn' : 'warn'}">Construction slump</span></span></div>
+        <div class="kv"><span class="k">Effect</span><span class="v">iron demand down</span></div>
+        <div class="kv"><span class="k">Ends in</span><span class="v num">40 days</span></div>
+      </div>
+    </div>
+    <div class="sheet">${h2(dir, 5, 'Warehouse')}
+      <table>
+        <tr><th>Resource</th><th class="n">Stock</th><th class="n">Price</th><th class="n">Value</th><th>Policy</th>${c ? '<th>90 days</th>' : ''}</tr>
+        ${D.market.map(m => `<tr class="row"><td class="name">${m.name}${m.locked ? ' <span class="pill warn">locked</span>' : ''}</td><td class="n num">${m.stock}</td><td class="n num">${m.price}/t</td><td class="n num">${m.value}</td><td>${m.locked ? '<span class="muted">needs Lithium Processing</span>' : (m.auto ? `<span class="pill accent">auto-sell</span><span class="sub">reserve ${m.reserve} t, floor ${m.floor}</span>` : '<span class="muted">hold</span>')}</td>${c ? `<td>${spark(m.seed, m.baseN, m.last, 120, 22, true)}</td>` : ''}</tr>`).join('')}
+      </table>
+    </div>
+    <div class="sheet">${h2(dir, 6, 'Recent')}
+      <div class="log">${D.log.slice(0, 4).map(l => `<div class="line"><span class="d">${l.d}</span><span class="t">${esc(l.t)}</span></div>`).join('')}</div>
+    </div>`;
+  }
+
+  */
+  // ---- Plots ----
+  function plots(dir) {
+    const c = dir === 'c';
+    const flag = p => ({
+      contested: `<span class="pill warn">${p.bids} bids</span>`,
+      blind: '<span class="pill danger">not surveyed</span>',
+      empty: '<span class="pill">empty</span>',
+      locked: '<span class="pill warn">locked ore</span>',
+    })[p.flag];
+    return `<h1>Plots</h1>
+    <div class="split">
+      <div class="main">
+        <div class="sheet">${h2(dir, 1, 'For sale')}
+          <table>
+            <tr><th>Plot</th><th>Region</th><th class="n">Area</th><th class="n">Ask</th><th class="n">Bids</th><th class="n">Closes</th><th>Survey</th></tr>
+            ${D.listed.map((p, i) => `<tr class="row${i === 0 ? ' sel' : ''}"><td class="name">#${p.id}</td><td class="nw">${p.region}</td><td class="n num">${p.ha} ha</td><td class="n num">${p.ask}</td><td class="n num">${p.bids}</td><td class="n num">day ${p.closes}</td><td class="wrap">${p.survey}${p.err ? ` <span class="muted">(${p.err})</span>` : ''} ${flag(p)}</td></tr>`).join('')}
+          </table>
+        </div>
+        <div class="sheet">${h2(dir, 2, 'Owned')}
+          <table>
+            <tr><th>Plot</th><th>Region</th><th class="n">Area</th><th>Mine</th><th>Output</th><th>Remaining</th><th class="act"></th></tr>
+            ${D.owned.map(p => `<tr class="row"><td class="name">#${p.id}</td><td class="nw">${p.region}</td><td class="n num">${p.ha} ha</td><td class="nw">${c ? `<span class="chip ${p.state}">${p.mine}</span>` : `<span class="${p.state}">${p.mine}</span>`}</td><td class="num">${p.output}</td><td class="wrap figure">${p.left.replace(/ t\b/g, '&nbsp;t').replace(/(\d) days/g, '$1&nbsp;days')}</td><td class="act">${p.mine === 'Operating' ? '<button class="btn sm">Mothball</button>' : p.mine === 'Building' ? '<span class="muted num">173 days</span>' : ''}</td></tr>`).join('')}
+          </table>
+        </div>
+      </div>
+      <div class="side">
+        <div class="sheet">${h2(dir, 3, 'Plot #18 · Copper Belt')}
+          <div class="kv"><span class="k">Area</span><span class="v num">501 ha</span></div>
+          <div class="kv"><span class="k">Ask</span><span class="v num">$1.07M</span></div>
+          <div class="kv"><span class="k">Auction</span><span class="v num">closes day 1380 · 2 bids</span></div>
+          <div class="kv"><span class="k">Mine capex</span><span class="v num">$2.00M</span></div>
+          <div class="kv"><span class="k">Region odds</span><span class="v num">copper 70% · iron 60%</span></div>
+          <h2 style="margin-top:4px">${idx(dir, 4)}Survey, day 1136</h2>
+          <div class="kv"><span class="k">Copper ore</span><span class="v num">~185,330 t <span class="muted">(x0.28)</span></span></div>
+          <div class="kv"><span class="k">Iron ore</span><span class="v num">~717,212 t <span class="muted">(x0.28)</span></span></div>
+          <div class="kv"><span class="k">Value at today's prices</span><span class="v num">~$133M</span></div>
+          <div class="notice"><span class="ic">!</span><span>Another company has a bid in. Contested plots have been clearing 10 to 30% over the ask. Bidding again replaces your bid.</span></div>
+          <div class="actions">
+            <div class="field"><label for="bid-${dir}">Bid</label><input class="text" id="bid-${dir}" value="1,300,000"></div>
+            <button class="btn primary">Place bid</button>
+            <button class="btn">Survey again ($150k)</button>
+          </div>
+        </div>
+        <div class="sheet">${h2(dir, 5, 'Research')}
+          <div class="research">${D.research.map(r => `<span class="tile ${r.s}">${r.name}${r.note ? ` <span class="num">· ${r.note}</span>` : ''}</span>`).join('')}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ---- Market ----
+  function market(dir) {
+    const c = dir === 'c';
+    const row = (m, i) => `<tr class="row${i === 1 ? ' sel' : ''}">
+      <td class="name wrap"><span class="nw" style="white-space:nowrap">${m.name}${m.locked ? ' <span class="pill warn">locked</span>' : ''}</span><span class="sub">demand ${m.demand}&nbsp;t/day · supply ${m.supply}&nbsp;t/day</span></td>
+      <td>${spark(m.seed, m.baseN, m.last, 150, 34, true)}</td>
+      <td class="n"><span class="num">${m.price}/t</span><span class="sub num">base ${m.base} · <span class="${m.ratio < 0.7 ? 'warn' : ''}">x${m.ratio.toFixed(2)}</span></span></td>
+      <td class="n"><span class="num">${m.stock}</span><span class="sub num">${m.value}</span></td>
+      <td>${m.locked ? '<span class="muted">needs Lithium Processing</span>' : `<div class="actions"><input class="text" id="q-${dir}-${m.id}" value="1,000" aria-label="tonnes"><button class="btn sm">Sell</button><button class="btn sm">Sell all</button></div>`}</td>
+      <td>${m.locked ? '' : `<div class="actions"><span class="check${m.auto ? ' on' : ''}"><i></i>Auto-sell</span><div class="field"><label for="r-${dir}-${m.id}">Reserve</label><input class="text" id="r-${dir}-${m.id}" value="${m.reserve}" style="width:80px"></div><div class="field"><label for="f-${dir}-${m.id}">Floor</label><input class="text" id="f-${dir}-${m.id}" value="${m.floor}" style="width:80px"></div><button class="btn sm">Apply</button></div><span class="sub">${m.sold}</span>`}</td>
+    </tr>`;
+    return `<h1>Market</h1>
+    <div class="sheet">${h2(dir, 1, 'Prices and standing orders')}
+      <table>
+        <tr><th>Resource</th><th>90 days</th><th class="n">Price</th><th class="n">Stock</th><th>Sell now</th><th>Standing order</th></tr>
+        ${D.market.map(row).join('')}
+      </table>
+    </div>
+    <div class="split">
+      <div class="main"><div class="sheet">${h2(dir, 2, 'Copper ore · 360 days')}
+        <div style="height:170px">${spark(7, 900, 575.6, 760, 170, true)}</div>
+        <div class="kv"><span class="k">Demand 200 t/day, supply 154 t/day. Price moves part-way to its target each day; the base price holds when nobody sells.</span></div>
+      </div></div>
+      <div class="side"><div class="sheet">${h2(dir, 3, 'Storage')}
+        <div class="kv"><span class="k">Warehouse</span><span class="v"><span class="line num">${D.warehouseValue}</span><span class="subline num">4,850 t across two ores</span></span></div>
+        <div class="kv"><span class="k">Cost</span><span class="v"><span class="line num">${D.storage}/month</span><span class="subline">5% of base price per tonne-month</span></span></div>
+        <div class="muted">Standing orders sell before storage builds up. Cover-costs selling is set on the Finance tab.</div>
+      </div></div>
+    </div>`;
+  }
+
+  // ---- Research ----
+  const TECHS = [
+    { name: 'Seismic Survey I', cost: '$1.0M', days: 90, pre: '', s: 'done' },
+    { name: 'Seismic Survey II', cost: '$1.5M', days: 120, pre: 'Seismic Survey I', s: 'done' },
+    { name: 'Core Sampling', cost: '$2.0M', days: 150, pre: 'Seismic Survey II', s: 'done' },
+    { name: 'High Throughput I', cost: '$2.5M', days: 180, pre: '', s: 'now', note: 'until day 1420' },
+    { name: 'Storage Logistics', cost: '$1.2M', days: 100, pre: '', s: 'open' },
+    { name: 'Lithium Processing', cost: '$4.0M', days: 240, pre: 'Core Sampling, High Throughput I', s: 'locked' },
+    { name: 'Deep Shaft', cost: '$3.0M', days: 200, pre: 'High Throughput I', s: 'locked' },
+    { name: 'Automated Haulage', cost: '$3.5M', days: 210, pre: 'Deep Shaft', s: 'locked' },
+  ];
+  function research(dir) {
+    const chip = t => ({ done: '<span class="chip good">done</span>', now: '<span class="chip accent">researching</span>', open: '<span class="chip muted">available</span>', locked: '<span class="chip muted">locked</span>' })[t.s];
+    const act = t => t.s === 'open' ? `<button class="btn sm disabled" title="Lab busy until day 1420">Start</button>` : t.s === 'now' ? `<span class="num muted">${t.note}</span>` : '';
+    return `<h1>Research</h1>
+    <div class="sheet">${h2(dir, 1, 'Laboratory')}
+      <div class="kv"><span class="k">Lab</span><span class="v"><span class="line">One project at a time</span><span class="subline num">busy until day 1420 · High Throughput I</span></span></div>
+    </div>
+    <div class="sheet">${h2(dir, 2, 'Technologies')}
+      <table>
+        <tr><th>Technology</th><th>Status</th><th class="n">Cost</th><th class="n">Days</th><th>Effect</th><th class="act"></th></tr>
+        ${TECHS.map(t => `<tr class="row${t.s === 'now' ? ' sel' : ''}"><td class="name wrap"><span style="white-space:nowrap">${t.name}</span>${t.pre ? `<span class="sub">needs ${t.pre}</span>` : ''}</td><td class="nw">${chip(t)}</td><td class="n num">${t.cost}</td><td class="n num">${t.days}</td><td class="wrap">${EFFECT[t.name] || ''}</td><td class="act">${act(t)}</td></tr>`).join('')}
+      </table>
+    </div>`;
+  }
+  const EFFECT = { 'Seismic Survey I': 'survey error x0.8', 'Seismic Survey II': 'survey error x0.8', 'Core Sampling': 'survey error x0.7', 'High Throughput I': 'mine output x1.25', 'Storage Logistics': 'storage cost x0.6', 'Lithium Processing': 'unlocks lithium', 'Deep Shaft': 'mine output x1.2, opex x1.1', 'Automated Haulage': 'opex x0.8' };
+
+  // ---- Finance ----
+  function finance(dir) {
+    return `<h1>Finance</h1>
+    ${finrow(1)}
+    <div class="split">
+      <div class="main">
+        <div class="sheet">${h2(dir, 2, 'Loans')}
+          <table>
+            <tr><th>Loan</th><th class="n">Principal</th><th class="n">Remaining</th><th class="n">Instalment</th><th class="n">Months left</th><th class="act"></th></tr>
+            <tr class="row"><td class="name">#1</td><td class="n num">$3.16M</td><td class="n num">$1.16M</td><td class="n num">$53k + interest</td><td class="n num">22</td><td class="act"><input class="text" id="repay-${dir}" value="500,000" aria-label="repay amount"> <button class="btn sm">Repay</button></td></tr>
+          </table>
+          <div class="muted">Equal principal instalments plus 8% a year on the balance, paid at each month end.</div>
+        </div>
+        <div class="sheet">${h2(dir, 3, 'Take a loan')}
+          <div class="actions">
+            <div class="field"><label for="loan-${dir}">Amount</label><input class="text" id="loan-${dir}" value="2,000,000"></div>
+            <button class="btn primary">Take loan</button>
+            <span class="muted">Up to ${D.capacity} more · minimum $250k · 60 months · 4 loans at most</span>
+          </div>
+        </div>
+      </div>
+      <div class="side">
+        <div class="sheet">${h2(dir, 4, 'Cover costs')}
+          <div class="check on"><i></i>Sell at month end to cover costs</div>
+          <div class="muted">If cash would go below zero after storage and instalments, the company sells just enough stock to stay at zero and logs what it sold.</div>
+          <div class="kv"><span class="k">Last month</span><span class="v"><span class="line">not needed</span></span></div>
+        </div>
+        <div class="sheet">${h2(dir, 5, 'Solvency')}
+          <div class="kv"><span class="k">Status</span><span class="v"><span class="line"><span class="chip good">solvent</span></span><span class="subline">3 month-ends in the red is bankruptcy</span></span></div>
+          <div class="kv"><span class="k">Storage</span><span class="v"><span class="line num">${D.storage}/month</span><span class="subline num">5% of base price per tonne-month</span></span></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function game(screen, hc) {
+    const dir = 'c';
+    return `<div class="game dir-${dir}${hc ? ' hc' : ''}">
+      ${header(dir)}${strip(screen === 'dashboard')}
+      <div class="body">${nav(dir, screen)}<main class="content">${SCREENS[screen](dir)}</main></div>
+      ${statusbar()}
+    </div>`;
+  }
+  const SCREENS = { dashboard, plots, market, research, finance };
+
+  const SCREENNAME = { dashboard: 'Dashboard', plots: 'Plots', market: 'Market', research: 'Research', finance: 'Finance' };
+  const SCREENNOTE = {
+    dashboard: 'Dashboard, locked as H4: what needs you first, then what you own, then the money.',
+    plots: 'Plots: for sale and owned, with the selected plot and its survey on the right.',
+    market: 'Market: prices, stock and standing orders; storage on the right.',
+    research: 'Research: one project at a time; prerequisites as sub-lines; the lab\'s state up top.',
+    finance: 'Finance: the finance row, loans, borrowing and the month-end cover-costs rule.',
+  };
+
+  function windowChrome(label, meta, inner) {
+    return `<div class="window"><div class="titlebar"><span class="dots"><i></i><i></i><i></i></span><span class="name">Deep Claim</span><span>${label}</span><span class="meta">${meta}</span></div><div class="viewport">${inner}</div></div>`;
+  }
+  function rulerHtml() {
+    return `<div class="ruler"><h4>Steam Deck legibility</h4>
+      <div class="row"><span style="font-size:12px">Twelve pixel text</span><span class="px fail">12px · fails</span></div>
+      <div class="row"><span style="font-size:14px">Fourteen pixel text</span><span class="px pass">14px · minimum</span></div>
+      <div class="row"><span style="font-size:16px">Sixteen pixel text</span><span class="px pass">16px · comfortable</span></div>
+      <div class="bar">40px minimum touch target</div></div>`;
+  }
+
+  // ------------------------------------------------------------
+  // state, URL, deck
+  // ------------------------------------------------------------
+  const state = { screen: 'dashboard', frame: 'desktop', hc: false, ruler: false, tokens: false };
+  const VALID = { screen: ['dashboard', 'plots', 'market', 'research', 'finance'], frame: ['desktop', 'deck', 'triptych'] };
+  (function readUrl() {
+    try {
+      const hash = (location.hash || '').replace(/^#/, '');
+      const p = new URLSearchParams(hash.includes('=') ? hash : location.search);
+      for (const k of Object.keys(VALID)) { const v = p.get(k); if (v && VALID[k].includes(v)) state[k] = v; }
+      if (p.get('hc') === '1') state.hc = true;
+      if (p.get('ruler') === '1') state.ruler = true;
+    } catch (e) { /* no url state */ }
+  })();
+  function writeUrl() {
+    try {
+      const p = new URLSearchParams();
+      p.set('screen', state.screen); p.set('frame', state.frame);
+      if (state.hc) p.set('hc', '1'); if (state.ruler) p.set('ruler', '1');
+      history.replaceState(null, '', location.pathname + location.search + '#' + p.toString());
+    } catch (e) { /* ignore */ }
+  }
+  window.addEventListener('hashchange', () => {
+    try {
+      const p = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+      let changed = false;
+      for (const k of Object.keys(VALID)) { const v = p.get(k); if (v && VALID[k].includes(v) && state[k] !== v) { state[k] = v; changed = true; } }
+      if (changed) render();
+    } catch (e) { /* ignore */ }
+  });
+
+  const deck = document.getElementById('deck'), launcher = document.getElementById('deckLauncher');
+  const stage = document.getElementById('stage');
+  const note = document.getElementById('stageNote');
+  function render() {
+    const { screen, frame, hc, ruler } = state;
+    let html = '';
+    if (frame === 'triptych') {
+      const cells = [
+        ['Desktop 1366×820', `<div class="frame desktop">${game(screen, hc)}</div>`, 'the frame you ship first.'],
+        ['Steam Deck 1280×800', `<div class="frame deck">${game(screen, hc)}</div>`, '7-inch panel; 14px text and 40px buttons are the floor.'],
+        ['Inverse scheme', `<div class="frame desktop">${game(screen, !hc)}</div>`, 'same tokens, daylight values; it only has to survive.'],
+      ];
+      html = '<div class="triptych">' + cells.map(([label, inner, cap]) =>
+        `<div class="tri-cell"><div class="scaler">${inner}</div><div class="caption"><b>${label}</b> <span>· ${cap}</span></div></div>`
+      ).join('') + '</div>';
+      note.textContent = 'Triptych: the current screen in the desktop frame, the Steam Deck frame and the inverse scheme, all at 45% scale.';
+    } else if (frame === 'deck') {
+      html = windowChrome('Steam Deck', '1280 × 800 · 7-inch', `<div class="frame deck">${game(screen, hc)}${ruler ? rulerHtml() : ''}</div>`);
+      note.textContent = 'Steam Deck frame at 1:1. On the real 7-inch panel every pixel here is about 0.11 mm; body text is 14px, buttons 40px tall. Toggle the ruler to check.';
+    } else {
+      html = windowChrome('Desktop', '1366 × 820', `<div class="frame desktop">${game(screen, hc)}</div>`);
+      note.textContent = SCREENNOTE[screen] + (hc ? ' Inverse scheme: same tokens, daylight values. It only has to survive, not to win.' : '');
+    }
+    stage.innerHTML = html;
+    document.getElementById('tokensView').hidden = !state.tokens;
+    document.getElementById('tokensPre').textContent = tokenBlock();
+    document.getElementById('benchSub').textContent = `${SCREENNAME[screen]} · ${frame === 'desktop' ? 'Desktop 1366×820' : frame === 'deck' ? 'Steam Deck 1280×800' : 'Triptych'}${hc ? ' · inverse' : ''}`;
+    document.querySelectorAll('.deck [data-group]').forEach(g => {
+      const k = g.dataset.group; g.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === state[k]));
+    });
+    document.getElementById('togHc').classList.toggle('on', hc);
+    document.getElementById('togTokens').classList.toggle('on', state.tokens);
+    document.getElementById('togRuler').classList.toggle('on', ruler);
+    writeUrl();
+  }
+
+  document.querySelectorAll('.deck [data-group] button').forEach(b => b.addEventListener('click', () => {
+    state[b.closest('[data-group]').dataset.group] = b.dataset.v; render();
+  }));
+  document.getElementById('btnCollapse').addEventListener('click', () => {
+    const c = deck.classList.toggle('collapsed'); document.getElementById('btnCollapse').textContent = c ? 'More' : 'Less';
+  });
+  const CORNERS = [['16px', 'auto', 'auto', '16px'], ['auto', '16px', 'auto', '16px'], ['auto', '16px', '16px', 'auto'], ['16px', 'auto', '16px', 'auto']]; // [top, bottom, left, right]
+  let corner = 0;
+  document.getElementById('btnDock').addEventListener('click', () => {
+    corner = (corner + 1) % CORNERS.length; const [t, b, l, r] = CORNERS[corner];
+    deck.style.top = t; deck.style.bottom = b; deck.style.left = l; deck.style.right = r;
+  });
+  document.getElementById('togHc').addEventListener('click', () => { state.hc = !state.hc; render(); });
+  document.getElementById('togTokens').addEventListener('click', () => { state.tokens = !state.tokens; deck.classList.remove('collapsed'); document.getElementById('btnCollapse').textContent = 'Less'; render(); });
+  document.getElementById('togRuler').addEventListener('click', () => { state.ruler = !state.ruler; if (state.ruler) state.frame = 'deck'; render(); });
+
+  // tokens: the final hand-off block, grouped. Copy copies exactly this text.
+  const FINAL_TOKENS = [
+    ['colour', [
+      ['canvas', '#0a0f17', 'window ground'], ['panel', '#111826', 'sheets, header, status line'], ['panel-2', '#172031', 'inset wells, strip, button fill'],
+      ['edge', '#243249', 'hairlines, row rules'], ['edge-strong', '#2f4160', 'control borders, title-block rule'],
+      ['text', '#ffffff', 'primary'], ['text-2', '#c9d4e6', 'secondary, keys'], ['text-3', '#8fa0ba', 'muted, labels, sub-lines'],
+      ['accent', '#2f8cff', 'primary buttons, selection, sparklines'], ['accent-hover', '#4a9cff', ''], ['accent-text', '#ffffff', 'text on accent'],
+      ['warn', '#f0b340', 'warnings, warn chips'], ['danger', '#ff6e6e', 'rejections, insolvency'], ['good', '#5fd98a', 'operating, solvent'],
+      ['selection', '#163058', 'selected row and tab'],
+    ]],
+    ['colour (inverse scheme)', [
+      ['canvas', '#f3f5f8', ''], ['panel', '#ffffff', ''], ['panel-2', '#eef1f5', ''], ['edge', '#cfd6e0', ''], ['edge-strong', '#b7c1cf', ''],
+      ['text', '#121820', ''], ['text-2', '#2f3a4a', ''], ['text-3', '#4f5c6d', ''], ['accent', '#1f5fb8', ''], ['accent-hover', '#2a6fcc', ''], ['accent-text', '#ffffff', ''],
+      ['warn', '#8a5a00', ''], ['danger', '#b42626', ''], ['good', '#1b6f35', ''], ['selection', '#dbe7f8', ''],
+    ]],
+    ['type', [
+      ['font-ui', '"Barlow", system-ui, sans-serif', 'all running text and controls'],
+      ['font-num', '"JetBrains Mono", ui-monospace, monospace', 'every figure, date and id (tabular by construction)'],
+      ['font-display', '"Barlow Condensed", "Barlow", sans-serif', 'h1, title blocks, company name'],
+      ['fs-12', '12px', 'labels, sub-lines, chips, table headers'], ['fs-13', '13px', 'status line, strip, notes'], ['fs-14', '14px', 'body, buttons, inputs'],
+      ['fs-16', '16px', 'reserved'], ['fs-17', '17px', 'header figures, title blocks, finance stats'], ['fs-20', '20px', 'screen title'],
+      ['lh-12', '16px', ''], ['lh-13', '18px', ''], ['lh-14', '20px', ''], ['lh-16', '22px', ''], ['lh-17', '22px', ''], ['lh-20', '24px', ''],
+      ['weight-regular', '400', ''], ['weight-medium', '500', 'buttons, values'], ['weight-semibold', '600', 'names, h1'], ['weight-bold', '700', 'title blocks, chips'],
+      ['figures', 'font-variant-numeric: tabular-nums', 'on every .num, .figure and td.n; the mono face makes it true in RmlUi'],
+    ]],
+    ['spacing', [
+      ['s-1', '4px', 'grid unit'], ['s-2', '8px', 'cell padding, inner gaps'], ['s-3', '12px', 'control padding, deck-frame gaps'], ['s-4', '16px', 'pane gutter, sheet padding, section gap'],
+      ['s-5', '20px', 'strip column gap'], ['s-6', '24px', 'reserved for large sections'],
+      ['row', '36px', 'table row height'], ['control', '36px desktop / 40px Steam Deck', 'buttons, inputs, checks'], ['chip', '20px tall / 40px min width (24px on Deck)', ''],
+    ]],
+    ['radii, borders, shadows', [
+      ['radius', '2px', 'everywhere'], ['border', '1px solid edge', 'sheets, rows'], ['border-strong', '1px solid edge-strong', 'controls, table head'],
+      ['title-rule', '2px solid edge-strong', 'under title blocks'], ['shadow', 'none', ''],
+    ]],
+  ];
+  function tokenBlock() {
+    const lines = ['/* Deep Claim · final tokens · plate C "Control Room" with title blocks · dashboard H4 */', ':root {'];
+    for (const [group, items] of FINAL_TOKENS) {
+      lines.push(`  /* ${group} */`);
+      for (const [name, value, note] of items) {
+        const key = group.startsWith('colour (inverse') ? `--inv-${name}` : `--${name}`;
+        lines.push(`  ${key}: ${value};${note ? ` /* ${note} */` : ''}`);
+      }
+    }
+    lines.push('}');
+    return lines.join('\n');
+  }
+  const toast = document.getElementById('toast');
+  document.getElementById('btnTokens').addEventListener('click', () => {
+    const text = tokenBlock();
+    const done = () => { toast.textContent = 'Tokens copied.'; setTimeout(() => { toast.textContent = ''; }, 2000); };
+    const fallback = () => {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { toast.textContent = 'Select and copy:'; } document.body.removeChild(ta);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+  });
+
+  // deck show/hide + drag
+  function setDeck(open) { deck.hidden = !open; launcher.hidden = open; }
+  document.getElementById('btnHide').addEventListener('click', () => setDeck(false));
+  launcher.addEventListener('click', () => setDeck(true));
+  document.addEventListener('keydown', e => {
+    if (e.key === '`' && !/input|textarea/i.test(e.target.tagName)) { e.preventDefault(); setDeck(deck.hidden); }
+  });
+  (function drag() {
+    const h = document.getElementById('deckHandle'); let sx = 0, sy = 0, ox = 0, oy = 0, on = false;
+    let armed = false, pid = null;
+    h.addEventListener('pointerdown', e => {
+      if (e.target.closest('button')) return;
+      armed = true; on = false; pid = e.pointerId; const r = deck.getBoundingClientRect(); sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+    });
+    h.addEventListener('pointermove', e => {
+      if (armed && !on && (Math.abs(e.clientX - sx) > 3 || Math.abs(e.clientY - sy) > 3)) { on = true; try { h.setPointerCapture(pid); } catch (err) { /* ignore */ } }
+      if (!on) return;
+      const w = deck.offsetWidth, hh = deck.offsetHeight;
+      const x = Math.min(Math.max(0, ox + e.clientX - sx), window.innerWidth - w);
+      const y = Math.min(Math.max(0, oy + e.clientY - sy), window.innerHeight - hh);
+      deck.style.left = x + 'px'; deck.style.top = y + 'px'; deck.style.right = 'auto'; deck.style.bottom = 'auto';
+    });
+    h.addEventListener('pointerup', () => { on = false; armed = false; });
+    h.addEventListener('pointercancel', () => { on = false; armed = false; });
+  })();
+
+  render();
+})();
+</script>

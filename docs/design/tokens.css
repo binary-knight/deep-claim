@@ -1,0 +1,72 @@
+/* Deep Claim · final tokens · plate C "Control Room" with title blocks · dashboard H4 */
+:root {
+  /* colour */
+  --canvas: #0a0f17; /* window ground */
+  --panel: #111826; /* sheets, header, status line */
+  --panel-2: #172031; /* inset wells, strip, button fill */
+  --edge: #243249; /* hairlines, row rules */
+  --edge-strong: #2f4160; /* control borders, title-block rule */
+  --text: #ffffff; /* primary */
+  --text-2: #c9d4e6; /* secondary, keys */
+  --text-3: #8fa0ba; /* muted, labels, sub-lines */
+  --accent: #2f8cff; /* primary buttons, selection, sparklines */
+  --accent-hover: #4a9cff;
+  --accent-text: #ffffff; /* text on accent */
+  --warn: #f0b340; /* warnings, warn chips */
+  --danger: #ff6e6e; /* rejections, insolvency */
+  --good: #5fd98a; /* operating, solvent */
+  --selection: #163058; /* selected row and tab */
+  /* colour (inverse scheme) */
+  --inv-canvas: #f3f5f8;
+  --inv-panel: #ffffff;
+  --inv-panel-2: #eef1f5;
+  --inv-edge: #cfd6e0;
+  --inv-edge-strong: #b7c1cf;
+  --inv-text: #121820;
+  --inv-text-2: #2f3a4a;
+  --inv-text-3: #4f5c6d;
+  --inv-accent: #1f5fb8;
+  --inv-accent-hover: #2a6fcc;
+  --inv-accent-text: #ffffff;
+  --inv-warn: #8a5a00;
+  --inv-danger: #b42626;
+  --inv-good: #1b6f35;
+  --inv-selection: #dbe7f8;
+  /* type */
+  --font-ui: "Barlow", system-ui, sans-serif; /* all running text and controls */
+  --font-num: "JetBrains Mono", ui-monospace, monospace; /* every figure, date and id (tabular by construction) */
+  --font-display: "Barlow Condensed", "Barlow", sans-serif; /* h1, title blocks, company name */
+  --fs-12: 12px; /* labels, sub-lines, chips, table headers */
+  --fs-13: 13px; /* status line, strip, notes */
+  --fs-14: 14px; /* body, buttons, inputs */
+  --fs-16: 16px; /* reserved */
+  --fs-17: 17px; /* header figures, title blocks, finance stats */
+  --fs-20: 20px; /* screen title */
+  --lh-12: 16px;
+  --lh-13: 18px;
+  --lh-14: 20px;
+  --lh-16: 22px;
+  --lh-17: 22px;
+  --lh-20: 24px;
+  --weight-regular: 400;
+  --weight-medium: 500; /* buttons, values */
+  --weight-semibold: 600; /* names, h1 */
+  --weight-bold: 700; /* title blocks, chips */
+  --figures: font-variant-numeric: tabular-nums; /* on every .num, .figure and td.n; the mono face makes it true in RmlUi */
+  /* spacing */
+  --s-1: 4px; /* grid unit */
+  --s-2: 8px; /* cell padding, inner gaps */
+  --s-3: 12px; /* control padding, deck-frame gaps */
+  --s-4: 16px; /* pane gutter, sheet padding, section gap */
+  --s-5: 20px; /* strip column gap */
+  --s-6: 24px; /* reserved for large sections */
+  --row: 36px; /* table row height */
+  --control: 36px desktop / 40px Steam Deck; /* buttons, inputs, checks */
+  --chip: 20px tall / 40px min width (24px on Deck);
+  /* radii, borders, shadows */
+  --radius: 2px; /* everywhere */
+  --border: 1px solid edge; /* sheets, rows */
+  --border-strong: 1px solid edge-strong; /* controls, table head */
+  --title-rule: 2px solid edge-strong; /* under title blocks */
+  --shadow: none;
+}
