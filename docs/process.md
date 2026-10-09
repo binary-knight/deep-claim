@@ -66,3 +66,23 @@ declined and why.
   specs record feature decisions; playtests record what players did.
 - Numbering: specs are numbered in the order they are opened. The first
   is `001-sell-policies`.
+
+## Prose: drafted here, polished by agy
+
+Every sentence a player reads (log notices, status lines, rejection
+reasons, how-to-play text, event names and descriptions, research and
+tech descriptions, tooltips) goes through two hands:
+
+1. I draft it, plain and correct, with every number, unit and id in place.
+2. `tools/prose/polish.sh` sends the draft to the agy CLI with the
+   game's voice brief (an operator's desk with in-world flavour: a
+   foreman's note, concrete nouns, no buzzwords). agy may rewrite freely
+   so the result reads as human writing, with one rule: numbers, units,
+   plot and resource names and placeholders such as `{amount}` must
+   survive unchanged.
+3. The polished text is diffed against the draft and checked for those
+   invariants before it lands in `data/strings.json`.
+
+Prose lives in data, not in code, so the pipeline can run on a file
+(spec 002). Mockup copy for design sessions is exempt until it becomes
+real copy.
