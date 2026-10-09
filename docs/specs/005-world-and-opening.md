@@ -69,6 +69,26 @@ Plots tab: "N plots not yet listed" line; no other change.
   AI-as-player the day of its first operating mine; CI runs a 10-seed
   sweep as a sanity check with thresholds from the Goal.
 
+## Plan
+- `data/regions.json`: `plot_count` 30 per region. `data/balance.json`:
+  `plots_listed_at_start` 4, `opening_min_mineable` 2,
+  `opening_max_locked_region` 1, `max_unsold_rounds` 6,
+  `relist_cooldown_days` 180.
+- `sim/content.h`, `sim/serialize.h`: `BalanceParams::openingMinMineable`,
+  `openingMaxLockedRegion` (hashed with the rest of the balance).
+- `content/src/loader.cpp`: the two keys, with
+  `opening_min_mineable <= plots_listed_at_start`.
+- `sim/worldgen.h`, `sim/src/worldgen.cpp`: region classes
+  (`regionMineableAtStart`, `regionLockedAtStart`), the opening hand, and
+  the constrained shuffle of the remainder. World RNG stream only.
+- `game/src/ui_model.*`, `main.rml`, catalogue key `ui.unlisted_plots`:
+  "N plots not yet listed".
+- `sim_runner/main.cpp`: `--sweep N`, per-seed rows, summary, Goal
+  thresholds as the exit code; CTest `runner_sweep`.
+- Tests: `tests/worldgen_test.cpp` (200-seed property test),
+  `tests/content_test.cpp` (keys), fixture values in
+  `tests/test_content.h`; layout probe scenario retuned.
+
 ## Out of scope
 Deposit sizes, iron margin, rival bid premium, AI knobs (spec 006); new
 regions or resources; the asteroid phase.
