@@ -162,3 +162,52 @@ Market rules.
   `data/ai.json`; this spec restrains the rival only, and a brake on the
   player's own growth is left to the asteroid design; a typical mine
   should last five to seven years.
+- 2026-10-09 (build, step 1): **baseline.** `--sweep` now reports the
+  contest: mines built per company at years 2, 5, 8 and the end, mines by
+  state, bankruptcy days, first depletion, the lives of mines opened in
+  the first three years, and mean price over base. 50 seeds, 10 years,
+  one rival, spec 005 data and rules:
+
+| Measure | Baseline |
+| --- | --- |
+| Median day company 0's first mine operates | 273 |
+| Seeds with a bankrupt company | 6 of 50 |
+| Mines built by year 10, leader over trailer, median seed | 3.06x (worst 71x) |
+| Mines built by year 10, company 0 / company 1, median | 16 / 49 |
+| Mean price over base: iron, copper, nickel, lithium | 0.61, 0.53, 0.66, 0.99 |
+| Median life of a mine opened in the first three years | 1,789 days (722 mines) |
+| Seeds with no depleted mine by year 8 | 0 |
+| Median withdrawn plots at year 8 | 44 |
+
+- 2026-10-09 (build, step 1): **two of the draft's "now" figures were
+  wrong.** Depletion already happens: the first mine runs out on day 996
+  in the median seed, 16 mines have by year 8, and the median mine of the
+  early cohort lasts 4.97 years. What playtest 2 met was the tail, not
+  the median: a spread of 2.5 puts one deposit in six above 2.5 times the
+  median and has no upper limit. The work on deposits is therefore the
+  cap and the spread, not the medians. And the leader's lead over the
+  trailer is 3.06x in the median seed, not "about 5x"; the bad seeds
+  (71x, 67x, 20x) are the ones that end in bankruptcy.
+- 2026-10-09 (build, step 1): **what kills the trailing company.**
+  Confirmed from the monthly CSV of all six bankrupt seeds (9, 10, 18,
+  28, 37, 40). In every one the company had 1 to 5 mines, no operating
+  mine (or one) for the last one to three years and 1 to 4 mothballed,
+  with iron at 27 to 38 (0.45 to 0.65x base) and copper at 290 to 450
+  (0.32 to 0.5x). Seed 9 loses exactly 1,200 a day from day 1620 to
+  bankruptcy: one mothballed mine at 15% of 8,000. In three seeds loan
+  instalments, and new loans taken to cover them, sit on top. So the
+  mothball charge is the drain, as the draft guessed, but it is the last
+  link: the mines are mothballed because the leader's 30 to 60 mines have
+  pushed prices under the trailer's opex, and the trailer cannot buy its
+  way out because no plot passes its return test at those prices. The
+  order of work follows from that: the valuation rule first (the cause),
+  then the wind-down rule for whatever bleeding is left.
+- 2026-10-09 (build, step 1): **the price target and the land target pull
+  against each other.** The market rule is price = base x (demand /
+  (demand + company supply)) ^ elasticity. A mean of 0.75x base allows
+  company supply of 0.78 of base demand in iron (three mines), 0.51 in
+  copper (under two), 0.43 in nickel (just over one) and 0.33 in lithium
+  (one): about seven producing mines in the world. Twenty-five or fewer
+  withdrawn plots at year 8 needs the two companies to have bought most
+  of the hundred plots listed by then. Both rows are reported, not gated;
+  the build tunes for the gated rows and reports where these two land.
