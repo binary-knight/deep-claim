@@ -370,6 +370,54 @@ struct SweepRow {
     bool worldValid = true;
 };
 
+// The opening hand by region class, and the longest run of one region among
+// the monthly listings that follow it.
+void describeQueue(const sim::Content& content, const sim::WorldState& state, SweepRow& row) {
+    const auto regionOf = [&state](std::size_t position) {
+        return state.plots[state.listingQueue[position].index()].region;
+    };
+    const std::size_t hand = state.nextListing;  // the opening hand is already listed
+    for (std::size_t i = 0; i < hand; ++i) {
+        const sim::RegionStart kind =
+            sim::classifyRegionAtStart(content, content.regions[regionOf(i).index()]);
+        row.openingMineable += kind == sim::RegionStart::Mineable ? 1U : 0U;
+        row.openingLocked += kind == sim::RegionStart::Locked ? 1U : 0U;
+    }
+    std::uint32_t run = 0;
+    for (std::size_t i = hand; i < state.listingQueue.size(); ++i) {
+        run = i > hand && regionOf(i) == regionOf(i - 1) ? run + 1 : 1;
+        row.longestRegionRun = std::max(row.longestRegionRun, run);
+    }
+}
+
+// Company 0's first mine: the day construction started and the day it opened.
+void recordFirstMine(const sim::TickReport& report, SweepRow& row) {
+    for (const sim::Notice& notice : report.notices) {
+        if (notice.company != sim::CompanyId(0)) {
+            continue;
+        }
+        if (notice.kind == sim::NoticeKind::MineStarted && row.firstMineStartedDay == 0) {
+            row.firstMineStartedDay = report.day + 1;
+        }
+        if (notice.kind == sim::NoticeKind::MineOperational && row.firstMineOperatingDay == 0) {
+            row.firstMineOperatingDay = report.day + 1;
+        }
+    }
+}
+
+void recordLand(const sim::Content& content, const sim::WorldState& state, SweepRow& row) {
+    for (std::size_t y = 0; y < kSweepYears.size(); ++y) {
+        if (state.day == kSweepYears.at(y) * sim::kDaysPerYear) {
+            row.unlisted.at(y) =
+                static_cast<std::uint32_t>(state.listingQueue.size()) - state.nextListing;
+            row.withdrawn.at(y) = static_cast<std::uint32_t>(state.withdrawnQueue.size());
+        }
+    }
+    if (state.day % sim::kDaysPerYear == 0 && !sim::validateWorld(content, state)) {
+        row.worldValid = false;
+    }
+}
+
 SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::Seed seed) {
     sim::GameSetup setup;
     setup.playerName = "Player (AI)";
@@ -380,25 +428,8 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
     sim::HeuristicController ai(content);
     SweepRow row;
     row.seed = seed;
-
     const sim::WorldState& state = simulation.state();
-    const auto kindOf = [&](sim::PlotId plot) {
-        return sim::classifyRegionAtStart(
-            content, content.regions[state.plots[plot.index()].region.index()]);
-    };
-    const std::size_t hand = state.nextListing;  // the opening hand is already listed
-    for (std::size_t i = 0; i < hand; ++i) {
-        const sim::RegionStart kind = kindOf(state.listingQueue[i]);
-        row.openingMineable += kind == sim::RegionStart::Mineable ? 1U : 0U;
-        row.openingLocked += kind == sim::RegionStart::Locked ? 1U : 0U;
-    }
-    std::uint32_t run = 0;
-    for (std::size_t i = hand; i < state.listingQueue.size(); ++i) {
-        const bool same = i > hand && state.plots[state.listingQueue[i].index()].region ==
-                                          state.plots[state.listingQueue[i - 1].index()].region;
-        run = same ? run + 1 : 1;
-        row.longestRegionRun = std::max(row.longestRegionRun, run);
-    }
+    describeQueue(content, state, row);
 
     const std::size_t companyCount = state.companies.size();
     for (sim::Day d = 0; d < options.days; ++d) {
@@ -410,27 +441,8 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
         if (state.nextListing != listedBefore && state.nextListing == state.listingQueue.size()) {
             row.lastNewListingDay = report.day + 1;
         }
-        for (const sim::Notice& notice : report.notices) {
-            if (notice.company != sim::CompanyId(0)) {
-                continue;
-            }
-            if (notice.kind == sim::NoticeKind::MineStarted && row.firstMineStartedDay == 0) {
-                row.firstMineStartedDay = report.day + 1;
-            } else if (notice.kind == sim::NoticeKind::MineOperational &&
-                       row.firstMineOperatingDay == 0) {
-                row.firstMineOperatingDay = report.day + 1;
-            }
-        }
-        for (std::size_t y = 0; y < kSweepYears.size(); ++y) {
-            if (state.day == kSweepYears.at(y) * sim::kDaysPerYear) {
-                row.unlisted.at(y) =
-                    static_cast<std::uint32_t>(state.listingQueue.size()) - state.nextListing;
-                row.withdrawn.at(y) = static_cast<std::uint32_t>(state.withdrawnQueue.size());
-            }
-        }
-        if (state.day % sim::kDaysPerYear == 0 && !sim::validateWorld(content, state)) {
-            row.worldValid = false;
-        }
+        recordFirstMine(report, row);
+        recordLand(content, state, row);
     }
     for (const sim::Company& company : state.companies) {
         row.finalCashCents.push_back(company.cash.cents());
@@ -464,7 +476,7 @@ Spread spreadOver(const std::vector<SweepRow>& rows, const Get& get) {
 }
 
 std::string spreadJson(const Spread& spread) {
-    return std::format("{{\"min\": {}, \"median\": {}, \"max\": {}}}", spread.min, spread.median,
+    return std::format(R"({{"min": {}, "median": {}, "max": {}}})", spread.min, spread.median,
                        spread.max);
 }
 

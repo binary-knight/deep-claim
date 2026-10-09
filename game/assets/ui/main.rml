@@ -131,14 +131,17 @@
                             <h2><span class="idx">01</span>For sale</h2>
                             <table>
                                 <tr><th class="w-plot">Plot</th><th class="w-region">Region</th><th class="n w-area">Area</th><th class="n w-money">Ask</th><th class="n w-bids">Bids</th><th class="n w-day">Closes</th><th>Survey</th></tr>
-                                <tr data-for="s : for_sale" class="row" data-class-sel="s.index == selected_plot" data-event-click="select_plot(s.index)">
-                                    <td class="name num">{{s.name}}</td>
-                                    <td class="nw">{{s.region}}</td>
-                                    <td class="n">{{s.area}}</td>
-                                    <td class="n">{{s.ask}}</td>
-                                    <td class="n">{{s.bids}}</td>
-                                    <td class="n">{{s.closes}}</td>
-                                    <td>{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'" data-class-good="s.flag_class == 'good'">{{s.flag}}</span></td>
+                                <!-- The selection class sits on the cells, not the row: this list
+                                     shrinks as plots sell, and RmlUi reads a class binding on the
+                                     repeated element itself once more after its entry is gone. -->
+                                <tr data-for="s : for_sale" class="row" data-event-click="select_plot(s.index)">
+                                    <td class="name num" data-class-sel="s.index == selected_plot">{{s.name}}</td>
+                                    <td class="nw" data-class-sel="s.index == selected_plot">{{s.region}}</td>
+                                    <td class="n" data-class-sel="s.index == selected_plot">{{s.area}}</td>
+                                    <td class="n" data-class-sel="s.index == selected_plot">{{s.ask}}</td>
+                                    <td class="n" data-class-sel="s.index == selected_plot">{{s.bids}}</td>
+                                    <td class="n" data-class-sel="s.index == selected_plot">{{s.closes}}</td>
+                                    <td data-class-sel="s.index == selected_plot">{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'" data-class-good="s.flag_class == 'good'">{{s.flag}}</span></td>
                                 </tr>
                             </table>
                             <span class="sub" data-if="no_unlisted != ''">{{no_unlisted}}</span>

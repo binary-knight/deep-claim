@@ -1131,6 +1131,8 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.notice_locked_soon.one", "resource,days"},
     {"ui.notice_locked_soon.many", "resource,days"},
     {"ui.notice_locked_ready", "resource,tech"},
+    {"ui.unlisted_plots.one", "count"},
+    {"ui.unlisted_plots.many", "count"},
     {"ui.no_unlisted", ""},
     {"ui.no_unlisted_withdrawn.one", "count"},
     {"ui.no_unlisted_withdrawn.many", "count"},

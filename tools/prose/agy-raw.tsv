@@ -195,3 +195,5 @@ ui.no_unlisted_withdrawn.many	No unlisted land left on the books. {count} withdr
 ui.loan_blocked_credit	Remaining credit is down to {amount}, below the bank's minimum loan of {min}.
 ui.loan_blocked_count	The bank allows {count} open loans, and every one of them is already drawn.
 ui.log_empty	Nothing logged under this heading yet.
+ui.unlisted_plots.one	{count} plot hasn't been listed yet.
+ui.unlisted_plots.many	{count} plots haven't been listed yet.
