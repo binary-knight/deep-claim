@@ -360,11 +360,10 @@ void printSummary(const Options& options, const sim::Content& content,
 
 // The years at which unlisted and withdrawn land are sampled.
 constexpr std::array<std::uint32_t, 3> kSweepYears = {2, 5, 8};
-// Goal thresholds from docs/specs/005-world-and-opening.md. The first two
-// are properties of the world and gate the exit code. The first-mine day is
-// reported, not gated: the land allows a mine by day 227 in the best seeds,
-// but when the built-in AI buys depends on its bidding rules, which belong to
-// spec 006. Gate it there once the AI is tuned.
+// Goal thresholds from docs/specs/005-world-and-opening.md. All three gate
+// the exit code; the first-mine day was reported only until spec 006 found
+// why the AI-played company bought late (its bids always lost to the
+// rival's) and fixed it.
 constexpr std::uint32_t kGoalMineableOpening = 2;
 constexpr std::uint32_t kGoalLandYear = 8;
 constexpr sim::Day kGoalFirstMineDay = 250;
@@ -381,8 +380,12 @@ constexpr std::int64_t kGoalWithdrawnYear8 = 25;
 // Mines opened this long before the end of the run form the cohort whose
 // lives are measured: long enough that a mine inside the goal has finished.
 constexpr sim::Day kMineLifeCohortDays = kGoalMineLifeMaxDays;
-// Whether the spec 006 goals decide the exit code.
-constexpr bool kGateContest = false;
+// The spec 006 goals that decide the exit code: bankruptcies, the lead of
+// one company over the other, and depletion by year 8. Mean prices, mine
+// life and withdrawn land are reported with their goals but do not gate:
+// the first and last pull against each other under the market rule (see
+// the spec's Decisions), and mine life needs a ten-year run to measure.
+constexpr bool kGateContest = true;
 
 // Mine counts are sampled at the sweep years and at the end of the run.
 constexpr std::size_t kMineSamples = kSweepYears.size() + 1;
@@ -769,8 +772,7 @@ std::vector<Check> sweepChecks(const Options& options, const std::vector<SweepRo
                            firstMine.median > options.days ? std::string("never")
                                                            : std::to_string(firstMine.median),
                            kGoalFirstMineDay, never, rows.size())
-             : std::format("not evaluated: the run is shorter than {} days", kGoalFirstMineDay),
-         false});
+             : std::format("not evaluated: the run is shorter than {} days", kGoalFirstMineDay)});
 
     const bool valid = std::ranges::all_of(rows, [](const SweepRow& r) { return r.worldValid; });
     checks.push_back(

@@ -35,6 +35,58 @@ TEST_CASE("Shipped data files load cleanly", "[content][data]") {
           c.findTech("lithium_processing"));
 }
 
+TEST_CASE("Shipped iron earns four and a half times a mine's opex at base", "[content][data]") {
+    // Spec 006: iron was a rounding error at 3.0. The figure is computed
+    // from the shipped files, so moving the price, the output or the opex
+    // without the others fails here.
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    REQUIRE(result.ok());
+    const sim::Content& c = *result.content;
+    const sim::ResourceDef& iron = c.resources[c.findResource("iron").index()];
+    const sim::Money revenue = iron.basePrice * iron.baseOutputTonnesPerDay;
+    CHECK(revenue.cents() * 2 == c.balance.mineOpexPerDay.cents() * 9);
+    // Every other ore earns more per mine than iron, so iron is the floor
+    // and the Copper Belt stays the prize.
+    for (const sim::ResourceDef& resource : c.resources) {
+        CHECK((resource.basePrice * resource.baseOutputTonnesPerDay) >= revenue);
+    }
+}
+
+TEST_CASE("Shipped deposits are capped at four medians", "[content][data][worldgen]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    REQUIRE(result.ok());
+    const sim::Content& c = *result.content;
+    for (const sim::RegionDef& region : c.regions) {
+        for (const sim::DepositPrior& prior : region.deposits) {
+            CHECK(prior.tonnesMaxMult == sim::Fixed::fromInt(4));
+        }
+    }
+    for (sim::Seed seed = 1; seed <= 20; ++seed) {
+        const sim::Simulation simulation(c, seed, test::setup());
+        const sim::WorldState& state = simulation.state();
+        for (std::size_t p = 0; p < state.plots.size(); ++p) {
+            const sim::RegionDef& region = c.regions[state.plots[p].region.index()];
+            for (const sim::DepositTruth& truth : state.hidden.plotDeposits[p].deposits) {
+                for (const sim::DepositPrior& prior : region.deposits) {
+                    if (prior.resource == truth.resource) {
+                        CHECK(truth.tonnesTotal <= prior.tonnesMedian * 4);
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("The shipped competitor's knobs are the tuned ones", "[content][data][ai]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    REQUIRE(result.ok());
+    const sim::AiParams& ai = result.content->ai;
+    CHECK(ai.supplyDiscount == sim::Fixed::one());
+    CHECK(ai.firstMineRequiredReturn <= ai.requiredReturn);
+    CHECK(ai.firstMineRecoverableShare >= ai.recoverableShare);
+    CHECK(result.content->balance.openingMineablePresence == sim::Fixed::fromRatio(1, 2));
+}
+
 TEST_CASE("A world generates from the shipped data", "[content][data][worldgen]") {
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
     REQUIRE(result.ok());

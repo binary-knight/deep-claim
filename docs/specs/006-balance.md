@@ -278,3 +278,89 @@ Market rules.
   rule conditional on the diagnosis, and the diagnosis is that the
   mothball charge is the last link, not the cause. Step 5 shows whether
   any bankruptcy is left for it to prevent.
+- 2026-10-09 (build, step 5): **tuning, one variable at a time.** Each row
+  adds one change to the row above; 50 seeds, 10 years, one rival.
+  Columns: median day company 0's first mine operates; seeds with a
+  bankruptcy; mines built, leader over trailer, median seed; mean price
+  over base for iron, copper, nickel, lithium; median life in days of
+  mines opened in the first three years; median withdrawn plots at year
+  8; mines built by company 0 / company 1.
+
+| Change | First mine | Bankrupt | Ratio | Prices | Life | Withdrawn | Mines |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Baseline (spec 005) | 273 | 6 | 3.06x | 0.61 0.53 0.66 0.99 | 1,789 | 44 | 16 / 49 |
+| Price valued at no more than base | 273 | 6 | 3.47x | 0.61 0.52 0.66 0.99 | 1,744 | 44 | 16 / 49 |
+| Bid offset fixed | 228 | 4 | 1.27x | 0.61 0.53 0.66 0.98 | 1,686 | 44 | 32 / 33 |
+| `supply_discount` 0 to 1 | 228 | 1 | 1.13x | 0.64 0.53 0.67 0.99 | 1,814 | 50 | 29 / 28 |
+| First-mine terms 1.1 and 0.6 (step 4 as committed) | 228 | 3 | 1.13x | 0.64 0.53 0.67 0.99 | 1,801 | 50 | 28 / 29 |
+| `tonnes_max_mult` 4 on every deposit | 228 | 3 | 1.12x | 0.64 0.53 0.67 1.00 | 1,801 | 49 | 28 / 29 |
+| `tonnes_spread` 1.6 on every deposit | 228 | 2 | 1.09x | 0.64 0.53 0.68 0.99 | 1,538 | 48 | 31 / 30 |
+| Medians raised (below) | 228 | 2 | 1.10x | 0.61 0.50 0.55 0.97 | 2,274 | 46 | 30 / 31 |
+| Iron `base_price` 60 to 90 | 228 | 0 | 1.08x | 0.57 0.50 0.54 0.96 | 2,167 | 37 | 37 / 37 |
+
+  Tried from the last row and not kept: first-mine terms back to 1.2 and
+  0.5 (no difference: 228, 0, 1.08x); `required_return` 1.5 (0.57 0.50
+  0.54 0.96, withdrawn 39) and 3.0 (0.60 0.51 0.57 0.96, withdrawn 50);
+  `max_open_prospects` 3 (no difference); `supply_discount` back to 0
+  (ratio 1.25x); iron at 75 (one bankruptcy, withdrawn 42).
+- 2026-10-09 (build, step 5): **deposits.** Spread 1.6 and a cap of four
+  medians everywhere. The narrower spread alone shortens the typical mine
+  (1,538 days) because the long tail was carrying the median, so the
+  medians go up by about 1.4 to put it back at six years: Northern Shield
+  iron 700k to 1.0M and nickel 20k to 50k; Copper Belt copper 90k to
+  150k, iron 250k to 350k, nickel 12k to 17k; Salt Flats lithium 6k to
+  12.5k, copper 30k to 40k. These are larger than the draft's starting
+  values (copper 110k, nickel 36k, lithium 9k), which gave 1,749 days.
+  The largest possible Copper Belt find is now 600k t, against the 1.59M t
+  of playtest 2; the cap is applied after the plot's area scales the draw.
+- 2026-10-09 (build, step 5): **iron at 90** is what ends the
+  bankruptcies. Every company that failed after the bid fix had one or
+  two iron mines earning 400 t x 35 to 45 against 8,000 opex and loan
+  instalments: enough to live, never enough to save 4M for a second
+  plot, and dead when the deposit ran out. At 90 that mine clears twice
+  as much. Revenue over opex at base is 4.5 (a data test computes it).
+- 2026-10-09 (build, step 5): **final sweep**, and the same data on 100
+  seeds the tuning never saw (51 to 150):
+
+| Measure | Baseline | Target | Seeds 1 to 50 | Seeds 51 to 150 |
+| --- | --- | --- | --- | --- |
+| Median day company 0's first mine operates | 273 | under 250 | 228 | 230 |
+| Seeds with a bankrupt company | 6 of 50 | at most 1 in 50 | 0 of 50 | 0 of 100 |
+| Mines built, leader over trailer, median seed | 3.06x | at most 2.5x | 1.08x | 1.08x |
+| Mean price over base: iron, copper, nickel, lithium | 0.61 0.53 0.66 0.99 | 0.75 or more | 0.57 0.50 0.54 0.96 | 0.57 0.50 0.56 1.00 |
+| Median life of a mine opened in the first three years | 1,789 days | 1,800 to 2,520 | 2,167 | 2,355 |
+| Seeds with no depleted mine by year 8 | 0 | none | 0 | 0 |
+| Median withdrawn plots at year 8 | 44 | 25 or fewer | 37 | 38 |
+| Iron revenue over opex at base | 3.0 | 4.5 | 4.5 | 4.5 |
+| Mines built by year 10, company 0 / company 1, median | 16 / 49 | | 37 / 37 | 37 / 37 |
+| Final cash, company 0 / company 1, median | $187M / $831M | | $765M / $832M | $764M / $818M |
+
+- 2026-10-09 (build, step 5): **two reported targets are missed, and
+  cannot be met with the means this spec allows.** Mean prices sit at
+  0.50 to 0.57x base for the three open ores (target 0.75x) and 37 plots
+  are withdrawn at year 8 (target 25). The cause is the size of the
+  markets against the size of a mine: one copper mine is 30% of base
+  copper demand, and a copper mine still earns twice its opex at 0.33x
+  base, so two rational companies build until the price is near there.
+  The AI's own knobs barely move it (`required_return` 3.0 gives 0.60
+  0.51 0.57 and 50 withdrawn plots: fewer mines, the same prices). For
+  information only, not shipped: doubling every `base_demand_tonnes_per_day`
+  gives 0.67 0.60 0.70 1.01 and 33 withdrawn; tripling gives 0.74 0.68
+  0.79 1.06 and 32, with median final cash near $1,500M. Market size is
+  not on this spec's list of things to tune and elasticity is on its list
+  of things not to; the build stops here on these two rows, as the spec
+  says to. They are a question for the owner: bigger markets, smaller
+  mines, or accept that ore trades at about half of base once two
+  companies are established.
+- 2026-10-09 (build, step 5): **gates.** `runner_sweep` (ten seeds, eight
+  years, every preset) now fails on: median first mine not under day 250
+  (spec 005's reported check, turned on), more than one bankrupt seed in
+  fifty (rounded up, so one in ten), a median leader-over-trailer ratio
+  above 3.0x, or any seed without a depleted mine by year 8. On the
+  shipped data the ten-seed run reads 227, 0, 1.10x and 0. Mean prices,
+  mine life and withdrawn land are printed with their goals and do not
+  gate. Mine life is measured on mines opened at least seven years before
+  the end of the run and so needs the ten-year sweep; in the eight-year
+  CTest run the cohort is 21 mines.
+- 2026-10-09 (build, step 5): the wind-down rule stays unbuilt: with no
+  bankruptcy in 150 seeds there is nothing for it to prevent.
