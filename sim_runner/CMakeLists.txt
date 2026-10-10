@@ -30,7 +30,9 @@ add_test(NAME runner_smoke COMMAND sim_runner --seed 1 --years 5 --ai 1 --sanity
 # to the build and to ctest, so the two agree there as well.
 set(DC_OPTIMIZED_BUILD_TYPES Release RelWithDebInfo MinSizeRel)
 if(CMAKE_BUILD_TYPE IN_LIST DC_OPTIMIZED_BUILD_TYPES AND NOT DC_SANITIZE)
-    add_test(NAME runner_sweep COMMAND sim_runner --sweep 50 --years 20 --ai 1)
+    # The command is the one spec 008 gives (AC-009). --sanity adds nothing to a
+    # sweep, which always exits non-zero when a gated check fails.
+    add_test(NAME runner_sweep COMMAND sim_runner --sweep 50 --years 20 --ai 1 --sanity)
     # Passing must mean the checks were judged, never that they were skipped.
     set_tests_properties(runner_sweep PROPERTIES
         TIMEOUT 180
@@ -59,8 +61,10 @@ endif()
 # Spec 008: the sweep summary carries the measures of bite, and on a sweep
 # shorter than 20 years the bite gates are not evaluated, so they cannot fail
 # it. No 20-year sweep takes that path, which is why this three-year one is
-# kept beside runner_sweep. The expression is matched against the whole
-# output; a dot matches a line break.
-add_test(NAME runner_bite_measures COMMAND sim_runner --sweep 2 --years 3 --ai 1)
+# kept beside runner_sweep. Each seed's row carries its idle-and-reopen spells
+# beside its longest idle run. --sanity is accepted with --sweep and changes
+# nothing. The expression is matched against the whole output; a dot matches a
+# line break.
+add_test(NAME runner_bite_measures COMMAND sim_runner --sweep 2 --years 3 --ai 1 --sanity)
 set_tests_properties(runner_bite_measures PROPERTIES PASS_REGULAR_EXPRESSION
-    [["below_breakeven_permille_iron": {"min".*"below_breakeven_permille_lithium": {"min".*"price_year_min_permille_iron": {"min".*"price_year_max_permille_lithium": {"min".*"mine_days_idled_0": {"min".*"mine_days_idled_1": {"min".*"cash_y10_0": null.*"cash_y10_1": null.*"seeds_with_bankruptcy_y1_10": [0-9]+,.*"seeds_with_bankruptcy_y11_20": null,.*"seeds_with_idled_mine": [0-9]+.*"name": "seeds_with_bankruptcy", "passed": true, "gated": true.*"name": "mean_prices", "passed": [a-z]+, "gated": false.*"name": "bite_iron", "passed": true, "gated": true, "detail": "not evaluated.*"name": "bite_copper", "passed": true, "gated": true, "detail": "not evaluated.*"name": "bite_nickel", "passed": true, "gated": true, "detail": "not evaluated.*"name": "idled_mines", "passed": true, "gated": true, "detail": "not evaluated.*"name": "cash_y10", "passed": true, "gated": true, "detail": "not evaluated.*"name": "bankruptcy_y1_10", "passed": true, "gated": true, "detail": "not evaluated.*"name": "bankruptcy_y11_20", "passed": true, "gated": false, "detail": "not evaluated.*"all_gated_passed": true]])
+    [["longest_idle_run_days": [0-9]+, "idle_reopen_spells": [0-9]+.*"below_breakeven_permille_iron": {"min".*"below_breakeven_permille_lithium": {"min".*"price_year_min_permille_iron": {"min".*"price_year_max_permille_lithium": {"min".*"mine_days_idled_0": {"min".*"mine_days_idled_1": {"min".*"cash_y10_0": null.*"cash_y10_1": null.*"seeds_with_bankruptcy_y1_10": [0-9]+,.*"seeds_with_bankruptcy_y11_20": null,.*"seeds_with_idled_mine": [0-9]+.*"name": "seeds_with_bankruptcy", "passed": true, "gated": true.*"name": "mean_prices", "passed": [a-z]+, "gated": false.*"name": "bite_iron", "passed": true, "gated": true, "detail": "not evaluated.*"name": "bite_copper", "passed": true, "gated": true, "detail": "not evaluated.*"name": "bite_nickel", "passed": true, "gated": true, "detail": "not evaluated.*"name": "idled_mines", "passed": true, "gated": true, "detail": "not evaluated.*"name": "cash_y10", "passed": true, "gated": true, "detail": "not evaluated.*"name": "bankruptcy_y1_10", "passed": true, "gated": true, "detail": "not evaluated.*"name": "bankruptcy_y11_20", "passed": true, "gated": false, "detail": "not evaluated.*"all_gated_passed": true]])

@@ -12,7 +12,7 @@
 // prices sat; and whether the markets bite (spec 008): how often each ore
 // sells below what a mine at base output needs, how far its yearly price
 // moves, how long mines stand idle and what a company holds at year 10. Its
-// exit code is the specs' goal thresholds.
+// exit code is the specs' goal thresholds, with or without --sanity.
 #include "sim/ai_controller.h"
 #include "sim/commands.h"
 #include "sim/content.h"
@@ -110,9 +110,10 @@ bool parseArgs(std::span<char*> args, Options& out) {
         }
     }
     if (out.sweep > 0) {
-        // A sweep has its own checks, and its seeds must not wrap round.
+        // A sweep's seeds must not wrap round. It has its own checks and
+        // always exits by them, so --sanity is accepted and adds nothing.
         const sim::Seed lastOffset = out.sweep - 1;
-        if (out.sanity || out.seed > std::numeric_limits<sim::Seed>::max() - lastOffset) {
+        if (out.seed > std::numeric_limits<sim::Seed>::max() - lastOffset) {
             return false;
         }
     }
@@ -403,7 +404,10 @@ constexpr sim::Day kBiteLastDay = kBiteLastYear * sim::kDaysPerYear;
 constexpr std::array<std::string_view, 3> kBiteOres = {"iron", "copper", "nickel"};
 constexpr std::int64_t kBiteMinPermille = 100;
 constexpr std::int64_t kBiteMaxPermille = 500;
-// A seed has an idled mine when one stood mothballed this many days in a row.
+// A seed has an idled mine when one stood mothballed this many days in a row
+// and was then reopened within the run. A mine left mothballed, because its
+// extractable ore ran out or for any other reason, shows no price decision
+// and does not count.
 constexpr std::uint32_t kIdledRunDays = 30;
 constexpr std::int64_t kGoalIdledSeedsPer50 = 40;
 constexpr std::uint32_t kCashYear = 10;
@@ -462,6 +466,8 @@ struct SweepRow {
     std::vector<std::int64_t> mineDaysIdled;
     std::vector<std::int64_t> cashY10Cents;
     std::uint32_t longestIdleRun = 0;  // most days in a row any one mine stood mothballed
+    // Times a mine went back to operating after kIdledRunDays or more mothballed.
+    std::uint32_t idleReopenSpells = 0;
     // Working state while the seed runs.
     std::vector<sim::Day> depletedDay;             // per mine, 1-based, 0 = not yet
     std::vector<std::int64_t> priceSumCents;       // per resource, saturating
@@ -618,11 +624,18 @@ void recordBitePrices(const sim::Content& content, const sim::WorldState& state,
 }
 
 // Idled mines and cash at year 10 (spec 008), once a day after the tick.
-// Idled means mothballed, whoever chose it and why.
+// Mine-days idled and the longest idle run count every mothballed day,
+// whoever chose it and why. An idle-and-reopen spell is a long enough run
+// that ends with the mine operating again: one that ends depleted or closed,
+// or is still running when the sweep stops, is not one.
 void recordBiteCompanies(const sim::WorldState& state, SweepRow& row) {
     row.idleRun.resize(state.mines.size(), 0);
     for (std::size_t m = 0; m < state.mines.size(); ++m) {
         if (state.mines[m].state != sim::MineState::Mothballed) {
+            const bool reopened = state.mines[m].state == sim::MineState::Operating;
+            if (reopened && row.idleRun[m] >= kIdledRunDays) {
+                ++row.idleReopenSpells;
+            }
             row.idleRun[m] = 0;
             continue;
         }
@@ -863,11 +876,11 @@ std::string biteJson(const Options& options, const SweepRow& row) {
     return std::format(
         "\"below_breakeven_permille\": {}, \"price_year_min_permille\": {}, "
         "\"price_year_max_permille\": {}, \"mine_days_idled\": [{}], \"cash_y{}\": {}, "
-        "\"longest_idle_run_days\": {}",
+        "\"longest_idle_run_days\": {}, \"idle_reopen_spells\": {}",
         listOrNull(biteMeasured(options.days), row.belowBreakEvenPermille),
         listOrNull(years, row.priceYearMinPermille), listOrNull(years, row.priceYearMaxPermille),
         joined(row.mineDaysIdled), kCashYear, listOrNull(cashY10Measured(options.days), cash),
-        row.longestIdleRun);
+        row.longestIdleRun, row.idleReopenSpells);
 }
 
 // Whether any company went bankrupt on a day after `after` and up to `upTo`
@@ -883,7 +896,7 @@ bool bankruptLater(const SweepRow& row) {
     return bankruptWithin(row, kCashDay, kBiteLastDay);
 }
 bool hasIdledMine(const SweepRow& row) {
-    return row.longestIdleRun >= kIdledRunDays;
+    return row.idleReopenSpells > 0;
 }
 
 // The spec 006 columns of one CSV row.
@@ -1119,8 +1132,8 @@ void biteChecks(const Options& options, const sim::Content& content,
     const auto idled = std::count_if(rows.begin(), rows.end(), hasIdledMine);
     const std::int64_t needed = (seeds * kGoalIdledSeedsPer50 + 49) / 50;
     add("idled_mines", idled >= needed,
-        std::format("{} of {} seeds had a mine mothballed for {} days in a row or more (goal: at "
-                    "least {})",
+        std::format("{} of {} seeds had a mine mothballed for {} days in a row or more and then "
+                    "reopened (goal: at least {})",
                     idled, seeds, kIdledRunDays, needed),
         true);
 
@@ -1350,7 +1363,10 @@ int main(int argc, char** argv) {
     Options options;
     if (!parseArgs(std::span<char*>(argv, static_cast<std::size_t>(argc)), options)) {
         std::cerr << "usage: sim_runner [--seed N] [--days N | --years N] [--ai N] [--data DIR] "
-                     "[--csv FILE] [--sanity] [--sweep N]\n";
+                     "[--csv FILE] [--sanity] [--sweep N]\n"
+                     "  --sanity  exit non-zero when a check of a single run fails; with --sweep "
+                     "it has no further effect, since a sweep always exits non-zero when a gated "
+                     "check fails\n";
         return 2;
     }
     const content::LoadResult loaded = content::loadFromDirectory(options.dataDir);
