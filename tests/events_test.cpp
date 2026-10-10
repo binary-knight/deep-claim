@@ -78,8 +78,9 @@ TEST_CASE("Event multipliers reach demand, opex and land prices", "[events]") {
           sim::Fixed::fromInt(2));
 
     // Opex: a notional operating mine costs 1.5x during the event.
-    CHECK(sim::mineDailyOpex(content, state, state.companies[0], sim::MineState::Operating) ==
-          content.balance.mineOpexPerDay.scaled(sim::Fixed::fromRatio(3, 2)));
+    const sim::ResourceId iron(0);
+    CHECK(sim::mineOpexQuote(content, state, state.companies[0], iron) ==
+          content.resources[iron.index()].mineOpexPerDay.scaled(sim::Fixed::fromRatio(3, 2)));
 
     // Land: plots listed while the event runs ask twice their land value.
     while (simulation.state().day < sim::kDaysPerMonth) {

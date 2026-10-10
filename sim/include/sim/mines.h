@@ -19,8 +19,6 @@ namespace sim {
 // What a company with these techs would pay to build on a plot of this area.
 [[nodiscard]] Money mineCapexQuote(const Content& content, const std::vector<TechId>& completed,
                                    std::int64_t areaHectares);
-[[nodiscard]] Money mineDailyOpex(const Content& content, const WorldState& world,
-                                  const Company& company, MineState state);
 
 // What `mine` costs its owner for one day in state `as` (spec 008). The
 // highest mineOpexPerDay among the mine's cost ores, times the owner's
@@ -34,6 +32,14 @@ namespace sim {
 // kMaxCashCents.
 [[nodiscard]] Money mineRunningCost(const Content& content, const WorldState& world,
                                     const Company& company, const Mine& mine, MineState as);
+
+// What an operating mine producing `resource` costs `company` today: the
+// ore's mineOpexPerDay times the same research and event cost multipliers
+// mineRunningCost applies. Quoted whether or not the company can extract the
+// ore yet; zero for a resource the content does not have. Saturates at
+// kMaxCashCents.
+[[nodiscard]] Money mineOpexQuote(const Content& content, const WorldState& world,
+                                  const Company& company, ResourceId resource);
 
 // What `mine` earns in a day at `prices` (one per resource, per tonne): its
 // most recent operating day's output at those prices, less its running cost

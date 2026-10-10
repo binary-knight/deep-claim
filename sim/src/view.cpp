@@ -181,18 +181,12 @@ void addMineEconomics(const Content& content, const WorldState& state, const Com
     }
 }
 
-// What an operating mine producing each ore would cost the viewer today:
-// the running cost of a mine whose only output is that ore, so the figure
-// carries the same research and event multipliers a real mine pays.
+// What an operating mine producing each ore would cost the viewer today.
 void addMineOpexQuotes(const Content& content, const WorldState& state, const Company& viewer,
                        CompanyView& view) {
     view.mineOpexQuotes.reserve(content.resources.size());
-    for (std::size_t r = 0; r < content.resources.size(); ++r) {
-        Mine probe;
-        probe.lastOutputTonnes.assign(content.resources.size(), 0);
-        probe.lastOutputTonnes[r] = 1;
-        view.mineOpexQuotes.push_back(
-            mineRunningCost(content, state, viewer, probe, MineState::Operating));
+    for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
+        view.mineOpexQuotes.push_back(mineOpexQuote(content, state, viewer, ResourceId(r)));
     }
 }
 

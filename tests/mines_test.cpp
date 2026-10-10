@@ -152,7 +152,8 @@ TEST_CASE("Operating mines extract, pay opex, decline and deplete", "[mines]") {
 
     const sim::Money before = simulation.state().companies[0].cash;
     simulation.tick();
-    CHECK(simulation.state().companies[0].cash == before - content.balance.mineOpexPerDay);
+    CHECK(simulation.state().companies[0].cash ==
+          before - content.resources[iron.index()].mineOpexPerDay);
     // Output declines as the deposit empties: 400 * (0.5 + 0.5 * 0.96) = 392.
     CHECK(mine.extractedTonnes[iron.index()] == 792);
 
@@ -190,7 +191,8 @@ TEST_CASE("Mothballed mines stop producing and pay reduced opex", "[mines]") {
     simulation.tick();
     CHECK(simulation.state().mines[0].extractedTonnes[0] == extracted);
     CHECK(simulation.state().companies[0].cash ==
-          before - content.balance.mineOpexPerDay.scaled(content.balance.mineMothballOpexMult));
+          before -
+              content.resources[0].mineOpexPerDay.scaled(content.balance.mineMothballOpexMult));
 
     simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 1});
     simulation.tick();
@@ -723,6 +725,38 @@ TEST_CASE("A single-ore mine pays that ore's running cost", "[mines][spec008]") 
     CHECK(runningCost(content, simulation, sim::MineState::Operating) ==
           sim::Money::fromUnits(8'000));
     CHECK(dayCharge(simulation) == sim::Money::fromUnits(8'000));
+}
+
+TEST_CASE("An ore's running cost quote is what a mine producing it pays", "[mines][spec008]") {
+    const sim::Content content = costedContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, 1'000'000)});
+    const sim::WorldState& state = simulation.state();
+    const sim::Company& player = state.companies[kPlayer.index()];
+
+    // The ore's own cost, whether or not the company can dig it today.
+    CHECK(sim::mineOpexQuote(content, state, player, kCopper) == sim::Money::fromUnits(12'000));
+    CHECK(sim::mineOpexQuote(content, state, player, kLithium) == sim::Money::fromUnits(20'000));
+    // The same figure an operating mine of that ore is charged.
+    CHECK(sim::mineOpexQuote(content, state, player, kIron) ==
+          runningCost(content, simulation, sim::MineState::Operating));
+    // An ore the content does not have costs nothing.
+    CHECK(sim::mineOpexQuote(content, state, player, sim::ResourceId(99)) == sim::Money::zero());
+    CHECK(sim::mineOpexQuote(content, state, player, sim::ResourceId()) == sim::Money::zero());
+}
+
+TEST_CASE("An ore's running cost quote carries the event cost multiplier", "[mines][spec008]") {
+    sim::Content content = costedContent();
+    content.events[0].dailyWeight = sim::Fixed::one();
+    content.events[0].minYear = 1;
+    content.events[0].effects.push_back(
+        {sim::EventEffectType::OpexMult, sim::ResourceId(), sim::Fixed::fromRatio(3, 2)});
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick();  // the event is active from day 0
+    const sim::WorldState& state = simulation.state();
+
+    CHECK(sim::mineOpexQuote(content, state, state.companies[kPlayer.index()], kCopper) ==
+          sim::Money::fromUnits(18'000));
 }
 
 TEST_CASE("A single-ore mine's margin and break-even follow its output", "[mines][spec008]") {

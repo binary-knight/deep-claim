@@ -332,11 +332,4 @@ TEST_CASE("Spec 008 content values are part of the content fingerprint", "[marke
         CHECK(sim::hashContent(changed) != original);
         CHECK(refused);
     }
-
-    // The single running-cost figure is being retired: it no longer counts.
-    sim::Content retired = content;
-    retired.balance.mineOpexPerDay = sim::Money::fromUnits(8'001);
-    CHECK(sim::hashContent(retired) == original);
-    sim::Simulation same(retired, 4, test::setup());
-    CHECK(same.load(saved.save()));
 }

@@ -1,5 +1,7 @@
 // Loads the real data/ files so that a typo in game content fails CI.
 #include "sim/content.h"
+#include "sim/fixed.h"
+#include "sim/money.h"
 #include "sim/simulation.h"
 #include "sim/world_state.h"
 #include "sim/worldgen.h"
@@ -35,18 +37,32 @@ TEST_CASE("Shipped data files load cleanly", "[content][data]") {
           c.findTech("lithium_processing"));
 }
 
-TEST_CASE("Shipped iron earns four and a half times a mine's opex at base", "[content][data]") {
-    // Spec 006: iron was a rounding error at 3.0. The figure is computed
-    // from the shipped files, so moving the price, the output or the opex
-    // without the others fails here.
+TEST_CASE("Shipped ores report their break-even share at base", "[content][data][spec008]") {
+    // Spec 008: the share of an ore's base price a mine at base output must
+    // earn to cover its running cost (cost per day / base output per day /
+    // base price). Computed from the shipped files and printed, so a tuning
+    // change shows its effect here; the tuned range is asserted once the
+    // economy is tuned.
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    REQUIRE(result.ok());
+    const sim::Content& c = *result.content;
+    for (const sim::ResourceDef& resource : c.resources) {
+        const sim::Money revenue = resource.basePrice * resource.baseOutputTonnesPerDay;
+        INFO(resource.id);
+        REQUIRE(revenue > sim::Money::zero());
+        const sim::Fixed share = resource.mineOpexPerDay.ratioTo(revenue);
+        WARN(resource.id << ": break-even share of base price " << sim::toString(share));
+    }
+}
+
+TEST_CASE("Shipped iron earns the least per mine at base", "[content][data]") {
+    // Spec 006: every other ore earns more per mine than iron, so iron is
+    // the floor and the Copper Belt stays the prize.
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
     REQUIRE(result.ok());
     const sim::Content& c = *result.content;
     const sim::ResourceDef& iron = c.resources[c.findResource("iron").index()];
     const sim::Money revenue = iron.basePrice * iron.baseOutputTonnesPerDay;
-    CHECK(revenue.cents() * 2 == c.balance.mineOpexPerDay.cents() * 9);
-    // Every other ore earns more per mine than iron, so iron is the floor
-    // and the Copper Belt stays the prize.
     for (const sim::ResourceDef& resource : c.resources) {
         CHECK((resource.basePrice * resource.baseOutputTonnesPerDay) >= revenue);
     }

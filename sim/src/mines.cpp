@@ -40,24 +40,6 @@ Money mineCapex(const Content& content, const Company& company, const Plot& plot
     return mineCapexQuote(content, company.completedTechs, plot.areaHectares);
 }
 
-Money mineDailyOpex(const Content& content, const WorldState& world, const Company& company,
-                    MineState state) {
-    const Fixed mult = techMultiplier(content, company, TechEffectType::OpexMult) *
-                       eventMultiplier(content, world, EventEffectType::OpexMult);
-    switch (state) {
-        case MineState::Operating:
-            return content.balance.mineOpexPerDay.scaled(mult);
-        case MineState::Mothballed:
-            return content.balance.mineOpexPerDay.scaled(mult).scaled(
-                content.balance.mineMothballOpexMult);
-        case MineState::Building:
-        case MineState::Depleted:
-        case MineState::Closed:
-            return Money::zero();
-    }
-    return Money::zero();
-}
-
 namespace {
 
 // Money arithmetic for the derived mine figures: every step is clamped to
@@ -126,6 +108,18 @@ std::optional<std::size_t> principalOre(const Content& content, const Mine& mine
     return best;
 }
 
+// A running cost of `baseCents` a day as `company` pays it today: times its
+// research cost multiplier and the active event cost multiplier.
+std::int64_t operatingOpexCents(const Content& content, const WorldState& world,
+                                const Company& company, std::int64_t baseCents) {
+    const std::int64_t mult =
+        checkedMulDiv(techMultiplier(content, company, TechEffectType::OpexMult).raw(),
+                      eventMultiplier(content, world, EventEffectType::OpexMult).raw(),
+                      Fixed::kScale)
+            .value_or(kMaxCashCents);
+    return saturatingMulDiv(baseCents, mult, Fixed::kScale, kMaxCashCents);
+}
+
 }  // namespace
 
 Money mineRunningCost(const Content& content, const WorldState& world, const Company& company,
@@ -133,18 +127,22 @@ Money mineRunningCost(const Content& content, const WorldState& world, const Com
     if (as != MineState::Operating && as != MineState::Mothballed) {
         return Money::zero();
     }
-    const std::int64_t mult =
-        checkedMulDiv(techMultiplier(content, company, TechEffectType::OpexMult).raw(),
-                      eventMultiplier(content, world, EventEffectType::OpexMult).raw(),
-                      Fixed::kScale)
-            .value_or(kMaxCashCents);
-    std::int64_t cents = saturatingMulDiv(costOreOpexCents(content, company, mine), mult,
-                                          Fixed::kScale, kMaxCashCents);
+    std::int64_t cents =
+        operatingOpexCents(content, world, company, costOreOpexCents(content, company, mine));
     if (as == MineState::Mothballed) {
         cents = saturatingMulDiv(cents, content.balance.mineMothballOpexMult.raw(), Fixed::kScale,
                                  kMaxCashCents);
     }
     return Money::fromCents(cents);
+}
+
+Money mineOpexQuote(const Content& content, const WorldState& world, const Company& company,
+                    ResourceId resource) {
+    if (!resource.valid() || resource.index() >= content.resources.size()) {
+        return Money::zero();
+    }
+    return Money::fromCents(operatingOpexCents(
+        content, world, company, content.resources[resource.index()].mineOpexPerDay.cents()));
 }
 
 Money mineDailyMargin(const Content& content, const WorldState& world, const Company& company,
