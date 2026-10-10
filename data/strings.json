@@ -308,6 +308,7 @@
   "ui.survey_pending": "survey in progress",
   "ui.survey_pending_again": "new survey in progress",
   "ui.survey_title": "Survey, day {day}",
+  "ui.survey_unaffordable": "A survey costs {amount}. The ledger won't cover it.",
   "ui.tech_available": "Ready to start.",
   "ui.tech_available_busy": "Ready, but the lab is busy.",
   "ui.tech_bankrupt": "The company is bankrupt",

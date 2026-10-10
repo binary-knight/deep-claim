@@ -321,3 +321,4 @@ ui.pending_policy_on	Auto-sell on: {resource}
 ui.pending_policy_off	Auto-sell off: {resource}
 ui.pending_cover_on	Cover costs on
 ui.pending_cover_off	Cover costs off
+ui.survey_unaffordable	A survey costs {amount}. The ledger won't cover it.
