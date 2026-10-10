@@ -1,6 +1,6 @@
 # 007: Orders show at once, and can be taken back
 
-Status: draft 2026-10-10, awaiting approval.
+Status: approved 2026-10-10, with the pending-loan amendment (see Decisions).
 
 ## Goal
 An order must be visible the moment it is given. Today an order placed
@@ -27,6 +27,13 @@ be withdrawn before the clock restarts.
   pending order costs money, and "Available" is reduced by it. Buttons
   that the remaining money cannot cover are disabled with the usual
   reason, so a paused turn cannot be over-spent.
+- **Borrowed money counts.** A pending loan adds its principal to
+  "Available", so a loan and the bid it pays for can be given in the
+  same paused turn (the sim applies orders in the order given).
+  Cancelling the loan takes the money back out: orders it was covering
+  stay pending and are flagged "not covered", and the sim will reject
+  them if the clock restarts as things stand. A pending manual sale does
+  not count, because the price can move before it is made.
 - **Pending orders list.** While anything is pending, a line beside the
   speed controls reads "N orders waiting for the clock"; clicking it
   opens the list, each with Cancel, and "Cancel all".
@@ -55,9 +62,10 @@ removed from the session's queue before the sim sees it.
 - `Session::pendingOrders()` returns the queued commands with a stable
   id each; `Session::cancel(id)` and `cancelAll()` remove them.
 - `Session::committed()` sums what the queue will cost at today's
-  quotes (survey fee, bid amount, mine capex, tech cost, repayment), and
-  the client uses view cash minus reserved minus committed for its
-  affordability checks.
+  quotes (survey fee, bid amount, mine capex, tech cost, repayment),
+  `Session::pendingBorrowed()` sums the principal of queued loans, and
+  the client uses view cash minus reserved minus committed plus pending
+  borrowed for its affordability checks.
 - **Trace.** A `command` record is written when the order is handed to
   the sim, not when the button is pressed, so a cancelled order never
   appears as given and replay needs no new rule. Giving and cancelling
@@ -93,3 +101,6 @@ several days ahead. Undo for orders already given. Any balance change
 ## Decisions
 - 2026-10-10: drafted from playtest 3. The owner asked for immediate
   feedback during play and chose cancellable pending orders.
+- 2026-10-10: approved by the owner with one amendment: a pending loan
+  counts toward Available (the draft would have blocked "borrow, then
+  bid" within one paused turn). Pending manual sales do not count.
