@@ -1576,6 +1576,7 @@ bool noticeIsWarning(sim::NoticeKind kind) {
         case sim::NoticeKind::IdleMineWarning:
         case sim::NoticeKind::MineFoundNothing:
         case sim::NoticeKind::MineRunningLow:
+        case sim::NoticeKind::MineLosingMoney:
             return true;
         default:
             return false;

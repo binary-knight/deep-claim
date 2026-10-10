@@ -445,11 +445,14 @@ body.deck #pausemenu { width: 300dp; }
 body.deck th.w-res { width: 200dp; }
 body.deck th.w-chart { width: 120dp; }
 body.deck price-chart.table { width: 120dp; }
-body.deck th.w-mine { width: 116dp; }
 /* The mine figures (spec 008) sit under the output and want the room: in
    this frame the dashboard's area drops under the region, as it stands on
-   the Plots tab, and the region column narrows to that tab's width. */
-body.deck th.w-region2 { width: 130dp; }
+   the Plots tab. A 12-character figure is 96dp here and must fit the Output
+   column while a mine order widens the action column, so the region and
+   mine columns give up what their widest text does not use (a region name
+   is 96dp, a chip 93dp). */
+body.deck th.w-mine { width: 108dp; }
+body.deck th.w-region, body.deck th.w-region2 { width: 108dp; }
 body.deck td .area { display: block; }
 body.deck th.w-act.wide { width: 224dp; }
 body.deck th.w-start { width: 220dp; }

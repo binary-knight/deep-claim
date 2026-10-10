@@ -1411,16 +1411,22 @@ void checkLosingPanel(Rml::Context& context, std::string_view where, const Losin
                   std::format("{}: the panel's loss is not in the warning colour", where));
 }
 
-// The notice's line on the Log tab.
+// The notice's line on the Log tab, shown as a warning: main.rml binds the
+// row's `warning` to the line's "warn" class, which main.rcss colours.
 void checkLosingLogLine(Rml::Context& context, std::string_view where, const LosingMine& losing,
                         Checks& checks) {
     settle(context);
     Rml::Element* content = context.GetDocument(0)->GetElementById("content");
     std::size_t shown = 0;
+    std::size_t warnings = 0;
     for (Rml::Element* line : visibleElements(content, "div", "line")) {
-        shown += visibleElements(line, "span", "t", losing.noticeText).size();
+        const std::size_t here = visibleElements(line, "span", "t", losing.noticeText).size();
+        shown += here;
+        warnings += line->IsClassSet("warn") ? here : 0;
     }
     checks.same(std::format("{}: the notice's lines on the Log tab", where), shown, std::size_t{1});
+    checks.same(std::format("{}: the notice's lines shown as a warning", where), warnings,
+                std::size_t{1});
 }
 
 // The notice and the clock. With the rule on the clock stopped on the day
@@ -1436,10 +1442,11 @@ void checkNotice(const game::App& app, const sim::Content& content, const Losing
     checks.same("losing-mine lines in the log", losing.notices, std::size_t{1});
     checks.expect(losing.noticeText.find(plot) != std::string::npos,
                   std::format("the notice does not name {}: \"{}\"", plot, losing.noticeText));
-    checks.expect(
-        std::ranges::any_of(model.log,
-                            [&](const game::LogRow& row) { return row.text == losing.noticeText; }),
-        "the notice is not among the Log tab's rows");
+    const auto row = std::ranges::find_if(
+        model.log, [&](const game::LogRow& shown) { return shown.text == losing.noticeText; });
+    checks.expect(row != model.log.end(), "the notice is not among the Log tab's rows");
+    checks.expect(row != model.log.end() && row->warning,
+                  "the notice's row in the log is not a warning");
     const auto rule = static_cast<std::size_t>(game::PauseOn::MineLosing);
     checks.expect(
         model.pause_rows.size() > rule && model.pause_rows[rule].on == ruleOn &&
@@ -1572,16 +1579,13 @@ int probeLosingMine(Rml::Context& context, game::App& app, LoggingSystem& system
     laidOut = probeLosingFrames(context, app, system, stopped, expected,
                                 "losing mine, mothball ordered", checks, spillWaiting) &&
               laidOut;
-    // The figure must fit its cell. With a mine order waiting it is known
-    // not to in the deck frame's Plots tab (reported with task 012: the cell
-    // is 87.5dp and twelve 14dp characters are 96dp); that is main.rcss's to
-    // put right, so it is measured and printed here and does not fail the
-    // probe. Make it a failure like the first once the column has the room.
+    // The figure must fit its cell, with a mine order waiting too: that is
+    // where the column is narrowest (the deck frame's Plots tab).
     std::cout << std::format(
         "\nknife-edge: \"{}\" ({} characters) runs {:.1f}dp past the Output cell at most, "
         "{:.1f}dp with a mine order waiting (zero or less fits)\n",
         expected.earns, expected.earns.size(), spill, spillWaiting);
-    if (spill > kSpillTolerance) {
+    if (std::max(spill, spillWaiting) > kSpillTolerance) {
         std::cout << "    the figure does not fit the Output cell\n";
         laidOut = false;
     }
