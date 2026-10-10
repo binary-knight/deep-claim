@@ -8,6 +8,7 @@
     "elasticity": 0.5,
     "volatility": 0.02,
     "storage_cost_per_tonne_month": 3,
+    "mine_opex_per_day": 8000,
     "unlocked_by": null
   },
   {
@@ -19,6 +20,7 @@
     "elasticity": 0.7,
     "volatility": 0.03,
     "storage_cost_per_tonne_month": 45,
+    "mine_opex_per_day": 8000,
     "unlocked_by": null
   },
   {
@@ -30,6 +32,7 @@
     "elasticity": 0.8,
     "volatility": 0.04,
     "storage_cost_per_tonne_month": 110,
+    "mine_opex_per_day": 8000,
     "unlocked_by": null
   },
   {
@@ -41,6 +44,7 @@
     "elasticity": 1.0,
     "volatility": 0.05,
     "storage_cost_per_tonne_month": 700,
+    "mine_opex_per_day": 8000,
     "unlocked_by": "lithium_processing"
   }
 ]

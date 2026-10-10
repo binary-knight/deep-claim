@@ -27,7 +27,8 @@ struct ResourceDef {
     Fixed elasticity;                         // price response to supply/demand imbalance
     Fixed volatility;                         // daily demand random-walk step as a fraction
     Money storageCostPerTonneMonth;
-    TechId unlockedBy;  // invalid when available from the start
+    Money mineOpexPerDay;  // a mine producing this ore, per day, before multipliers (spec 008)
+    TechId unlockedBy;     // invalid when available from the start
 };
 
 enum class TechEffectType : std::uint8_t {
@@ -135,6 +136,8 @@ struct BalanceParams {
     std::uint32_t maxUnsoldRounds = 0;
     Day relistCooldownDays = 0;
     std::uint32_t bankruptcyGraceMonths = 0;
+    // Consecutive losing days before a mine's owner is told (spec 008).
+    std::uint32_t mineLossNoticeDays = 0;
     // Commodity market dynamics (see DESIGN.md, step 9).
     std::uint32_t marketSupplySmoothingDays = 0;  // EMA window for company supply
     std::uint32_t marketPriceAdjustDays = 0;      // days for price to close most of the gap
@@ -144,6 +147,13 @@ struct BalanceParams {
     Fixed priceFloorMult;  // relative to base price
     Fixed priceCapMult;
     Fixed demandGrowthPerYear;  // compound growth of every resource's base demand
+    // Spec 008: the market's two clamps, as data. Demand over supply is held
+    // inside the ratio pair before the power law; the combined demand factor
+    // (walk x growth x events) is held inside the factor pair.
+    Fixed marketRatioMin;
+    Fixed marketRatioMax;
+    Fixed demandFactorMin;
+    Fixed demandFactorMax;
     // Standing sell orders every company starts with (spec 001).
     SellPolicy defaultSellPolicy;
     bool defaultCoverCosts = false;

@@ -29,6 +29,11 @@
   "price_floor_mult": 0.1,
   "price_cap_mult": 10,
   "demand_growth_per_year": 0.04,
+  "market_ratio_min": 0.2,
+  "market_ratio_max": 5,
+  "demand_factor_min": 0.01,
+  "demand_factor_max": 1000,
+  "mine_loss_notice_days": 5,
   "default_sell_policy": { "enabled": true, "reserve_tonnes": 0, "floor_price": 0 },
   "default_cover_costs": true
 }

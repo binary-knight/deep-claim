@@ -19,10 +19,11 @@ content::Sources goodSources() {
     s.resources = R"([
       {"id": "iron", "name": "Iron", "base_price": 110, "base_demand_tonnes_per_day": 800,
        "base_output_tonnes_per_day": 400, "elasticity": 0.6, "volatility": 0.02, "storage_cost_per_tonne_month": 1.5,
-       "unlocked_by": null},
+       "mine_opex_per_day": 9000, "unlocked_by": null},
       {"id": "lithium", "name": "Lithium", "base_price": 14000.25,
        "base_demand_tonnes_per_day": 8, "base_output_tonnes_per_day": 5, "elasticity": 1.1, "volatility": 0.05,
-       "storage_cost_per_tonne_month": 8, "unlocked_by": "lithium_processing"}
+       "storage_cost_per_tonne_month": 8, "mine_opex_per_day": 7000.5,
+       "unlocked_by": "lithium_processing"}
     ])";
     s.techs = R"([
       {"id": "seismic_1", "cost": 600000, "duration_days": 90,
@@ -55,6 +56,9 @@ content::Sources goodSources() {
       "market_price_adjust_days": 10, "demand_reversion_rate": 0.01, "demand_mult_min": 0.3,
       "demand_mult_max": 3, "price_floor_mult": 0.1, "price_cap_mult": 10,
       "demand_growth_per_year": 0.04,
+      "market_ratio_min": 0.2, "market_ratio_max": 5,
+      "demand_factor_min": 0.01, "demand_factor_max": 1000,
+      "mine_loss_notice_days": 5,
       "default_sell_policy": {"enabled": true, "reserve_tonnes": 0, "floor_price": 0},
       "default_cover_costs": true
     })";
@@ -412,6 +416,148 @@ TEST_CASE("Unsold-land keys load and are validated", "[content]") {
     const auto absent = content::loadFromStrings(missing);
     CHECK_FALSE(absent.ok());
     CHECK(hasError(absent, "balance.json", "max_unsold_rounds", ""));
+}
+
+TEST_CASE("Each ore's mine running cost loads and must be above zero", "[content]") {
+    const auto good = content::loadFromStrings(goodSources());
+    INFO(content::formatErrors(good.errors));
+    REQUIRE(good.ok());
+    CHECK(good.content->resources[0].mineOpexPerDay == sim::Money::fromUnits(9'000));
+    CHECK(good.content->resources[1].mineOpexPerDay == sim::Money::fromCents(700'050));
+
+    content::Sources s = goodSources();
+    s.resources =
+        replaceOnce(s.resources, R"("mine_opex_per_day": 9000)", R"("mine_opex_per_day": 0)");
+    s.resources =
+        replaceOnce(s.resources, R"("mine_opex_per_day": 7000.5)", R"("mine_opex_per_day": -1)");
+    const auto bad = content::loadFromStrings(s);
+    CHECK_FALSE(bad.ok());
+    CHECK(hasError(bad, "resources.json", "[0].mine_opex_per_day", "must be at least 0.01"));
+    CHECK(hasError(bad, "resources.json", "[1].mine_opex_per_day", "must be at least 0.01"));
+
+    content::Sources missing = goodSources();
+    missing.resources = replaceOnce(missing.resources, R"("mine_opex_per_day": 9000, )", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "resources.json", "[0].mine_opex_per_day", "missing required key"));
+
+    content::Sources text = goodSources();
+    text.resources = replaceOnce(text.resources, R"("mine_opex_per_day": 9000)",
+                                 R"("mine_opex_per_day": "9000")");
+    const auto wrongType = content::loadFromStrings(text);
+    CHECK_FALSE(wrongType.ok());
+    CHECK(hasError(wrongType, "resources.json", "[0].mine_opex_per_day", "expected a number"));
+}
+
+TEST_CASE("Market clamps load with the values the market code used", "[content]") {
+    const auto good = content::loadFromStrings(goodSources());
+    INFO(content::formatErrors(good.errors));
+    REQUIRE(good.ok());
+    // The same expressions as the constants in sim/src/markets.cpp, so the
+    // decimal in the file is shown to be the identical fixed-point value.
+    CHECK(good.content->balance.marketRatioMin == sim::Fixed::fromRatio(1, 5));
+    CHECK(good.content->balance.marketRatioMax == sim::Fixed::fromInt(5));
+    CHECK(good.content->balance.demandFactorMin == sim::Fixed::fromRatio(1, 100));
+    CHECK(good.content->balance.demandFactorMax == sim::Fixed::fromInt(1000));
+}
+
+TEST_CASE("Market clamps must be above zero and each min below its max", "[content]") {
+    content::Sources s = goodSources();
+    s.balance = replaceOnce(s.balance, R"("market_ratio_min": 0.2)", R"("market_ratio_min": 0)");
+    s.balance =
+        replaceOnce(s.balance, R"("demand_factor_min": 0.01)", R"("demand_factor_min": -0.5)");
+    const auto notPositive = content::loadFromStrings(s);
+    CHECK_FALSE(notPositive.ok());
+    CHECK(hasError(notPositive, "balance.json", "market_ratio_min", "must be between"));
+    CHECK(hasError(notPositive, "balance.json", "demand_factor_min", "must be between"));
+    // A rejected min is reported once, not again as an ordering error.
+    CHECK_FALSE(hasError(notPositive, "balance.json", "market_ratio_max", ""));
+    CHECK_FALSE(hasError(notPositive, "balance.json", "demand_factor_max", ""));
+
+    content::Sources equal = goodSources();
+    equal.balance =
+        replaceOnce(equal.balance, R"("market_ratio_max": 5)", R"("market_ratio_max": 0.2)");
+    equal.balance =
+        replaceOnce(equal.balance, R"("demand_factor_max": 1000)", R"("demand_factor_max": 0.01)");
+    const auto notBelow = content::loadFromStrings(equal);
+    CHECK_FALSE(notBelow.ok());
+    CHECK(hasError(notBelow, "balance.json", "market_ratio_max",
+                   "must be greater than market_ratio_min"));
+    CHECK(hasError(notBelow, "balance.json", "demand_factor_max",
+                   "must be greater than demand_factor_min"));
+
+    content::Sources inverted = goodSources();
+    inverted.balance =
+        replaceOnce(inverted.balance, R"("market_ratio_min": 0.2)", R"("market_ratio_min": 6)");
+    const auto above = content::loadFromStrings(inverted);
+    CHECK_FALSE(above.ok());
+    CHECK(hasError(above, "balance.json", "market_ratio_max",
+                   "must be greater than market_ratio_min"));
+}
+
+TEST_CASE("Market clamps are bounded so the price arithmetic cannot overflow", "[content]") {
+    content::Sources s = goodSources();
+    s.balance = replaceOnce(s.balance, R"("market_ratio_max": 5)", R"("market_ratio_max": 10.5)");
+    s.balance =
+        replaceOnce(s.balance, R"("demand_factor_max": 1000)", R"("demand_factor_max": 1001)");
+    s.balance =
+        replaceOnce(s.balance, R"("market_ratio_min": 0.2)", R"("market_ratio_min": 0.009)");
+    const auto bad = content::loadFromStrings(s);
+    CHECK_FALSE(bad.ok());
+    CHECK(hasError(bad, "balance.json", "market_ratio_max", "must be between"));
+    CHECK(hasError(bad, "balance.json", "demand_factor_max", "must be between"));
+    CHECK(hasError(bad, "balance.json", "market_ratio_min", "must be between"));
+
+    content::Sources widest = goodSources();
+    widest.balance =
+        replaceOnce(widest.balance, R"("market_ratio_min": 0.2)", R"("market_ratio_min": 0.01)");
+    widest.balance =
+        replaceOnce(widest.balance, R"("market_ratio_max": 5)", R"("market_ratio_max": 10)");
+    widest.balance = replaceOnce(widest.balance, R"("demand_factor_min": 0.01)",
+                                 R"("demand_factor_min": 0.000001)");
+    const auto accepted = content::loadFromStrings(widest);
+    INFO(content::formatErrors(accepted.errors));
+    CHECK(accepted.ok());
+}
+
+TEST_CASE("Every market clamp key is required", "[content]") {
+    content::Sources s = goodSources();
+    s.balance = replaceOnce(s.balance, R"("market_ratio_min": 0.2, "market_ratio_max": 5,)", "");
+    s.balance =
+        replaceOnce(s.balance, R"("demand_factor_min": 0.01, "demand_factor_max": 1000,)", "");
+    const auto absent = content::loadFromStrings(s);
+    CHECK_FALSE(absent.ok());
+    for (const std::string_view key :
+         {"market_ratio_min", "market_ratio_max", "demand_factor_min", "demand_factor_max"}) {
+        INFO(key);
+        CHECK(hasError(absent, "balance.json", key, "missing required key"));
+    }
+}
+
+TEST_CASE("The losing-mine notice threshold loads and must be at least one day", "[content]") {
+    const auto good = content::loadFromStrings(goodSources());
+    REQUIRE(good.ok());
+    CHECK(good.content->balance.mineLossNoticeDays == 5);
+
+    content::Sources s = goodSources();
+    s.balance =
+        replaceOnce(s.balance, R"("mine_loss_notice_days": 5)", R"("mine_loss_notice_days": 0)");
+    const auto zero = content::loadFromStrings(s);
+    CHECK_FALSE(zero.ok());
+    CHECK(hasError(zero, "balance.json", "mine_loss_notice_days", "must be between 1 and"));
+
+    content::Sources fractional = goodSources();
+    fractional.balance = replaceOnce(fractional.balance, R"("mine_loss_notice_days": 5)",
+                                     R"("mine_loss_notice_days": 2.5)");
+    const auto notWhole = content::loadFromStrings(fractional);
+    CHECK_FALSE(notWhole.ok());
+    CHECK(hasError(notWhole, "balance.json", "mine_loss_notice_days", "expected an integer"));
+
+    content::Sources missing = goodSources();
+    missing.balance = replaceOnce(missing.balance, R"("mine_loss_notice_days": 5,)", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "balance.json", "mine_loss_notice_days", "missing required key"));
 }
 
 TEST_CASE("Large valid money values with cents are accepted", "[content]") {
