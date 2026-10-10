@@ -301,3 +301,19 @@ ui.sale_at_ask	at the ask
 ui.sale_buyer_you	You
 ui.no_sales	No land has sold yet.
 ui.panel_sale	day {day}, {paid}, {over}
+ui.pending_survey	Survey ordered
+ui.pending_bid	Bid placed: {amount}
+ui.pending_build	Mine ordered
+ui.pending_research	Queued for the lab
+ui.pending_mothball	Mothball ordered
+ui.pending_reopen	Reopening ordered
+ui.pending_loan	Loan ordered: {amount}
+ui.pending_repayment	Repayment ordered: {amount}
+ui.pending_sale	Sale ordered: {tonnes} of {resource}
+ui.cancel	Cancel
+ui.cancel_all	Cancel all
+ui.committed	Committed: {amount}
+ui.pending_count.one	{count} order waiting for the clock
+ui.pending_count.many	{count} orders waiting for the clock
+ui.pending_not_covered	not covered
+status.order_cancelled	Withdrawn before the clock moved; nothing was charged.
