@@ -1,11 +1,38 @@
+#include "sim/ai_controller.h"
 #include "sim/content.h"
+#include "sim/ids.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
+#include "sim/world_state.h"
 
 #include "test_content.h"
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <numeric>
+
+namespace {
+
+// Plays `days` days with the built-in competitor giving the orders of every
+// company, the player's included, so that land is contested.
+void playWithAi(sim::Simulation& simulation, sim::HeuristicController& ai, sim::Day days) {
+    const std::size_t companies = simulation.state().companies.size();
+    for (sim::Day d = 0; d < days; ++d) {
+        for (std::uint32_t c = 0; c < companies; ++c) {
+            simulation.collectCommands(sim::CompanyId(c), ai);
+        }
+        simulation.tick();
+    }
+}
+
+std::int64_t tonnesExtracted(const sim::Mine& mine) {
+    return std::accumulate(mine.extractedTonnes.begin(), mine.extractedTonnes.end(),
+                           std::int64_t{0});
+}
+
+}  // namespace
 
 TEST_CASE("Same seed produces identical state", "[determinism]") {
     const sim::Content content = test::makeContent();
@@ -53,4 +80,46 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     sim::Simulation simulation(content, 42, test::setup());
     simulation.tick(sim::kDaysPerYear);
     CHECK(simulation.stateHash() == kGolden);
+}
+
+TEST_CASE("Golden state hash of a played game is stable across platforms", "[determinism]") {
+    // The run above gives no orders, so it hashes empty mine, survey and loan
+    // lists and auctions nobody bid in. Here the built-in competitor gives
+    // the orders of both companies for three years, which leaves land bought
+    // at auction, surveys, mines built, running and idle with ore extracted
+    // and sold, loans and research in the state. A change to how any of that
+    // is stored, hashed or computed moves this value where the bare run
+    // would not notice (spec 008 added two fields to every mine and the bare
+    // value stayed put).
+    // Recorded on Linux/GCC on 2026-10-10 and verified on Windows/MSVC in CI.
+    // It uses the in-code content fixture, so tuning data/*.json does not
+    // move it. A deliberate change to sim state or rules moves it once:
+    // update the constant in the same commit and record the reason in
+    // docs/DESIGN.md.
+    constexpr std::uint64_t kGoldenPlayed = 0xc0980b717725177fULL;
+    constexpr sim::Day kDays = sim::kDaysPerYear * 3;
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 42, test::setup());
+    sim::HeuristicController ai(content);
+    playWithAi(simulation, ai, kDays);
+
+    // What makes the value worth pinning. If the competitor stops building,
+    // this fails here instead of quietly pinning an empty game.
+    const sim::WorldState& world = simulation.state();
+    REQUIRE(std::any_of(world.mines.begin(), world.mines.end(),
+                        [](const sim::Mine& mine) { return tonnesExtracted(mine) > 0; }));
+    CHECK(std::any_of(world.surveys.begin(), world.surveys.end(),
+                      [](const sim::Survey& survey) { return survey.complete != 0; }));
+    CHECK(std::any_of(world.auctions.begin(), world.auctions.end(),
+                      [](const sim::Auction& auction) { return auction.winner.valid(); }));
+    CHECK(std::any_of(world.loans.begin(), world.loans.end(),
+                      [](const sim::Loan& loan) { return loan.active != 0; }));
+
+    CHECK(simulation.stateHash() == kGoldenPlayed);
+
+    // The same state must come back from a save: a field that is hashed but
+    // not saved, or saved in another order, shows up here.
+    sim::Simulation restored(content, 7, test::setup());
+    REQUIRE(restored.load(simulation.save()));
+    CHECK(restored.stateHash() == kGoldenPlayed);
 }
