@@ -327,3 +327,4 @@ ui.pause_on.mine_losing	Mine losing money
 ui.mine_margin	{amount}/day
 ui.mine_break_even	Break-even {amount}/t
 ui.mine_no_figure	not producing yet
+ui.mine_margin_note	at today's price

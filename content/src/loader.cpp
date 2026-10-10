@@ -1273,6 +1273,7 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.mine_margin", "amount"},
     {"ui.mine_break_even", "amount"},
     {"ui.mine_no_figure", ""},
+    {"ui.mine_margin_note", ""},
 });
 
 // Names of the {placeholders} a template uses. Braces that do not form a
