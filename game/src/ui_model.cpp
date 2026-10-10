@@ -1212,6 +1212,9 @@ void fillPanelActions(const sim::Content& content, const sim::CompanyView& view,
     panel.survey_label =
         text(content, found.latest != nullptr ? "ui.survey_again" : "ui.survey_first",
              {{"amount", formatMoney(content.balance.surveyCost)}});
+    panel.can_afford_survey = content.balance.surveyCost <= available;
+    panel.survey_blocked = text(content, "ui.survey_unaffordable",
+                                {{"amount", formatMoney(content.balance.surveyCost)}});
     panel.can_build = panel.owned && !plot.mine && !view.bankrupt;
     panel.can_afford_mine = plot.mineCapexQuote <= available;
     panel.build_label = text(content, "ui.build_label", {{"amount", panel.capex}});

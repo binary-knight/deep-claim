@@ -217,14 +217,18 @@
                                 <div class="notice" data-if="panel.notice != ''" data-class-danger="panel.notice_class == 'danger'"><span class="ic">!</span><span class="msg">{{panel.notice}}</span></div>
                                 <div class="notice" data-if="panel.contest != ''"><span class="ic">!</span><span class="msg">{{panel.contest}}</span></div>
                                 <div class="notice" data-if="panel.survey_note != ''"><span class="ic">!</span><span class="msg">{{panel.survey_note}}</span></div>
+                                <!-- Why the Survey button below is disabled: the money
+                                     available does not cover the fee. Not shown while a
+                                     survey order waits here; its own fee is counted already. -->
+                                <div class="notice" data-if="!panel.survey_order.pending && panel.can_survey && !panel.can_afford_survey"><span class="ic">!</span><span class="msg">{{panel.survey_blocked}}</span></div>
                                 <div class="actions">
                                     <!-- An order waiting for the clock stands in for its
                                          control: the chip, and Cancel to take it back (spec 007). -->
                                     <div class="field" data-if="panel.listed && !panel.bid_order.pending"><label>Bid</label><input class="text" type="text" data-value="bid_input"/></div>
                                     <button class="primary" data-if="panel.listed && !panel.bid_order.pending" data-event-click="bid(panel.index)">Place bid</button>
                                     <span class="hrow" data-if="panel.bid_order.pending"><span class="chip accent">{{panel.bid_order.text}}</span><span class="chip warn" data-if="panel.bid_order.not_covered">{{ui_not_covered}}</span><button data-event-click="cancel(panel.bid_order.id)">{{ui_cancel}}</button></span>
-                                    <button data-if="!panel.survey_order.pending && panel.can_survey" data-event-click="survey(panel.index)">{{panel.survey_label}}</button>
-                                    <button class="disabled" data-if="!panel.survey_order.pending && !panel.can_survey">{{panel.survey_label}}</button>
+                                    <button data-if="!panel.survey_order.pending && panel.can_survey && panel.can_afford_survey" data-event-click="survey(panel.index)">{{panel.survey_label}}</button>
+                                    <button class="disabled" data-if="!panel.survey_order.pending && (!panel.can_survey || !panel.can_afford_survey)">{{panel.survey_label}}</button>
                                     <span class="hrow" data-if="panel.survey_order.pending"><span class="chip accent">{{panel.survey_order.text}}</span><span class="chip warn" data-if="panel.survey_order.not_covered">{{ui_not_covered}}</span><button data-event-click="cancel(panel.survey_order.id)">{{ui_cancel}}</button></span>
                                     <button class="primary" data-if="!panel.build_order.pending && panel.can_build && panel.can_afford_mine" data-event-click="build(panel.index)">{{panel.build_label}}</button>
                                     <button class="disabled" data-if="!panel.build_order.pending && panel.can_build && !panel.can_afford_mine">{{panel.build_blocked}}</button>

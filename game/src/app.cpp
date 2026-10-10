@@ -352,6 +352,8 @@ void App::bindModel() {
         h.RegisterMember("can_survey", &PlotPanel::can_survey);
         h.RegisterMember("survey_label", &PlotPanel::survey_label);
         h.RegisterMember("survey_note", &PlotPanel::survey_note);
+        h.RegisterMember("can_afford_survey", &PlotPanel::can_afford_survey);
+        h.RegisterMember("survey_blocked", &PlotPanel::survey_blocked);
         h.RegisterMember("sale", &PlotPanel::sale);
         h.RegisterMember("can_build", &PlotPanel::can_build);
         h.RegisterMember("can_afford_mine", &PlotPanel::can_afford_mine);
@@ -1013,15 +1015,8 @@ void App::onRepayAll(int loanIndex) {
     const sim::LoanId id(static_cast<std::uint32_t>(loanIndex));
     for (const sim::LoanView& loan : session_->view().loans) {
         if (loan.id == id && loan.active) {
-            // A click that outlived the button: cash has since fallen short.
-            // Against the money available, as the button is (spec 007).
-            const sim::CompanyView& view = session_->view();
-            const sim::Money available =
-                view.cash - view.reservedCash - session_->committed() + session_->pendingBorrowed();
-            if (view.bankrupt || loan.remaining > available) {
-                setStatus(rejectReasonText(*content_, sim::RejectReason::InsufficientFunds), true);
-                return;
-            }
+            // No money is counted here: the button's state comes from the
+            // model, and the sim alone turns a repayment away (R-001).
             // The balance to the cent, read now rather than from the label.
             order(sim::RepayLoan{Session::kPlayer, id, loan.remaining});
             setStatus(text(*content_, "status.repayment_ordered",

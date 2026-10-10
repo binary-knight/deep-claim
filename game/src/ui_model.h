@@ -139,6 +139,10 @@ struct PlotPanel {
     // Why a survey would be wasted: the report lands after the auction
     // closes, or the mine here is worked out (then the button is disabled).
     std::string survey_note;
+    // The money available covers the fee. When it does not, the button is
+    // disabled and survey_blocked says why (spec 007).
+    bool can_afford_survey = false;
+    std::string survey_blocked;
     bool can_build = false;
     bool can_afford_mine = false;
     std::string build_label;    // "Build mine ($2.00M)"
