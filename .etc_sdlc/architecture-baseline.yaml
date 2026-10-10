@@ -1,0 +1,676 @@
+schema_version: 1
+status: ratified
+ratified_by: binaryknight
+ratified_at: '2026-10-10T11:01:28+00:00'
+confidence:
+  score: medium
+  inputs:
+    claims_total: 63
+    verified: 50
+    stale: 10
+    aspirational: 0
+    contradicted: 3
+    artifacts_claim_checked: README.md, docs/process.md, docs/DESIGN.md, docs/design/handoff.md,
+      docs/design/ui-design.md
+    artifacts_not_claim_checked: docs/specs/001-007, tools/prose/README.md, tools/prose/voice.md,
+      docs/HANDOFF.md, .meta/ (generated this run)
+    sampling: claims capped at 10-20 per artifact; evidence by grep and targeted reads,
+      no builds or tests run
+    patterns_surveyed: player-facing-strings (competing), rule-and-balance-placement
+      (competing); counts are grep approximations
+    seams: none (single-repo offline desktop game)
+inventory:
+- path: README.md
+  type: convention-doc
+  last_modified: '2026-10-08'
+- path: docs/process.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/DESIGN.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/HANDOFF.md
+  type: convention-doc
+  last_modified: '2026-10-10'
+- path: docs/design/handoff.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/design/ui-design.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: tools/prose/README.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: tools/prose/voice.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/specs/001-sell-policies.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/specs/002-prose-catalogue.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/specs/003-client-restyle.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/specs/004-playtest-2-fixes.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/specs/005-world-and-opening.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/specs/006-balance.md
+  type: convention-doc
+  last_modified: '2026-10-10'
+- path: docs/specs/007-pending-orders.md
+  type: convention-doc
+  last_modified: '2026-10-10'
+- path: .clang-format
+  type: lint-config
+  last_modified: '2026-10-08'
+- path: .clang-tidy
+  type: lint-config
+  last_modified: '2026-10-08'
+- path: cmake/Warnings.cmake
+  type: lint-config
+  last_modified: '2026-10-08'
+- path: cmake/Sanitizers.cmake
+  type: lint-config
+  last_modified: '2026-10-08'
+- path: CMakePresets.json
+  type: lint-config
+  last_modified: '2026-10-08'
+- path: .github/workflows/ci.yml
+  type: lint-config
+  last_modified: '2026-10-08'
+- path: tools/prose/to_json.py
+  type: generator
+  last_modified: '2026-10-09'
+- path: tools/design/tokens_to_rcss.py
+  type: generator
+  last_modified: '2026-10-09'
+- path: tools/design/icons.py
+  type: generator
+  last_modified: '2026-10-09'
+- path: docs/specs/001-prose
+  type: reference-impl
+  last_modified: '2026-10-09'
+claims:
+- id: CL-001
+  source: README.md
+  claim: docs/DESIGN.md holds architecture decisions and vcpkg.json lists dependencies
+  classification: VERIFIED
+  evidence: 'docs/DESIGN.md, vcpkg.json (catch2, nlohmann-json, feature game: sdl3,
+    rmlui); counterexamples 0'
+  resolution: null
+- id: CL-002
+  source: README.md
+  claim: vcpkg is a git submodule at external/vcpkg, bootstrapped via ./external/vcpkg/bootstrap-vcpkg.sh
+  classification: VERIFIED
+  evidence: .gitmodules path external/vcpkg; bootstrap script itself not read
+  resolution: null
+- id: CL-003
+  source: README.md
+  claim: Configure/build/test presets debug, release, asan exist
+  classification: VERIFIED
+  evidence: CMakePresets.json has all three (plus debug-game, release-game)
+  resolution: null
+- id: CL-004
+  source: README.md
+  claim: release-game preset builds the SDL3/RmlUi client behind the vcpkg 'game'
+    manifest feature
+  classification: VERIFIED
+  evidence: CMakePresets.json release-game sets VCPKG_MANIFEST_FEATURES=game; root
+    CMakeLists DC_BUILD_GAME gates add_subdirectory(game)
+  resolution: null
+- id: CL-005
+  source: README.md
+  claim: Client binary is at ./build/release-game/game/deep_claim
+  classification: VERIFIED
+  evidence: binaryDir build/${presetName}; game/CMakeLists.txt add_executable(deep_claim)
+  resolution: null
+- id: CL-006
+  source: README.md
+  claim: Data and assets are copied next to the executable so the build dir can be
+    zipped and moved
+  classification: VERIFIED
+  evidence: game/CMakeLists.txt deep_claim_assets copy_directory data and game/assets
+  resolution: null
+- id: CL-007
+  source: README.md
+  claim: Saves live in the SDL per-user pref dir under DeepClaim/DeepClaim/saves
+  classification: VERIFIED
+  evidence: game/src/main.cpp:161 SDL_GetPrefPath; platform/src/null_services.cpp:23
+    base_/saves
+  resolution: null
+- id: CL-008
+  source: README.md
+  claim: 'Controls: space pauses, 1/2/3 set speed, . steps one day, F8 opens the interface
+    debugger'
+  classification: VERIFIED
+  evidence: game/src/app.cpp:699-712; game/src/main.cpp:40
+  resolution: null
+- id: CL-009
+  source: README.md
+  claim: sim_runner is at ./build/release/sim_runner/sim_runner and accepts --seed
+    --years --ai --sanity --csv
+  classification: VERIFIED
+  evidence: sim_runner/main.cpp parses all five; sim_runner/CMakeLists.txt
+  resolution: null
+- id: CL-010
+  source: README.md
+  claim: --sanity exits non-zero if any check fails; JSON summary lists outcomes,
+    price statistics and sanity checks
+  classification: VERIFIED
+  evidence: sim_runner/main.cpp header comment; CTest runner_smoke uses --sanity;
+    exit path taken from comment, not traced
+  resolution: null
+- id: CL-011
+  source: docs/process.md
+  claim: Specs live at docs/specs/NNN-name.md, numbered in the order opened; the first
+    is 001-sell-policies
+  classification: VERIFIED
+  evidence: docs/specs/001..007 contiguous; one extra 001-prefixed dir docs/specs/001-prose
+    (not a spec file)
+  resolution: null
+- id: CL-012
+  source: docs/process.md
+  claim: 'Every spec follows the template: Goal, Player-facing behaviour, Sim rules,
+    View, Client, Tests, Out of scope, Decisions'
+  classification: STALE
+  evidence: all 7 specs have the core sections; 002 and 004 have no View; 007 adds
+    Session; 004/005/006 add Plan; 001 and 007 carry a Status line not in the template
+  resolution: 'supersede: new specs use the etc /spec format (owner, 2026-10-10).
+    Specs 001-007 stay as written; the docs/process.md template is historical.'
+- id: CL-013
+  source: docs/process.md
+  claim: The sim contains every rule; the client only sends commands and shows views
+  classification: STALE
+  evidence: 'client consumes sim::CompanyView; counterexamples: game/src/ui_model.cpp:456,978,1149,1185,1339
+    and game/src/app.cpp:942 recompute affordability as view.cash - view.reservedCash
+    (app.cpp:942 gates a command); game/session/src/auto_pause.cpp holds auto-pause
+    rules. sim has an unused available-cash helper at sim/src/plot_market.cpp:188'
+  resolution: 'record-decision: the sim is the only authority; it validates and rejects
+    every command. Client and session may derive display and button-enable state from
+    view fields, but never a rule the sim does not also enforce.'
+- id: CL-014
+  source: docs/process.md
+  claim: 'Determinism: no wall clock, no floats in state, seeded RNG streams only'
+  classification: VERIFIED
+  evidence: zero chrono/rand/random_device in sim/; only float use is Fixed::fromDouble
+    (conversion); named streams sim/src/random.cpp:9-13
+  resolution: null
+- id: CL-015
+  source: docs/process.md
+  claim: Any change to state updates the golden hash once, with the reason in docs/DESIGN.md
+  classification: VERIFIED
+  evidence: tests/determinism_test.cpp:47 kGolden; docs/DESIGN.md:582,698; history
+    not exhaustively audited
+  resolution: null
+- id: CL-016
+  source: docs/process.md
+  claim: docs/DESIGN.md is the running record of architectural decisions; specs record
+    feature decisions; playtests record what players did
+  classification: VERIFIED
+  evidence: DESIGN.md per-spec sections; every spec has Decisions; docs/playtests/
+    has 3 write-ups
+  resolution: null
+- id: CL-017
+  source: docs/process.md
+  claim: Balance numbers live in data/*.json with their reasoning in the spec
+  classification: VERIFIED
+  evidence: 'data/balance.json, ai.json, techs.json, events.json, resources.json,
+    regions.json; minor in-code knobs: sim/include/sim/mines.h:75 kRunningLowDays=30,
+    sim/src/ai_controller.cpp:188 (13/10 margin), sim/src/surveys.cpp:25 kMaxShift,
+    sim/src/markets.cpp:194,232 clamps'
+  resolution: null
+- id: CL-018
+  source: docs/process.md
+  claim: 'Prose lives in data, not code: player-facing text goes draft -> tools/prose/polish.sh
+    -> data/strings.json'
+  classification: STALE
+  evidence: '303 catalogue entries, ~149 text() call sites; counterexamples: ~22 literals
+    in game/src/ui_model.cpp (mine states L37-59, action labels L420-528, research
+    chips L1132-1143), ''Game loaded'' at game/session/src/session.cpp:127, ~113 static
+    labels in game/assets/ui/main.rml, ''Northfield Minerals'' at game/src/app.cpp:157'
+  resolution: 'record-decision: anything C++ shows the player goes through the data/strings.json
+    catalogue; existing C++ literals are violations to migrate when touched. Static
+    headings and button labels written in game/assets/ui/main.rml are allowed.'
+- id: CL-019
+  source: docs/process.md
+  claim: Interface work needs a Design Studio session recorded in docs/design/ before
+    Build; code follows the design document
+  classification: VERIFIED
+  evidence: docs/design/* present; design commit 0854b82 precedes spec 003 draft 4599296;
+    specs 004 and 007 not checked for design-doc updates
+  resolution: null
+- id: CL-020
+  source: docs/process.md
+  claim: 'Each change leaves a paper trail: playtest write-ups in docs/playtests/
+    and playtest findings feed specs'
+  classification: VERIFIED
+  evidence: 3 write-ups; specs 001 and 007 cite playtest findings
+  resolution: null
+- id: CL-021
+  source: docs/process.md
+  claim: 'Verification tooling exists: sim_runner sweep for balance changes and a
+    layout probe for interface changes'
+  classification: VERIFIED
+  evidence: sim_runner/; game/src/layout_probe.cpp; CTest runner_sweep
+  resolution: null
+- id: CL-022
+  source: docs/process.md
+  claim: Codex review findings are applied or declined in the spec's Decisions
+  classification: VERIFIED
+  evidence: commit e97be90 applies the Codex findings on spec 006; lint/CI status
+    not verified
+  resolution: null
+- id: CL-023
+  source: docs/DESIGN.md
+  claim: sim/ is a pure C++20 static library with all rules and state and no third-party
+    dependencies; content/ owns nlohmann-json
+  classification: VERIFIED
+  evidence: sim/CMakeLists.txt links only dc_warnings; content links nlohmann_json
+    PRIVATE; no content/game/platform/nlohmann include under sim/
+  resolution: null
+- id: CL-024
+  source: docs/DESIGN.md
+  claim: 'Dependency direction: platform -> game/session -> game (SDL3 + RmlUi); session
+    has no SDL or RmlUi'
+  classification: VERIFIED
+  evidence: game/session/CMakeLists.txt; game/CMakeLists.txt; platform links only
+    dc_warnings and does not depend on the sim
+  resolution: null
+- id: CL-025
+  source: docs/DESIGN.md
+  claim: game/app no longer touches the Simulation; the session exposes priceHistory
+    and stateHash
+  classification: VERIFIED
+  evidence: 0 matches for Simulation in game/src/app.cpp and ui_model.cpp
+  resolution: null
+- id: CL-026
+  source: docs/DESIGN.md
+  claim: 1 tick = 1 in-game day; calendar is 12 months of 30 days
+  classification: VERIFIED
+  evidence: sim/include/sim/types.h kDaysPerMonth=30; simulation.cpp tick() increments
+    day once
+  resolution: null
+- id: CL-027
+  source: docs/DESIGN.md
+  claim: No floating point in sim state; Fixed::fromDouble exists only for the content
+    loader boundary
+  classification: VERIFIED
+  evidence: only double in sim is fixed.h:54 / fixed.cpp:137; callers outside loader
+    not checked
+  resolution: null
+- id: CL-028
+  source: docs/DESIGN.md
+  claim: Own PCG32 RNG with one stream per system (world, market, survey, event, ai);
+    no std distributions
+  classification: VERIFIED
+  evidence: sim/include/sim/random.h RngStreams; rng.h Pcg32
+  resolution: null
+- id: CL-029
+  source: docs/DESIGN.md
+  claim: State hash is FNV-1a over a canonical little-endian byte stream, never std::hash
+  classification: VERIFIED
+  evidence: sim/include/sim/hash.h Fnv1a64; no std::hash in sim/
+  resolution: null
+- id: CL-030
+  source: docs/DESIGN.md
+  claim: No iteration over std::unordered_map during a tick
+  classification: VERIFIED
+  evidence: no unordered containers anywhere in sim/
+  resolution: null
+- id: CL-031
+  source: docs/DESIGN.md
+  claim: Golden hash is checked on Windows/MSVC in CI and uses an in-code content
+    fixture; current value 0x2a5da3177ab7c69d
+  classification: VERIFIED
+  evidence: tests/determinism_test.cpp:47 with test::makeContent(); ci.yml runs ctest
+    on windows-2022; test not run
+  resolution: null
+- id: CL-032
+  source: docs/DESIGN.md
+  claim: 'Tick pipeline in fixed order: commands -> auctions -> surveys -> mines ->
+    sell policies (4b) -> markets -> finance -> research -> events -> advance day'
+  classification: VERIFIED
+  evidence: sim/src/simulation.cpp:195-204; applyCommands uses std::stable_sort (line
+    77)
+  resolution: null
+- id: CL-033
+  source: docs/DESIGN.md
+  claim: Hidden truth lives only in WorldState::hidden; view.cpp never mentions it
+    and a test greps the source
+  classification: VERIFIED
+  evidence: 0 matches in sim/src/view.cpp; tests/view_source_test.cpp
+  resolution: null
+- id: CL-034
+  source: docs/DESIGN.md
+  claim: Commands are a variant submitted via Simulation::submit, applied next tick;
+    reports filtered per viewer; controllers see only CompanyView
+  classification: VERIFIED
+  evidence: simulation.h:42 reportFor; controller.h:24 decide(const CompanyView&,
+    ...)
+  resolution: null
+- id: CL-035
+  source: docs/DESIGN.md
+  claim: Save files are magic 'DCSV', uint32 format version, then WorldState; kSaveVersion
+    stays at 1 until the first public build
+  classification: VERIFIED
+  evidence: sim/include/sim/save.h:13,19; save.cpp:621,643
+  resolution: null
+- id: CL-036
+  source: docs/DESIGN.md
+  claim: Entities are never erased from WorldState vectors; dead ones carry a flag
+  classification: STALE
+  evidence: entity vectors (companies, plots, mines, auctions) show no erase; one
+    erase at sim/src/plot_market.cpp:148 on state.withdrawnQueue, a queue of plot
+    ids, not an entity vector. Rule scope is imprecise
+  resolution: 'record-decision: the rule covers entity vectors indexed by id (companies,
+    plots, mines, auctions, loans, surveys); queues and lists of ids may shrink.'
+- id: CL-037
+  source: docs/DESIGN.md
+  claim: Sanitizer preset builds the sim stack only and CI runs the sanitizer leg
+    on Ubuntu only
+  classification: VERIFIED
+  evidence: CMakePresets.json asan; ci.yml matrix line 17
+  resolution: null
+- id: CL-038
+  source: docs/DESIGN.md
+  claim: vcpkg submodule pinned by builtin-baseline; game dependencies behind the
+    'game' manifest feature
+  classification: VERIFIED
+  evidence: .gitmodules; vcpkg.json:31; debug-game and release-game presets
+  resolution: null
+- id: CL-039
+  source: docs/DESIGN.md
+  claim: clang-format and clang-tidy are enforced in CI; warnings are errors by default
+  classification: VERIFIED
+  evidence: ci.yml format and tidy jobs; cmake/Warnings.cmake; option name not checked
+  resolution: null
+- id: CL-040
+  source: docs/DESIGN.md
+  claim: sim_runner drives balance testing against sim and content only; deep_claim_replay
+    has no client dependencies
+  classification: VERIFIED
+  evidence: sim_runner/CMakeLists.txt; game/session/CMakeLists.txt:18
+  resolution: null
+- id: CL-041
+  source: docs/design/handoff.md
+  claim: 'Source of truth for the mockups: deep-claim-studio.html beside this file'
+  classification: CONTRADICTED
+  evidence: no deep-claim-studio.html tracked; the bench is docs/design/bench.html
+    (ui-design.md:110-111)
+  resolution: 'supersede: the tree wins; the bench source is docs/design/bench.html.
+    handoff.md is a historical record of the design sprint.'
+- id: CL-042
+  source: docs/design/handoff.md
+  claim: Generate main.rcss from data/ui/tokens.json at build time
+  classification: CONTRADICTED
+  evidence: no data/ui/tokens.json; actual pipeline is tools/design/tokens_to_rcss.py
+    reading docs/design/tokens.css and emitting committed game/assets/ui/tokens.rcss,
+    guarded by tests/design_tokens_test.cpp; main.rcss is hand-written
+  resolution: 'supersede: the tree wins; tokens flow docs/design/tokens.css -> tools/design/tokens_to_rcss.py
+    -> game/assets/ui/tokens.rcss, and main.rcss is hand-written.'
+- id: CL-043
+  source: docs/design/handoff.md
+  claim: Status strip is Dashboard only
+  classification: CONTRADICTED
+  evidence: 'game/assets/ui/main.rml:38 #strip sits between #header and #body with
+    no tab condition: shown on every tab. Order of the six facts matches'
+  resolution: 'supersede: the tree wins; the status strip is shown on every tab.'
+- id: CL-044
+  source: docs/design/handoff.md
+  claim: 'Rail: 56px icon rail expanding to 160px on hover; six icons as a 22px sprite'
+  classification: STALE
+  evidence: main.rcss:133 hover 160dp; six tabs; sprite cells are 24px not 22px (icons.tga
+    from tools/design/icons.py)
+  resolution: 'supersede: the tree wins; the rail sprite cells are 24px.'
+- id: CL-045
+  source: docs/design/handoff.md
+  claim: Truncate the company name in code with formatCompanyName
+  classification: STALE
+  evidence: behaviour exists (game/src/ui_model.cpp:30 kCompanyNameMax=26, :1327)
+    but no function named formatCompanyName
+  resolution: 'supersede: the tree wins; the company name is truncated in ui_model.cpp
+    (kCompanyNameMax), with no formatCompanyName function.'
+- id: CL-046
+  source: docs/design/handoff.md
+  claim: 'Fonts: Barlow, Barlow Condensed and JetBrains Mono TTFs (OFL) in game/assets/fonts/,
+    loaded at startup'
+  classification: VERIFIED
+  evidence: 7 TTFs and 3 licence files present; startup load code not inspected
+  resolution: null
+- id: CL-047
+  source: docs/design/handoff.md
+  claim: Keep the custom <price-chart> element and add a compact mode for sparklines
+  classification: VERIFIED
+  evidence: game/src/chart_element.cpp:108-109 mode attribute; main.rml header sparkline
+  resolution: null
+- id: CL-048
+  source: docs/design/handoff.md
+  claim: 'Header: company, date, cash, spendable, debt, cash sparkline, speed controls,
+    Save/Load/New, in one row'
+  classification: VERIFIED
+  evidence: game/assets/ui/main.rml:12-33; an extra Stops button is additive
+  resolution: null
+- id: CL-049
+  source: docs/design/handoff.md
+  claim: Section indices (h2 .idx) restart at 01 per screen; title block = mono index
+    + condensed uppercase title + 2px rule
+  classification: VERIFIED
+  evidence: main.rcss:35,48; main.rml comment line 9
+  resolution: null
+- id: CL-050
+  source: docs/design/handoff.md
+  claim: RCSS replaces every px with dp and Deck overrides become a second block
+  classification: VERIFIED
+  evidence: main.rcss uses dp throughout; body.deck selectors at main.rcss:433 (selected
+    by class, not dp ratio)
+  resolution: null
+- id: CL-051
+  source: docs/design/handoff.md
+  claim: The component CSS printed in the handoff uses the locked token names
+  classification: STALE
+  evidence: colour values match tokens.rcss; handoff CSS uses names not in the token
+    block (--line, --line-2, --muted, --select, --pad, --gap, --dir-c) where tokens
+    are --edge, --edge-strong, --text-3, --selection
+  resolution: 'supersede: the tree wins; token names are those in docs/design/tokens.css.'
+- id: CL-052
+  source: docs/design/ui-design.md
+  claim: docs/design/tokens.css is the locked token source of truth; the client token
+    stylesheet is generated from it
+  classification: VERIFIED
+  evidence: tools/design/tokens_to_rcss.py; game/assets/ui/tokens.rcss header GENERATED
+  resolution: null
+- id: CL-053
+  source: docs/design/ui-design.md
+  claim: Pipeline tokens.css -> tokens_to_rcss.py -> tokens.rcss, with a test guarding
+    drift
+  classification: VERIFIED
+  evidence: tests/design_tokens_test.cpp registered in tests/CMakeLists.txt
+  resolution: null
+- id: CL-054
+  source: docs/design/ui-design.md
+  claim: Code follows this document and handoff.md; the client implements the tokens
+    and components
+  classification: STALE
+  evidence: main.rcss uses the palette as hand-copied literals (RmlUi has no custom
+    properties); only tokens.rcss is test-guarded, so drift between main.rcss and
+    tokens.css is untested
+  resolution: 'record-decision: literals in main.rcss are allowed because RmlUi has
+    no custom properties; tokens.css stays the source, and the layout probe and review
+    catch drift. No new test.'
+- id: CL-055
+  source: docs/design/ui-design.md
+  claim: 'Fonts: Barlow, Barlow Condensed and JetBrains Mono carry the type'
+  classification: VERIFIED
+  evidence: game/assets/fonts/; main.rcss font-family rules; load seen in layout_probe.cpp:607-610
+  resolution: null
+- id: CL-056
+  source: docs/design/ui-design.md
+  claim: Desktop window is 1366x820 and the Steam Deck frame is 1280x800
+  classification: VERIFIED
+  evidence: game/src/main.cpp:136,153; layout_probe.cpp:93
+  resolution: null
+- id: CL-057
+  source: docs/design/ui-design.md
+  claim: 'Steam Deck legibility: body text no smaller than 14px, buttons at least
+    40px tall'
+  classification: VERIFIED
+  evidence: main.rcss:419-423 body.deck; layout_probe.cpp:86,264-266 kMinDeckText=14
+    (probe diagnostic, not a CI test)
+  resolution: null
+- id: CL-058
+  source: docs/design/ui-design.md
+  claim: Controls are 36px tall on desktop
+  classification: VERIFIED
+  evidence: main.rcss:168,197,226,241,254
+  resolution: null
+- id: CL-059
+  source: docs/design/ui-design.md
+  claim: Chips are 20px tall with a 40px minimum width
+  classification: VERIFIED
+  evidence: main.rcss:305-306; tokens.css:65
+  resolution: null
+- id: CL-060
+  source: docs/design/ui-design.md
+  claim: 'Token scale: type 12/13/14/16/17/20, spacing 4/8/12/16/20/24, 2px radii
+    everywhere, no shadows'
+  classification: STALE
+  evidence: 'scale and 2dp radius mostly hold, no shadows or gradients; counterexamples
+    in main.rcss: 3dp radius (:242), 6dp scrollbar radius (:408,:413), 19dp type (:81),
+    spacing 6/9/10/30/44dp'
+  resolution: 'adopt: the token scale is the rule; off-scale values in main.rcss are
+    violations to tidy when the client is next touched.'
+- id: CL-061
+  source: docs/design/ui-design.md
+  claim: Component set and dashboard order 01 Needs you .. 05 Recent; icon rail of
+    six icons; five screens
+  classification: VERIFIED
+  evidence: 'main.rcss .needs, .finrow, #rail .ic.* (six icons; the sixth is Log);
+    main.rml'
+  resolution: null
+- id: CL-062
+  source: docs/design/ui-design.md
+  claim: No gradients, glass cards, pulsing dots, left accent bars or shadows; state
+    shown as words in chips
+  classification: VERIFIED
+  evidence: 0 gradient/box-shadow/animation declarations in main.rcss and main.rml;
+    border-left not checked
+  resolution: null
+- id: CL-063
+  source: docs/design/ui-design.md
+  claim: Referenced artifacts exist, including the deep-claim-studio.html bench artifact
+  classification: STALE
+  evidence: bench.html, handoff.md, process.md, polish.sh, playtest write-up exist;
+    deep-claim-studio.html is not in the tree (published as an external artifact)
+  resolution: 'record-decision: the bench artifact is published outside the repo;
+    docs/design/bench.html is its source.'
+exemplars:
+- name: Keyed prose catalogue
+  paths:
+  - data/strings.json
+  - game/session/src/text.cpp
+  - game/session/include/game/format.h
+  applies_to: any text C++ shows the player (notices, status lines, labels, chips)
+  blessed_by: binaryknight
+- name: Balance numbers in data
+  paths:
+  - data/balance.json
+  - data/ai.json
+  - content/src/loader.cpp
+  applies_to: any number a designer would tune; reaches the sim through sim::Content
+  blessed_by: binaryknight
+- name: Design tokens pipeline
+  paths:
+  - docs/design/tokens.css
+  - tools/design/tokens_to_rcss.py
+  - tests/design_tokens_test.cpp
+  applies_to: interface colours, type and spacing
+  blessed_by: binaryknight
+do_not_copy:
+- path: game/src/ui_model.cpp (string literals at L37-59, L420-528, L1132-1143)
+  reason: player-facing labels hard-coded in C++; use the strings catalogue. Migrate
+    when touched.
+- path: game/session/src/session.cpp:127
+  reason: '''Game loaded'' log text hard-coded; use the strings catalogue.'
+- path: game/src/app.cpp:157
+  reason: rival company name hard-coded; belongs in data.
+- path: sim/src/ai_controller.cpp:188
+  reason: 1.3x extraction margin hard-coded; balance knobs belong in data/ai.json.
+    Move when touched.
+- path: sim/include/sim/mines.h:75
+  reason: kRunningLowDays=30 hard-coded; belongs in data/balance.json. Move when touched.
+- path: sim/src/surveys.cpp:25
+  reason: survey shift cap hard-coded; move to data when touched.
+- path: sim/src/markets.cpp:194,232
+  reason: market clamps hard-coded; move to data when touched (spec 008).
+- path: docs/design/handoff.md
+  reason: 'historical record of the design sprint; six claims do not match the tree.
+    Not a source of rules: use ui-design.md, tokens.css and spec 003.'
+seams: []
+rules:
+- id: R-001
+  statement: 'The sim is the only authority on game rules: it validates and rejects
+    every command. game/ and game/session may derive display and button-enable state
+    from view fields, but never a rule the sim does not also enforce.'
+  provenance:
+    who: binaryknight
+    when: '2026-10-10T11:01:35+00:00'
+    trigger: ratification session 2026-10-10
+  mechanizable: false
+  enforced_by: human-judgment
+- id: R-002
+  statement: Anything C++ shows the player goes through the data/strings.json catalogue
+    via text(); static headings and button labels in game/assets/ui/main.rml are exempt.
+  provenance:
+    who: binaryknight
+    when: '2026-10-10T11:01:35+00:00'
+    trigger: ratification session 2026-10-10
+  mechanizable: false
+  enforced_by: human-judgment
+- id: R-003
+  statement: Numbers a designer would tune live in data/*.json and reach the sim through
+    sim::Content; do not add tuning constants to sim sources.
+  provenance:
+    who: binaryknight
+    when: '2026-10-10T11:01:35+00:00'
+    trigger: ratification session 2026-10-10
+  mechanizable: false
+  enforced_by: human-judgment
+- id: R-004
+  statement: The interface token scale in docs/design/tokens.css is the rule for type,
+    spacing and radius; off-scale values in main.rcss are violations to tidy when
+    touched.
+  provenance:
+    who: binaryknight
+    when: '2026-10-10T11:01:35+00:00'
+    trigger: ratification session 2026-10-10
+  mechanizable: false
+  enforced_by: human-judgment
+- id: R-005
+  statement: files matching sim/** must not contain unordered_
+  provenance:
+    who: binaryknight
+    when: '2026-10-10T11:01:35+00:00'
+    trigger: ratification session 2026-10-10
+  mechanizable: true
+  enforced_by: human-judgment
+- id: R-006
+  statement: files matching sim/** must not contain std::hash
+  provenance:
+    who: binaryknight
+    when: '2026-10-10T11:01:35+00:00'
+    trigger: ratification session 2026-10-10
+  mechanizable: true
+  enforced_by: human-judgment
+- id: R-007
+  statement: files matching sim/** must not contain <chrono>
+  provenance:
+    who: binaryknight
+    when: '2026-10-10T11:01:35+00:00'
+    trigger: ratification session 2026-10-10
+  mechanizable: true
+  enforced_by: human-judgment

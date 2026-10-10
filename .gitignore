@@ -9,3 +9,7 @@ compile_commands.json
 # Claude Code session files
 .claude/
 .mcp.json
+
+# etc harness session telemetry
+.etc_sdlc/efficiency/
+.etc_sdlc/telemetry.db
