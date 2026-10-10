@@ -173,7 +173,9 @@ and clang-tidy are enforced in CI. Warnings are errors by default
   systems can index by id without bounds checks.
 - Archive reads bound each container by its real minimum serialized size
   (measured once from a default value) and turn allocation failure into the
-  error flag.
+  error flag. A variant is the exception: its default value is its first
+  alternative, which need not be its smallest, so a variant's minimum is
+  its smallest alternative plus the tag (see "Pending orders (spec 007)").
 - Saves carry `hashOf(content)` in the header and refuse to load against
   different content. Reordering resources in data files would otherwise
   silently retarget every ResourceId in a save.
@@ -492,7 +494,8 @@ and clang-tidy are enforced in CI. Warnings are errors by default
 - Assets are copied by an always-run target so .rml/.rcss/.json edits reach
   the build tree without a C++ change.
 - The dashboard opens with a dismissible how-to-play card, the header shows
-  spendable cash next to cash, finance shows loan terms and insolvency
+  spendable cash next to cash (labelled "Available" and net of pending
+  orders since spec 007), finance shows loan terms and insolvency
   progress, status lines say "queued" and point to the log for rejections.
 - First test-play finding: every block in the content panel laid out at
   zero width. Cause (RmlUi): a scroll container subtracts its vertical
@@ -513,11 +516,13 @@ pieces that need OpenGL.
   a crash keeps the record. Records: `new_game` (seed, player, AI names,
   content hash, build id), `load` and `save` (with a copy of the save bytes
   written next to the trace, because the real save lives in the pref path
-  and may be overwritten), `command` (the player's order, tagged with the
-  day it was submitted), `day` (day and state hash after every tick),
+  and may be overwritten), `command` (the player's order, written when the
+  session hands it to the sim and tagged with that day, which is the day it
+  was given), `day` (day and state hash after every tick),
   `notice` (each player-visible log entry with its text), `state` (monthly
   summary: cash, reserved, debt, capacity, plots, mines with output, stock,
-  prices, rivals), `ui` (tab, select_plot, select_resource, speed, status),
+  prices, rivals), `ui` (tab, select_plot, select_resource, speed, status,
+  and since spec 007 order_queued and order_cancelled),
   `marker`, `screenshot` and `end`. Seeds travel as decimal strings and
   hashes as hex strings so JSON tools that read numbers as doubles do not
   corrupt them. The trace is written by the session (orders, ticks,
@@ -526,8 +531,8 @@ pieces that need OpenGL.
 - **Where**: the `DEEP_CLAIM_PLAYTEST` environment variable if set (`off`
   disables tracing); otherwise `playtest/` in the repository for a
   development build (gitignored); otherwise `playtest/` under the per-user
-  data directory. The build id is the short git revision captured at
-  configure time.
+  data directory. The build id is the short git revision, read on every
+  build since spec 007 (it was captured at configure time before).
 - **Screenshots**: F9 writes a `marker` record and takes a screenshot, F12
   takes one. The frame is read back from the default framebuffer in a
   pre-swap callback added to the vendored backend (the only other edit
@@ -908,3 +913,99 @@ column were never used for tuning):
 | Iron revenue over opex at base | 3.0 | 4.5 | 4.5 | 4.5 |
 | Mines built by year 10, company 0 / company 1, median | 16 / 49 | | 37 / 37 | 37 / 37 |
 | Final cash, company 0 / company 1, median | $187M / $831M | | $765M / $832M | $764M / $818M |
+
+## Pending orders (spec 007)
+
+- **Orders wait in the session, not the sim.** `Session::submit` binds the
+  order to the player, gives it an id and appends it to a queue of
+  `PendingOrder {id, command}`; `pendingOrders()` returns the queue in the
+  order given. `giveOrders` hands the whole queue to `Simulation::submit`
+  in that order at the top of `tickOnce`, before the rivals decide, and in
+  `Session::save()`. Any tick empties the queue, so an order reaches the
+  sim on the day it was given and the game plays out exactly as if it had
+  gone straight there. Ids start at 1 and are never handed out twice in a
+  session.
+- **Cancel is not a sim rule.** `cancel(id)` and `cancelAll()` erase from
+  the session's queue; the sim never saw the order, so there is nothing to
+  validate, charge, log or undo, and no command, notice or state was added.
+  `cancel` returns false for an id that is no longer waiting (given or
+  cancelled already), and the client then sets no status line. Taking back an
+  order the sim already holds would be a sim rule and is out of scope.
+- **Saving gives the orders first.** `Session::save()` is no longer const:
+  it hands over the queue and then saves, so the save holds the orders as
+  the current day's commands, as it did before, and they can no longer be
+  cancelled. A successful `load` clears the queue.
+- **Trace.** A `command` record is written at hand-over, not when the
+  button is pressed, with the hand-over day (the day the order was given).
+  A cancelled order therefore never appears as a command. `submit`,
+  `cancel` and `cancelAll` write `ui` records of kind `order_queued` and
+  `order_cancelled`, whose detail is `#<id> <command json>`; the id ties a
+  cancellation to the order it withdrew. `kTraceVersion` is still 1.
+  Replay feeds each `command` record to `Session::submit` and ticks on
+  each `day` record, so it goes through the same queue and needs no rule
+  for cancelled orders.
+- **Committed and Available are display figures (R-001).** `orderCost`
+  prices one waiting order at today's quotes: the survey fee, a bid less
+  the player's standing bid on that plot (the view already counts the
+  standing bid as reserved, and the sim asks a rebid to cover only the
+  difference), the plot's `mineCapexQuote`, the tech's cost, a repayment's
+  amount; loans, sales, mine switches, sell policies and cover-costs cost
+  nothing. `committed()` sums it over the queue and `pendingBorrowed()`
+  sums the principal of waiting loans. The client's one affordability
+  figure is cash - reserved - committed + pending borrowed
+  (`Orders::available` in `ui_model.cpp`); the header shows it as
+  "Available", where it used to show "Spendable", and the status strip
+  shows Committed while it is above zero. None of this is a rule: the sim
+  validates every order when it arrives and its rejection is what counts.
+- **Display costs are never negative, and unknown things cost nothing.** A
+  cost is clamped at zero so an order with a nonsense amount cannot make
+  money look available, and a bid, build or research order naming a plot
+  or tech the view does not show costs nothing. Such orders stay in the
+  queue for the sim to reject.
+- **"Not covered" is a walk, not a rule.** `readOrders` goes through the
+  queue with a running balance that starts at cash less reserved: a loan
+  adds its principal, any other order is flagged when its cost is above
+  zero and above the balance, and only a covered order is subtracted. An
+  uncovered order takes nothing from the orders after it, as a rejected
+  order would not, so cancelling a loan does not flag everything behind
+  the first shortfall.
+- **One order path in the client.** Every handler goes through
+  `App::order`, which submits and refreshes at once. Before, an order
+  given with the clock stopped changed nothing on screen, because the
+  interface shows sim state and the sim had not applied the order; now
+  the queue itself is shown. Cancel sets `status.order_cancelled`. A
+  second click on the cover-costs switch while its change is waiting
+  cancels that change instead of queueing its opposite behind it.
+- **Strings.** Chips and pending lines are `ui.pending_*` catalogue keys.
+  Sell-policy and cover-costs changes needed labels the spec had not
+  listed: `ui.pending_policy_on`/`off` and `ui.pending_cover_on`/`off`.
+- **Build id at build time.** The root `CMakeLists.txt` defines an
+  always-run target `dc_build_id` that runs `cmake/BuildId.cmake` in
+  script mode (and once at configure time, so the header exists for tools
+  that read `compile_commands.json` without building). The script writes `generated/dc_build_id.h` in the build
+  directory, defining `DC_BUILD_ID`, and rewrites it only when the content
+  changes, so a build with no new commit recompiles nothing. The id is the
+  output of `git rev-parse --short HEAD`, or `unknown` when
+  `<source>/.git` does not exist, git is missing, or the output is not a
+  hex string. The existence test stops a source archive unpacked inside
+  another repository from taking that repository's revision. Only
+  `game/src/main.cpp` includes the header, so only it recompiles after a
+  commit. Playtest 3 had found the trace naming the previous merge.
+- **The save reader, the one change under `sim/`.** `ReadArchive` bounds a
+  vector's length prefix by the smallest serialized size of an element,
+  measured from a default-constructed value. For `sim::Command`, a
+  variant, the default is its first alternative, `BidOnPlot` (17 bytes
+  with the tag), so the reader demanded 17 bytes per queued command and
+  could refuse a valid save whose queue held a shorter one: a survey,
+  build, mine switch, loan, research or cover-costs order. The bug
+  predates this spec; saving with orders waiting made it easy to reach.
+  `minSerializedSize` in `sim/include/sim/archive.h` now gives a variant
+  its smallest alternative plus the tag (6 bytes for `SetCoverCosts`).
+  Read side only: the bytes written are the same.
+- **Nothing moved.** The golden determinism hash is still
+  `0x2a5da3177ab7c69d`, `kSaveVersion` is still 1 and the save format is
+  byte for byte what it was; no sim state, command, notice or balance
+  number was added, and the content fingerprint is untouched by this
+  spec's code (the new strings are outside it).
+- **Open.** Listed in the spec under "Open after build"; the feature has
+  not yet been seen on a display, run through CI, reviewed or playtested.
