@@ -263,7 +263,8 @@ bool parseArgs(std::span<char*> argv, Args& args) {
     return true;
 }
 
-bool writeSave(const std::filesystem::path& path, const game::Session& session) {
+// Not const: saving gives the session's waiting orders to the sim first.
+bool writeSave(const std::filesystem::path& path, game::Session& session) {
     const std::vector<std::uint8_t> bytes = session.save();
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) byte buffer to stream

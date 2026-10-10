@@ -3,6 +3,7 @@
 #include "sim/commands.h"
 #include "sim/content.h"
 #include "sim/ids.h"
+#include "sim/money.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
 #include "sim/view.h"
@@ -15,6 +16,7 @@
 #include <limits>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -101,13 +103,130 @@ std::optional<sim::Notice> Session::takePausedBy() {
 
 void Session::submit(sim::Command command) {
     sim::setCommandCompany(command, kPlayer);
+    PendingOrder order;
+    order.id = nextOrderId_++;
+    order.command = command;
+    traceOrder("order_queued", order);
+    pending_.push_back(std::move(order));
+}
+
+bool Session::cancel(std::uint64_t id) {
+    const auto it = std::find_if(pending_.begin(), pending_.end(),
+                                 [id](const PendingOrder& order) { return order.id == id; });
+    if (it == pending_.end()) {
+        return false;
+    }
+    traceOrder("order_cancelled", *it);
+    pending_.erase(it);
+    return true;
+}
+
+void Session::cancelAll() {
+    for (const PendingOrder& order : pending_) {
+        traceOrder("order_cancelled", order);
+    }
+    pending_.clear();
+}
+
+void Session::traceOrder(std::string_view kind, const PendingOrder& order) {
     if (trace_ != nullptr) {
-        trace_->command(day(), command, content_);
+        // The id ties a cancellation to the order it withdrew.
+        const std::string detail =
+            "#" + std::to_string(order.id) + " " + encodeCommand(order.command);
+        trace_->ui(day(), kind, detail);
     }
-    if (const auto* bid = std::get_if<sim::BidOnPlot>(&command)) {
-        submittedBids_.push_back(bid->plot);
+}
+
+void Session::giveOrders() {
+    // Moved out first: nothing given here can queue another order, but the
+    // queue must be empty whatever happens below.
+    const std::vector<PendingOrder> orders = std::move(pending_);
+    pending_.clear();
+    for (const PendingOrder& order : orders) {
+        if (trace_ != nullptr) {
+            trace_->command(day(), order.command, content_);
+        }
+        if (const auto* bid = std::get_if<sim::BidOnPlot>(&order.command)) {
+            submittedBids_.push_back(bid->plot);
+        }
+        simulation_.submit(order.command);
     }
-    simulation_.submit(command);
+}
+
+namespace {
+
+template <typename... Handlers>
+struct Overloaded : Handlers... {
+    using Handlers::operator()...;
+};
+template <typename... Handlers>
+Overloaded(Handlers...) -> Overloaded<Handlers...>;
+
+// A cost for display is never negative: an order with a nonsense amount is
+// the sim's to reject, and must not make money look available.
+sim::Money atLeastZero(sim::Money amount) {
+    return std::max(amount, sim::Money::zero());
+}
+
+}  // namespace
+
+sim::Money Session::orderCost(const sim::Command& command) const {
+    const auto plotView = [this](sim::PlotId plot) -> const sim::PlotView* {
+        return plot.valid() && plot.index() < view_.plots.size() ? &view_.plots[plot.index()]
+                                                                 : nullptr;
+    };
+    return std::visit(
+        Overloaded{
+            [this](const sim::CommissionSurvey&) { return content_->balance.surveyCost; },
+            [&](const sim::BidOnPlot& bid) {
+                // A raise needs only the difference from the standing bid,
+                // which the view already counts as reserved.
+                const sim::PlotView* plot = plotView(bid.plot);
+                const sim::Money standing = plot != nullptr && plot->auction.has_value()
+                                                ? plot->auction->myBid
+                                                : sim::Money::zero();
+                return atLeastZero(bid.amount - standing);
+            },
+            [&](const sim::BuildMine& build) {
+                const sim::PlotView* plot = plotView(build.plot);
+                return plot != nullptr ? plot->mineCapexQuote : sim::Money::zero();
+            },
+            [this](const sim::StartResearch& research) {
+                return research.tech.valid() && research.tech.index() < content_->techs.size()
+                           ? content_->techs[research.tech.index()].cost
+                           : sim::Money::zero();
+            },
+            [](const sim::RepayLoan& repay) { return atLeastZero(repay.amount); },
+            [](const sim::TakeLoan&) { return sim::Money::zero(); },
+            [](const sim::SellOre&) { return sim::Money::zero(); },
+            [](const sim::SetMineState&) { return sim::Money::zero(); },
+            [](const sim::SetSellPolicy&) { return sim::Money::zero(); },
+            [](const sim::SetCoverCosts&) { return sim::Money::zero(); },
+        },
+        command);
+}
+
+sim::Money Session::committed() const {
+    sim::Money total = sim::Money::zero();
+    for (const PendingOrder& order : pending_) {
+        total += orderCost(order.command);
+    }
+    return total;
+}
+
+sim::Money Session::pendingBorrowed() const {
+    sim::Money total = sim::Money::zero();
+    for (const PendingOrder& order : pending_) {
+        if (const auto* loan = std::get_if<sim::TakeLoan>(&order.command)) {
+            total += atLeastZero(loan->principal);
+        }
+    }
+    return total;
+}
+
+std::vector<std::uint8_t> Session::save() {
+    giveOrders();
+    return simulation_.save();
 }
 
 bool Session::load(std::span<const std::uint8_t> bytes) {
@@ -118,6 +237,7 @@ bool Session::load(std::span<const std::uint8_t> bytes) {
     cashHistory_.assign(1, view_.cash);
     pausedBy_.reset();
     submittedBids_.clear();
+    pending_.clear();
     log_.clear();
     sim::Notice marker;
     marker.kind = sim::NoticeKind::EventEnded;  // placeholder kind; text is what matters
@@ -132,8 +252,9 @@ bool Session::load(std::span<const std::uint8_t> bytes) {
 }
 
 void Session::tickOnce() {
-    // Rivals decide from their own views; the player's orders are already
-    // queued. The sim applies everything in company order.
+    // The player's orders go to the sim first, then the rivals decide from
+    // their own views. The sim applies everything in company order.
+    giveOrders();
     const std::size_t companies = view_.companies.size();
     for (std::uint32_t c = 1; c < companies; ++c) {
         simulation_.collectCommands(sim::CompanyId(c), ai_);
