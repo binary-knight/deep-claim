@@ -16,9 +16,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace game {
@@ -78,6 +80,14 @@ const char* mineStateClass(sim::MineState state) {
 
 std::string plotLabel(sim::PlotId id) {
     return std::format("#{}", id.value() + 1);
+}
+
+// A resource's name, or "" for an id the content does not have (a waiting
+// order can name anything; the sim rejects it).
+std::string resourceName(const sim::Content& content, sim::ResourceId resource) {
+    return resource.valid() && resource.index() < content.resources.size()
+               ? content.resources[resource.index()].name
+               : std::string();
 }
 
 std::string dayLabel(sim::Day day) {
@@ -312,6 +322,178 @@ std::string monthsBeforeBankruptcy(const sim::Content& content, const sim::Compa
     return std::to_string(grace > view.monthsInsolvent ? grace - view.monthsInsolvent : 0);
 }
 
+// ---- orders waiting for the clock (spec 007) ----
+
+template <typename... Fs>
+struct Overloaded : Fs... {
+    using Fs::operator()...;
+};
+template <typename... Fs>
+Overloaded(Fs...) -> Overloaded<Fs...>;
+
+// Session ids count up from one, so an int holds them for longer than
+// anyone will play; one that did not fit would read as "nothing to cancel".
+int orderId(std::uint64_t id) {
+    return id <= static_cast<std::uint64_t>(std::numeric_limits<int>::max()) ? static_cast<int>(id)
+                                                                             : 0;
+}
+
+// The chip or line for a waiting order. The two switches have no chip of
+// their own in the catalogue; their line is the sentence the status bar
+// gives when they are set.
+std::string pendingText(const sim::Content& content, const sim::Command& command) {
+    return std::visit(
+        Overloaded{
+            [&](const sim::CommissionSurvey&) { return text(content, "ui.pending_survey"); },
+            [&](const sim::BidOnPlot& bid) {
+                return text(content, "ui.pending_bid", {{"amount", formatMoney(bid.amount)}});
+            },
+            [&](const sim::BuildMine&) { return text(content, "ui.pending_build"); },
+            [&](const sim::StartResearch&) { return text(content, "ui.pending_research"); },
+            [&](const sim::SetMineState& mine) {
+                return text(content,
+                            mine.operate != 0 ? "ui.pending_reopen" : "ui.pending_mothball");
+            },
+            [&](const sim::TakeLoan& loan) {
+                return text(content, "ui.pending_loan", {{"amount", formatMoney(loan.principal)}});
+            },
+            [&](const sim::RepayLoan& repay) {
+                return text(content, "ui.pending_repayment",
+                            {{"amount", formatMoney(repay.amount)}});
+            },
+            [&](const sim::SellOre& sale) {
+                return text(content, "ui.pending_sale",
+                            {{"tonnes", formatTonnes(sale.tonnes)},
+                             {"resource", resourceName(content, sale.resource)}});
+            },
+            [&](const sim::SetSellPolicy& policy) {
+                return text(content,
+                            policy.enabled != 0 ? "status.policy_starts" : "status.policy_stops",
+                            {{"resource", resourceName(content, policy.resource)}});
+            },
+            [&](const sim::SetCoverCosts& cover) {
+                return text(content, cover.enabled != 0 ? "status.cover_on" : "status.cover_off");
+            },
+        },
+        command);
+}
+
+// The session's queue as the interface shows it: one mark per waiting order,
+// and the money left once the queue is counted.
+struct Orders {
+    const std::vector<PendingOrder>* waiting = nullptr;
+    std::vector<OrderMark> marks;  // one per waiting order, same positions
+    // Cash less reserved, less what the queue will cost, plus what its loans
+    // bring in: the figure every affordability check uses.
+    sim::Money available;
+};
+
+// Marks an order "not covered" when the money on hand at its turn falls
+// short of its cost: cash less reserved, plus the loans given before it,
+// less the orders before it that are covered. An order that is not covered
+// takes nothing from the orders after it, as a rejected order would not.
+// Display only (R-001): the sim decides what it accepts.
+Orders readOrders(const Session& session) {
+    const sim::CompanyView& view = session.view();
+    Orders orders;
+    orders.waiting = &session.pendingOrders();
+    const sim::Money spendable = view.cash - view.reservedCash;
+    orders.available = spendable - session.committed() + session.pendingBorrowed();
+    sim::Money running = spendable;
+    for (const PendingOrder& order : *orders.waiting) {
+        OrderMark mark;
+        mark.pending = true;
+        mark.id = orderId(order.id);
+        mark.text = pendingText(session.content(), order.command);
+        if (const auto* loan = std::get_if<sim::TakeLoan>(&order.command)) {
+            running += std::max(loan->principal, sim::Money::zero());
+        } else {
+            const sim::Money cost = session.orderCost(order.command);
+            mark.not_covered = cost > sim::Money::zero() && cost > running;
+            if (!mark.not_covered) {
+                running -= cost;
+            }
+        }
+        orders.marks.push_back(std::move(mark));
+    }
+    return orders;
+}
+
+// Position of the last waiting order of type T that `matches`.
+template <typename T, typename Matches>
+std::optional<std::size_t> lastOrder(const Orders& orders, Matches matches) {
+    for (std::size_t i = orders.waiting->size(); i-- > 0;) {
+        const auto* command = std::get_if<T>(&(*orders.waiting)[i].command);
+        if (command != nullptr && matches(*command)) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
+// The mark for a control: its last waiting order, or nothing pending.
+template <typename T, typename Matches>
+OrderMark markFor(const Orders& orders, Matches matches) {
+    const std::optional<std::size_t> at = lastOrder<T>(orders, matches);
+    return at ? orders.marks[*at] : OrderMark{};
+}
+
+OrderMark mineOrderMark(const Orders& orders, sim::MineId mine) {
+    return markFor<sim::SetMineState>(
+        orders, [mine](const sim::SetMineState& order) { return order.mine == mine; });
+}
+
+OrderMark buildOrderMark(const Orders& orders, sim::PlotId plot) {
+    return markFor<sim::BuildMine>(
+        orders, [plot](const sim::BuildMine& order) { return order.plot == plot; });
+}
+
+PendingRow pendingRow(const OrderMark& mark) {
+    return PendingRow{mark.id, mark.text, mark.not_covered};
+}
+
+// The strip's Committed figure, the count line beside the speed controls,
+// the list behind it, and the Finance and Market sheets' pending lines.
+void fillPending(const Session& session, const Orders& orders, UiModel& model) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const sim::Money committed = session.committed();
+    model.spendable = formatMoney(view.cash - view.reservedCash);
+    model.available = formatMoney(orders.available);
+    model.has_committed = committed > sim::Money::zero();
+    model.committed = model.has_committed
+                          ? text(content, "ui.committed", {{"amount", formatMoney(committed)}})
+                          : "";
+    model.pending_orders.clear();
+    model.finance_orders.clear();
+    model.market_orders.clear();
+    model.pending_shortfall = false;
+    for (std::size_t i = 0; i < orders.marks.size(); ++i) {
+        const sim::Command& command = (*orders.waiting)[i].command;
+        const PendingRow row = pendingRow(orders.marks[i]);
+        model.pending_orders.push_back(row);
+        model.pending_shortfall = model.pending_shortfall || row.not_covered;
+        if (std::holds_alternative<sim::TakeLoan>(command) ||
+            std::holds_alternative<sim::RepayLoan>(command)) {
+            model.finance_orders.push_back(row);
+        } else if (std::holds_alternative<sim::SellOre>(command)) {
+            model.market_orders.push_back(row);
+        }
+    }
+    model.pending_count = static_cast<int>(model.pending_orders.size());
+    model.has_pending = model.pending_count > 0;
+    model.pending_line = model.has_pending
+                             ? textPlural(content, "ui.pending_count", model.pending_count,
+                                          {{"count", std::to_string(model.pending_count)}})
+                             : "";
+    model.loan_order = markFor<sim::TakeLoan>(orders, [](const sim::TakeLoan&) { return true; });
+    model.cover_order =
+        markFor<sim::SetCoverCosts>(orders, [](const sim::SetCoverCosts&) { return true; });
+    model.ui_cancel = text(content, "ui.cancel");
+    model.ui_cancel_all = text(content, "ui.cancel_all");
+    model.ui_not_covered = text(content, "ui.pending_not_covered");
+}
+
 // ---- header and strip ----
 
 void fillStrip(const Session& session, UiModel& model) {
@@ -410,7 +592,7 @@ constexpr int kDatedPriority = 10;
 
 // Standing problems: insolvency, storage above a tenth of cash, idle mines.
 void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
-                     std::vector<PendingNeed>& pending) {
+                     const Orders& orders, std::vector<PendingNeed>& pending) {
     if (view.monthsInsolvent > 0) {
         NeedRow row;
         row.title = text(content, "ui.need_insolvent_title",
@@ -442,18 +624,21 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
         row.action = 2;
         row.target = static_cast<int>(mine.id.value());
         row.act_label = "Mothball";
+        row.order = mineOrderMark(orders, mine.id);
         pending.push_back({0, kWarningPriority + 2, std::move(row)});
     }
 }
 
 // A tech the player could start this minute: not known, prerequisites done,
-// affordable. The Research tab's Start button uses the same test.
-bool techStartable(const sim::Content& content, const sim::CompanyView& view, std::uint32_t i) {
+// affordable with the money available. The Research tab's Start button uses
+// the same test.
+bool techStartable(const sim::Content& content, const sim::CompanyView& view, sim::Money available,
+                   std::uint32_t i) {
     const sim::TechDef& tech = content.techs[i];
     return !view.bankrupt && !view.activeResearch && !knowsTech(view, sim::TechId(i)) &&
            std::ranges::all_of(tech.prerequisites,
                                [&](sim::TechId p) { return knowsTech(view, p); }) &&
-           tech.cost <= view.cash - view.reservedCash;
+           tech.cost <= available;
 }
 
 constexpr sim::Day kSurveyNewsDays = 15;
@@ -462,10 +647,10 @@ constexpr sim::Day kSurveyNewsDays = 15;
 // with a project it could start, and a survey report that has just landed
 // on a plot still at auction.
 void addDecisionNeeds(const sim::Content& content, const sim::CompanyView& view,
-                      std::vector<PendingNeed>& pending) {
+                      sim::Money available, std::vector<PendingNeed>& pending) {
     int startable = 0;
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
-        startable += techStartable(content, view, i) ? 1 : 0;
+        startable += techStartable(content, view, available, i) ? 1 : 0;
     }
     if (startable > 0) {
         NeedRow row;
@@ -567,12 +752,12 @@ void addDatedNeeds(const sim::Content& content, const sim::CompanyView& view,
     }
 }
 
-void fillNeeds(const Session& session, UiModel& model) {
+void fillNeeds(const Session& session, const Orders& orders, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     std::vector<PendingNeed> pending;
-    addWarningNeeds(content, view, pending);
-    addDecisionNeeds(content, view, pending);
+    addWarningNeeds(content, view, orders, pending);
+    addDecisionNeeds(content, view, orders.available, pending);
     addDatedNeeds(content, view, pending);
     std::stable_sort(
         pending.begin(), pending.end(), [](const PendingNeed& a, const PendingNeed& b) {
@@ -589,7 +774,7 @@ void fillNeeds(const Session& session, UiModel& model) {
 // ---- dashboard: what you own ----
 
 OwnedRow makeOwnedRow(const sim::Content& content, const sim::CompanyView& view,
-                      const sim::PlotView& plot) {
+                      const Orders& orders, const sim::PlotView& plot) {
     OwnedRow row;
     row.index = static_cast<int>(plot.id.value());
     row.name = plotLabel(plot.id);
@@ -602,6 +787,7 @@ OwnedRow makeOwnedRow(const sim::Content& content, const sim::CompanyView& view,
         row.mine_class = "muted";
         row.remaining = text(content, "ui.remaining_no_mine");
         row.can_build = !view.bankrupt;
+        row.build_order = buildOrderMark(orders, plot.id);
         return row;
     }
     row.mine = mineStateLabel(mine->state);
@@ -612,6 +798,7 @@ OwnedRow makeOwnedRow(const sim::Content& content, const sim::CompanyView& view,
     row.can_toggle = !view.bankrupt && (mine->state == sim::MineState::Operating ||
                                         mine->state == sim::MineState::Mothballed);
     row.mine_index = static_cast<int>(mine->id.value());
+    row.mine_order = mineOrderMark(orders, mine->id);
     return row;
 }
 
@@ -645,13 +832,13 @@ std::string rivalLine(const sim::Content& content, const sim::CompanyView& view,
         {{"company", rival.name}, {"plots", plots}, {"mines", mineCount}, {"bidding", bidding}});
 }
 
-void fillOwned(const Session& session, UiModel& model) {
+void fillOwned(const Session& session, const Orders& orders, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     model.owned.clear();
     for (const sim::PlotView& plot : view.plots) {
         if (plot.listing == sim::PlotListing::Sold && plot.owner == Session::kPlayer) {
-            model.owned.push_back(makeOwnedRow(content, view, plot));
+            model.owned.push_back(makeOwnedRow(content, view, orders, plot));
         }
     }
     model.rival_line.clear();
@@ -950,8 +1137,22 @@ void fillPanelNotice(const sim::Content& content, const sim::CompanyView& view,
     }
 }
 
+// Orders waiting on the selected plot: each stands in for its button.
+void fillPanelOrders(const Orders& orders, const sim::PlotView& plot, PlotPanel& panel) {
+    const sim::PlotId id = plot.id;
+    panel.survey_order = markFor<sim::CommissionSurvey>(
+        orders, [id](const sim::CommissionSurvey& order) { return order.plot == id; });
+    panel.bid_order = markFor<sim::BidOnPlot>(
+        orders, [id](const sim::BidOnPlot& order) { return order.plot == id; });
+    panel.build_order = buildOrderMark(orders, id);
+    if (plot.mine) {
+        panel.mine_order = mineOrderMark(orders, plot.mine->id);
+    }
+}
+
 void fillPanelActions(const sim::Content& content, const sim::CompanyView& view,
-                      const sim::PlotView& plot, const SurveyLookup& found, PlotPanel& panel) {
+                      sim::Money available, const sim::PlotView& plot, const SurveyLookup& found,
+                      PlotPanel& panel) {
     // A worked-out mine has answered the question a survey asks.
     const bool workedOut = panel.owned && plot.mine &&
                            (plot.mine->state == sim::MineState::Depleted ||
@@ -975,7 +1176,7 @@ void fillPanelActions(const sim::Content& content, const sim::CompanyView& view,
         text(content, found.latest != nullptr ? "ui.survey_again" : "ui.survey_first",
              {{"amount", formatMoney(content.balance.surveyCost)}});
     panel.can_build = panel.owned && !plot.mine && !view.bankrupt;
-    panel.can_afford_mine = plot.mineCapexQuote <= view.cash - view.reservedCash;
+    panel.can_afford_mine = plot.mineCapexQuote <= available;
     panel.build_label = text(content, "ui.build_label", {{"amount", panel.capex}});
     panel.build_blocked = text(content, "ui.build_blocked", {{"amount", panel.capex}});
     if (plot.mine) {
@@ -988,7 +1189,7 @@ void fillPanelActions(const sim::Content& content, const sim::CompanyView& view,
     }
 }
 
-void fillPanel(const Session& session, UiModel& model) {
+void fillPanel(const Session& session, const Orders& orders, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     PlotPanel panel;
@@ -1024,7 +1225,8 @@ void fillPanel(const Session& session, UiModel& model) {
     const SurveyLookup found = findSurvey(view, plot.id);
     const bool anyExtractable = fillPanelSurvey(content, view, found, panel);
     fillPanelNotice(content, view, plot, found, anyExtractable, panel);
-    fillPanelActions(content, view, plot, found, panel);
+    fillPanelActions(content, view, orders.available, plot, found, panel);
+    fillPanelOrders(orders, plot, panel);
     model.panel = panel;
 }
 
@@ -1048,8 +1250,29 @@ std::string policySummary(const sim::Content& content, const sim::SellPolicy& po
                  {"price", formatMoney(policy.floorPrice)}});
 }
 
+// A resource's standing order as it will stand once the waiting orders are
+// given: the switch shows its new setting at once (spec 007).
+sim::SellPolicy policyOrdered(const sim::CompanyView& view, const Orders& orders,
+                              sim::ResourceId resource) {
+    sim::SellPolicy policy = view.sellPolicies[resource.index()];
+    const std::optional<std::size_t> at = lastOrder<sim::SetSellPolicy>(
+        orders, [resource](const sim::SetSellPolicy& order) { return order.resource == resource; });
+    if (at) {
+        const auto& order = std::get<sim::SetSellPolicy>((*orders.waiting)[*at].command);
+        policy.enabled = order.enabled;
+        policy.reserveTonnes = order.reserveTonnes;
+        policy.floorPrice = order.floorPrice;
+    }
+    return policy;
+}
+
+OrderMark policyOrderMark(const Orders& orders, sim::ResourceId resource) {
+    return markFor<sim::SetSellPolicy>(
+        orders, [resource](const sim::SetSellPolicy& order) { return order.resource == resource; });
+}
+
 ResourceRow makeResourceRow(const sim::Content& content, const sim::CompanyView& view,
-                            std::uint32_t r, int selected) {
+                            const Orders& orders, std::uint32_t r, int selected) {
     const sim::MarketView& market = view.markets[r];
     ResourceRow row;
     row.index = static_cast<int>(r);
@@ -1071,9 +1294,13 @@ ResourceRow makeResourceRow(const sim::Content& content, const sim::CompanyView&
     row.locked = resourceLocked(content, view, sim::ResourceId(r));
     row.locked_note = row.locked ? lockedNote(content, view, sim::ResourceId(r)) : "";
     row.selected = static_cast<int>(r) == selected;
-    const sim::SellPolicy& policy = view.sellPolicies[r];
+    const sim::ResourceId resource(r);
+    const sim::SellPolicy policy = policyOrdered(view, orders, resource);
     row.policy_on = policy.enabled != 0;
     row.policy = policySummary(content, policy);
+    row.policy_order = policyOrderMark(orders, resource);
+    row.sale_order = markFor<sim::SellOre>(
+        orders, [resource](const sim::SellOre& order) { return order.resource == resource; });
     row.auto_sold = view.autoSoldTonnes[r] > 0
                         ? text(content, "ui.auto_sold",
                                {{"tonnes", formatTonnes(view.autoSoldTonnes[r])},
@@ -1082,17 +1309,21 @@ ResourceRow makeResourceRow(const sim::Content& content, const sim::CompanyView&
     return row;
 }
 
-void fillResources(const Session& session, UiModel& model) {
+void fillResources(const Session& session, const Orders& orders, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     model.resources.clear();
     for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
-        model.resources.push_back(makeResourceRow(content, view, r, model.selected_resource));
+        model.resources.push_back(
+            makeResourceRow(content, view, orders, r, model.selected_resource));
     }
+    model.policy_order = OrderMark{};
     if (model.selected_resource >= 0 &&
         model.selected_resource < static_cast<int>(content.resources.size())) {
         const auto r = static_cast<std::size_t>(model.selected_resource);
-        const sim::SellPolicy& policy = view.sellPolicies[r];
+        const sim::ResourceId resource(static_cast<std::uint32_t>(r));
+        const sim::SellPolicy policy = policyOrdered(view, orders, resource);
+        model.policy_order = policyOrderMark(orders, resource);
         const sim::MarketView& market = view.markets[r];
         model.policy_enabled = policy.enabled != 0;
         model.policy_summary =
@@ -1111,8 +1342,8 @@ void fillResources(const Session& session, UiModel& model) {
 
 // ---- research ----
 
-TechRow makeTechRow(const sim::Content& content, const sim::CompanyView& view, std::uint32_t i,
-                    const std::string& busyUntil) {
+TechRow makeTechRow(const sim::Content& content, const sim::CompanyView& view, const Orders& orders,
+                    std::uint32_t i, const std::string& busyUntil) {
     const sim::TechDef& tech = content.techs[i];
     TechRow row;
     row.index = static_cast<int>(i);
@@ -1146,16 +1377,23 @@ TechRow makeTechRow(const sim::Content& content, const sim::CompanyView& view, s
             row.blocked = text(content, "ui.tech_busy", {{"day", busyUntil}});
         } else if (view.bankrupt) {
             row.blocked = text(content, "ui.tech_bankrupt");
-        } else if (tech.cost > view.cash - view.reservedCash) {
+        } else if (tech.cost > orders.available) {
             row.blocked = text(content, "ui.tech_unaffordable", {{"amount", row.cost}});
         } else {
             row.can_start = true;
         }
     }
+    row.order = markFor<sim::StartResearch>(
+        orders, [i](const sim::StartResearch& order) { return order.tech == sim::TechId(i); });
+    if (row.order.pending) {
+        // The chip stands in for Start; the order's own cost is not a reason.
+        row.can_start = false;
+        row.blocked.clear();
+    }
     return row;
 }
 
-void fillTechs(const Session& session, UiModel& model) {
+void fillTechs(const Session& session, const Orders& orders, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     model.techs.clear();
@@ -1167,7 +1405,7 @@ void fillTechs(const Session& session, UiModel& model) {
         busyTech = content.techs[research.tech.index()].name;
     }
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
-        model.techs.push_back(makeTechRow(content, view, i, busyUntil));
+        model.techs.push_back(makeTechRow(content, view, orders, i, busyUntil));
     }
     model.lab_line = text(content, "ui.lab_one");
     model.lab_sub = busyUntil.empty()
@@ -1177,12 +1415,11 @@ void fillTechs(const Session& session, UiModel& model) {
 
 // ---- finance ----
 
-void fillFinance(const Session& session, UiModel& model) {
+void fillFinance(const Session& session, const Orders& orders, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     const sim::BalanceParams& b = content.balance;
     model.loans.clear();
-    const sim::Money spendable = view.cash - view.reservedCash;
     for (const sim::LoanView& loan : view.loans) {
         if (!loan.active) {
             continue;
@@ -1195,7 +1432,10 @@ void fillFinance(const Session& session, UiModel& model) {
         row.instalment = formatMoney(loan.principalPerMonth) + " + interest";
         row.months = std::to_string(loan.monthsRemaining);
         row.active = loan.active;
-        row.can_repay_all = !view.bankrupt && loan.remaining <= spendable;
+        row.can_repay_all = !view.bankrupt && loan.remaining <= orders.available;
+        const sim::LoanId id = loan.id;
+        row.repay_order = markFor<sim::RepayLoan>(
+            orders, [id](const sim::RepayLoan& order) { return order.loan == id; });
         model.loans.push_back(row);
     }
     // The loan form states the remaining credit and refuses in advance what
@@ -1218,7 +1458,12 @@ void fillFinance(const Session& session, UiModel& model) {
                               {"min", formatMoney(b.loanMinPrincipal)},
                               {"months", std::to_string(b.loanTermMonths)},
                               {"count", std::to_string(b.maxActiveLoans)}});
-    model.cover_costs = view.coverCosts;
+    // The switch shows its new setting at once (spec 007).
+    const std::optional<std::size_t> cover =
+        lastOrder<sim::SetCoverCosts>(orders, [](const sim::SetCoverCosts&) { return true; });
+    model.cover_costs =
+        cover ? std::get<sim::SetCoverCosts>((*orders.waiting)[*cover].command).enabled != 0
+              : view.coverCosts;
     model.cover_check = text(content, "ui.cover_check");
     model.cover_explain = text(content, "ui.cover_explain");
     // What cover-costs sold at the last month end, from the log.
@@ -1336,7 +1581,6 @@ void refreshModel(const Session& session, UiModel& model) {
     }
     model.day = formatDay(session.day());
     model.cash = formatMoney(view.cash);
-    model.spendable = formatMoney(view.cash - view.reservedCash);
     model.debt = formatMoney(view.outstandingPrincipal);
     model.speed_label = speedLabel(session.speed());
     model.speed = static_cast<int>(session.speed());
@@ -1344,15 +1588,17 @@ void refreshModel(const Session& session, UiModel& model) {
     model.ui_shortcuts = text(content, "ui.shortcuts");
     model.ui_game_over = text(content, "ui.game_over", {{"company", model.company}});
     model.ui_pause_menu_title = text(content, "ui.pause_menu_title");
+    const Orders orders = readOrders(session);
+    fillPending(session, orders, model);
     fillStrip(session, model);
-    fillNeeds(session, model);
-    fillOwned(session, model);
+    fillNeeds(session, orders, model);
+    fillOwned(session, orders, model);
     fillFinanceRow(session, model);
     fillSale(session, model);
-    fillPanel(session, model);
-    fillResources(session, model);
-    fillTechs(session, model);
-    fillFinance(session, model);
+    fillPanel(session, orders, model);
+    fillResources(session, orders, model);
+    fillTechs(session, orders, model);
+    fillFinance(session, orders, model);
     fillLog(session, model);
     fillPauseRows(session, model);
 }
