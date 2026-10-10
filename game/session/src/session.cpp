@@ -207,14 +207,19 @@ sim::Money Session::orderCost(const sim::Command& command) const {
     };
     return std::visit(
         Overloaded{
-            [this](const sim::CommissionSurvey&) { return content_->balance.surveyCost; },
+            [&](const sim::CommissionSurvey& survey) {
+                return plotView(survey.plot) != nullptr ? content_->balance.surveyCost
+                                                        : sim::Money::zero();
+            },
             [&](const sim::BidOnPlot& bid) {
+                const sim::PlotView* plot = plotView(bid.plot);
+                if (plot == nullptr) {
+                    return sim::Money::zero();
+                }
                 // A raise needs only the difference from the standing bid,
                 // which the view already counts as reserved.
-                const sim::PlotView* plot = plotView(bid.plot);
-                const sim::Money standing = plot != nullptr && plot->auction.has_value()
-                                                ? plot->auction->myBid
-                                                : sim::Money::zero();
+                const sim::Money standing =
+                    plot->auction.has_value() ? plot->auction->myBid : sim::Money::zero();
                 return atLeastZero(saturatingSub(bid.amount, standing));
             },
             [&](const sim::BuildMine& build) {
@@ -254,9 +259,15 @@ sim::Money Session::pendingBorrowed() const {
     return total;
 }
 
-std::vector<std::uint8_t> Session::save() {
-    giveOrders();
-    return simulation_.save();
+std::vector<std::uint8_t> Session::save() const {
+    // The save is taken from a copy of the sim that has been given the
+    // waiting orders, so this game keeps them: still listed, still counted
+    // and still open to Cancel. A save is a rare act; the copy is its cost.
+    sim::Simulation saved = simulation_;
+    for (const PendingOrder& order : pending_) {
+        saved.submit(order.command);
+    }
+    return saved.save();
 }
 
 bool Session::load(std::span<const std::uint8_t> bytes) {

@@ -76,7 +76,7 @@ public:
 
     // ---- player ----
     // Queues an order, always bound to the player. It reaches the sim at the
-    // start of the next tick, or when the game is saved, whichever is first.
+    // start of the next tick; until then it can be cancelled.
     void submit(sim::Command command);
     // What is waiting for the clock, in the order given.
     [[nodiscard]] const std::vector<PendingOrder>& pendingOrders() const { return pending_; }
@@ -108,9 +108,10 @@ public:
     [[nodiscard]] const std::vector<sim::Money>& cashHistory() const { return cashHistory_; }
 
     // ---- persistence ----
-    // Gives the waiting orders to the sim first, so the save holds them as
-    // the current day's orders; they can no longer be cancelled.
-    [[nodiscard]] std::vector<std::uint8_t> save();
+    // The save holds the waiting orders as the current day's orders, so a
+    // game loaded from it plays on as this one will. This session is left as
+    // it was: the orders still wait here and can still be cancelled.
+    [[nodiscard]] std::vector<std::uint8_t> save() const;
     // On success the waiting orders are discarded with the old game.
     [[nodiscard]] bool load(std::span<const std::uint8_t> bytes);
 
