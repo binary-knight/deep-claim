@@ -986,3 +986,209 @@ TEST_CASE("Mine margin and break-even saturate instead of overflowing", "[mines]
     CHECK(margin(content, state, negative) == sim::Money::fromUnits(-8'000));
     CHECK(breakEven(content, state, negative) == sim::Money::fromUnits(20));
 }
+
+// Spec 008: consecutive losing days per mine (the only new saved state).
+
+namespace {
+
+// Iron at 100,000 a day: 400 t breaks even at exactly $250, far above the
+// fixture's $60, so an iron mine loses money every day at market prices.
+sim::Content losingContent() {
+    sim::Content c = costedContent();
+    c.resources[kIron.index()].mineOpexPerDay = sim::Money::fromUnits(100'000);
+    return c;
+}
+
+// Sets today's iron price through a save edit. The mines step runs before
+// the market moves, so the next tick's counter sees exactly this price.
+void setIronPrice(sim::Simulation& simulation, const sim::Content& content, sim::Money price) {
+    sim::WorldState edited = simulation.state();
+    sim::Market& market = edited.markets[kIron.index()];
+    market.price = price;
+    market.priceHistory.back() = price;
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+}
+
+// Marks mine 0's loss as already announced, as the notice (a later task) will.
+void markLossAnnounced(sim::Simulation& simulation, const sim::Content& content) {
+    sim::WorldState edited = simulation.state();
+    edited.mines[0].lossAnnounced = 1;
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+}
+
+}  // namespace
+
+TEST_CASE("A mine running at a loss counts its consecutive losing days", "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, 1'000'000)});
+    const sim::Mine& mine = simulation.state().mines[0];
+    REQUIRE(mine.lastOutputTonnes[kIron.index()] == 400);
+
+    // Its first operating day already lost money.
+    CHECK(mine.lossDays == 1);
+    simulation.tick(3);
+    CHECK(simulation.state().mines[0].lossDays == 4);
+    // The count runs on past the notice threshold; nothing here announces it.
+    simulation.tick(content.balance.mineLossNoticeDays);
+    CHECK(simulation.state().mines[0].lossDays == 4 + content.balance.mineLossNoticeDays);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+}
+
+TEST_CASE("A mine that has not opened or is making money has no losing days", "[mines][spec008]") {
+    const sim::Content content = costedContent();  // iron breaks even at $20
+    sim::Simulation simulation(content, 1, test::setup());
+    orderMine(simulation, content, {deposit(kIron, 1'000'000)});
+    simulation.tick(content.balance.mineBuildDays);
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Building);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+
+    simulation.tick(5);
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Operating);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+}
+
+TEST_CASE("A day at break-even or better clears the losing days and the announcement",
+          "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, 1'000'000)});
+    simulation.tick(2);
+    REQUIRE(simulation.state().mines[0].lossDays == 3);
+    markLossAnnounced(simulation, content);
+
+    // Still losing: the announcement stands while the run of days goes on.
+    simulation.tick();
+    CHECK(simulation.state().mines[0].lossDays == 4);
+    CHECK(simulation.state().mines[0].lossAnnounced == 1);
+
+    setIronPrice(simulation, content, sim::Money::fromUnits(300));
+    simulation.tick();
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+    // The next losing day starts a new count.
+    setIronPrice(simulation, content, sim::Money::fromUnits(60));
+    simulation.tick();
+    CHECK(simulation.state().mines[0].lossDays == 1);
+}
+
+TEST_CASE("A day exactly at break-even is not a losing day", "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    orderMine(simulation, content, {deposit(kIron, 1'000'000)});
+    simulation.tick(content.balance.mineBuildDays);
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Building);
+
+    // The mine opens next tick with a full 400 t: 100,000 a day is $250 a tonne.
+    SECTION("at break-even") {
+        setIronPrice(simulation, content, sim::Money::fromUnits(250));
+        simulation.tick();
+        REQUIRE(simulation.state().mines[0].lastOutputTonnes[kIron.index()] == 400);
+        CHECK(simulation.state().mines[0].lossDays == 0);
+    }
+    SECTION("a cent under") {
+        setIronPrice(simulation, content, sim::Money::fromCents(24'999));
+        simulation.tick();
+        REQUIRE(simulation.state().mines[0].lastOutputTonnes[kIron.index()] == 400);
+        CHECK(simulation.state().mines[0].lossDays == 1);
+    }
+}
+
+TEST_CASE("The losing days use the price as the mines step sees it", "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, 1'000'000)});
+    REQUIRE(simulation.state().mines[0].lossDays == 1);
+
+    // Profitable at the price the day opens with; the market then pulls the
+    // price back under break-even in the same tick, which does not count.
+    setIronPrice(simulation, content, sim::Money::fromUnits(251));
+    simulation.tick();
+    REQUIRE(simulation.state().markets[kIron.index()].price < sim::Money::fromUnits(250));
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    simulation.tick();
+    CHECK(simulation.state().mines[0].lossDays == 1);
+}
+
+TEST_CASE("Mothballing a losing mine clears its losing days", "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, 1'000'000)});
+    simulation.tick(2);
+    REQUIRE(simulation.state().mines[0].lossDays == 3);
+    markLossAnnounced(simulation, content);
+
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 0});
+    simulation.tick();
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Mothballed);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+    // It would still lose money if reopened, but an idle mine is not counted.
+    simulation.tick(3);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 1});
+    simulation.tick();
+    CHECK(simulation.state().mines[0].lossDays == 1);
+}
+
+TEST_CASE("A losing mine that runs out has no losing days", "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, 1'000)});
+    REQUIRE(simulation.state().mines[0].lossDays == 1);
+    markLossAnnounced(simulation, content);
+
+    simulation.tick(10);
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Depleted);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+}
+
+TEST_CASE("A mine with no output to price has no losing days", "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    // Only locked ore: the mine operates and pays its cost but digs nothing.
+    openMine(simulation, content, {deposit(kLithium, 5'000)});
+    simulation.tick(4);
+    const sim::WorldState& state = simulation.state();
+    REQUIRE(state.mines[0].state == sim::MineState::Operating);
+    REQUIRE(std::ranges::all_of(state.mines[0].lastOutputTonnes,
+                                [](std::int64_t tonnes) { return tonnes == 0; }));
+    // The bare cost would read as a loss; there is no price to blame for it.
+    std::vector<sim::Money> prices;
+    prices.reserve(state.markets.size());
+    for (const sim::Market& market : state.markets) {
+        prices.push_back(market.price);
+    }
+    REQUIRE(margin(content, state, prices) < sim::Money::zero());
+    CHECK(state.mines[0].lossDays == 0);
+}
+
+TEST_CASE("A mine's losing days survive save and load and are part of the state hash",
+          "[mines][spec008][save]") {
+    const sim::Content content = losingContent();
+    sim::Simulation original(content, 5, test::setup());
+    openMine(original, content, {deposit(kIron, 1'000'000)});
+    original.tick(2);
+    markLossAnnounced(original, content);
+    REQUIRE(original.state().mines[0].lossDays == 3);
+
+    sim::Simulation restored(content, 6, test::setup());
+    REQUIRE(restored.load(original.save()));
+    CHECK(restored.state().mines[0].lossDays == 3);
+    CHECK(restored.state().mines[0].lossAnnounced == 1);
+    CHECK(restored.stateHash() == original.stateHash());
+    original.tick(4);
+    restored.tick(4);
+    CHECK(restored.state().mines[0].lossDays == 7);
+    CHECK(restored.stateHash() == original.stateHash());
+
+    // Either field alone moves the hash.
+    sim::WorldState edited = original.state();
+    edited.mines[0].lossDays += 1;
+    CHECK(sim::hashWorld(edited) != original.stateHash());
+    edited = original.state();
+    edited.mines[0].lossAnnounced = 0;
+    CHECK(sim::hashWorld(edited) != original.stateHash());
+}

@@ -15,8 +15,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace sim {
 
@@ -401,6 +403,46 @@ void warnRunningLow(const Content& /*content*/, WorldState& state, TickReport& r
     }
 }
 
+namespace {
+
+// A mine's margin says something about the market only when the mine is
+// working and has a day's output to price. The view's rule for showing
+// earnings, less the mothballed case: an idle mine is not losing money.
+bool countsTowardLosses(const WorldState& state, const Mine& mine) {
+    return mine.state == MineState::Operating &&
+           state.companies[mine.owner.index()].bankrupt == 0 &&
+           std::ranges::any_of(mine.lastOutputTonnes,
+                               [](std::int64_t tonnes) { return tonnes > 0; });
+}
+
+// Advances every mine's count of consecutive losing days (spec 008), at the
+// prices as the mines step sees them: yesterday's close, before today's
+// market update. A mine that does not count (see above) or that broke even
+// or better today starts afresh, and may be announced again. Raises nothing
+// yet: the notice is the caller's next step.
+void updateMineLosses(const Content& content, WorldState& state, TickReport& /*report*/) {
+    std::vector<Money> prices;
+    prices.reserve(state.markets.size());
+    for (const Market& market : state.markets) {
+        prices.push_back(market.price);
+    }
+    for (Mine& mine : state.mines) {
+        const Company& owner = state.companies[mine.owner.index()];
+        if (countsTowardLosses(state, mine) &&
+            mineDailyMargin(content, state, owner, mine, prices) < Money::zero()) {
+            // Saturates: a save can carry any count, and a wrap would read as a reset.
+            if (mine.lossDays < std::numeric_limits<std::uint32_t>::max()) {
+                ++mine.lossDays;
+            }
+            continue;
+        }
+        mine.lossDays = 0;
+        mine.lossAnnounced = 0;
+    }
+}
+
+}  // namespace
+
 void runMines(const Content& content, WorldState& state, TickReport& report) {
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         Mine& mine = state.mines[i];
@@ -446,6 +488,7 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
         owner.cash =
             debitCash(owner.cash, mineRunningCost(content, state, owner, mine, mine.state));
     }
+    updateMineLosses(content, state, report);
 }
 
 }  // namespace sim

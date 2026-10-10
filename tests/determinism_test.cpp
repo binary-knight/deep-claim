@@ -44,6 +44,10 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // spec 004 (plot and mine state) and spec 005 (the listing queue is built
     // as an opening hand plus a region-interleaved remainder) and spec 006
     // (an auction keeps the ask it opened with).
+    // Spec 008 added two fields to each mine's state (lossDays and
+    // lossAnnounced) and did not move it: nobody gives an order in this run,
+    // so no mine is built and the mine list is hashed empty. The new fields
+    // are pinned by the save and hash tests in mines_test.cpp instead.
     constexpr std::uint64_t kGolden = 0x2a5da3177ab7c69dULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
