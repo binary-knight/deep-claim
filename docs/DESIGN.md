@@ -920,8 +920,8 @@ column were never used for tuning):
   order to the player, gives it an id and appends it to a queue of
   `PendingOrder {id, command}`; `pendingOrders()` returns the queue in the
   order given. `giveOrders` hands the whole queue to `Simulation::submit`
-  in that order at the top of `tickOnce`, before the rivals decide, and in
-  `Session::save()`. Any tick empties the queue, so an order reaches the
+  in that order at the top of `tickOnce`, before the rivals decide, and
+  nowhere else. Any tick empties the queue, so an order reaches the
   sim on the day it was given and the game plays out exactly as if it had
   gone straight there. Ids start at 1 and are never handed out twice in a
   session.
@@ -931,10 +931,20 @@ column were never used for tuning):
   `cancel` returns false for an id that is no longer waiting (given or
   cancelled already), and the client then sets no status line. Taking back an
   order the sim already holds would be a sim rule and is out of scope.
-- **Saving gives the orders first.** `Session::save()` is no longer const:
-  it hands over the queue and then saves, so the save holds the orders as
-  the current day's commands, as it did before, and they can no longer be
-  cancelled. A successful `load` clears the queue.
+- **A save carries the orders and leaves them waiting.** `Session::save()`
+  is const. It copies the sim, submits the queue to the copy in the order
+  given and saves the copy, so the save holds the orders as the current
+  day's commands while the session's queue is untouched: the orders are
+  still listed, still counted in Committed and still open to Cancel. A
+  save writes no `command` record, and a game that saves plays out exactly as
+  one that never does. With an empty queue the bytes are the sim's own
+  save. The copy is the cost, paid on a rare act. The build first handed
+  the queue over inside `save()`; review found that a save with the clock
+  stopped then removed the chips and gave Available back while the money
+  was already spoken for. A successful `load` clears the queue. The
+  orders in a loaded save are in the sim, not the queue, so they are not
+  shown as waiting and cannot be cancelled: an order cancelled after a
+  save comes back if that save is loaded.
 - **Trace.** A `command` record is written at hand-over, not when the
   button is pressed, with the hand-over day (the day the order was given).
   A cancelled order therefore never appears as a command. `submit`,
@@ -951,7 +961,10 @@ column were never used for tuning):
   difference), the plot's `mineCapexQuote`, the tech's cost, a repayment's
   amount; loans, sales, mine switches, sell policies and cover-costs cost
   nothing. `committed()` sums it over the queue and `pendingBorrowed()`
-  sums the principal of waiting loans. The client's one affordability
+  sums the principal of waiting loans. Both sums, and the bid difference,
+  saturate at the largest amount: an order can carry any amount until the
+  sim turns it away, and `Money`'s checked arithmetic ends the program on
+  overflow. The client's one affordability
   figure is cash - reserved - committed + pending borrowed
   (`Orders::available` in `ui_model.cpp`); the header shows it as
   "Available", where it used to show "Spendable", and the status strip
@@ -959,8 +972,9 @@ column were never used for tuning):
   validates every order when it arrives and its rejection is what counts.
 - **Display costs are never negative, and unknown things cost nothing.** A
   cost is clamped at zero so an order with a nonsense amount cannot make
-  money look available, and a bid, build or research order naming a plot
-  or tech the view does not show costs nothing. Such orders stay in the
+  money look available, and a survey, bid, build or research order naming
+  a plot the view does not show, or a tech the content does not hold,
+  costs nothing. Such orders stay in the
   queue for the sim to reject.
 - **"Not covered" is a walk, not a rule.** `readOrders` goes through the
   queue with a running balance that starts at cash less reserved: a loan
@@ -1007,5 +1021,6 @@ column were never used for tuning):
   byte for byte what it was; no sim state, command, notice or balance
   number was added, and the content fingerprint is untouched by this
   spec's code (the new strings are outside it).
-- **Open.** Listed in the spec under "Open after build"; the feature has
-  not yet been seen on a display, run through CI, reviewed or playtested.
+- **Open.** Listed in the spec under "Open after build"; the review
+  outcomes are in the spec's Decisions under "Reviews". The feature has
+  not yet been seen on a display, run through CI or playtested.

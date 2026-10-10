@@ -263,7 +263,8 @@ bool parseArgs(std::span<char*> argv, Args& args) {
     return true;
 }
 
-// Not const: saving gives the session's waiting orders to the sim first.
+// The save holds the session's waiting orders; the session keeps them, and
+// Session::save is const.
 bool writeSave(const std::filesystem::path& path, game::Session& session) {
     const std::vector<std::uint8_t> bytes = session.save();
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
