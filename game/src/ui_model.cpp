@@ -368,11 +368,12 @@ std::string pendingText(const sim::Content& content, const sim::Command& command
             },
             [&](const sim::SetSellPolicy& policy) {
                 return text(content,
-                            policy.enabled != 0 ? "status.policy_starts" : "status.policy_stops",
+                            policy.enabled != 0 ? "ui.pending_policy_on" : "ui.pending_policy_off",
                             {{"resource", resourceName(content, policy.resource)}});
             },
             [&](const sim::SetCoverCosts& cover) {
-                return text(content, cover.enabled != 0 ? "status.cover_on" : "status.cover_off");
+                return text(content,
+                            cover.enabled != 0 ? "ui.pending_cover_on" : "ui.pending_cover_off");
             },
         },
         command);

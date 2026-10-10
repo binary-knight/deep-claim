@@ -317,3 +317,7 @@ ui.pending_count.one	{count} order waiting for the clock
 ui.pending_count.many	{count} orders waiting for the clock
 ui.pending_not_covered	not covered
 status.order_cancelled	Order cancelled before work started. Nothing charged to the ledger.
+ui.pending_policy_on	Auto-sell on: {resource}
+ui.pending_policy_off	Auto-sell off: {resource}
+ui.pending_cover_on	Cover costs on
+ui.pending_cover_off	Cover costs off
