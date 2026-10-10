@@ -9,11 +9,14 @@
 #include "sim/money.h"
 #include "sim/plot_market.h"
 #include "sim/tech.h"
+#include "sim/types.h"
 #include "sim/world_state.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 namespace sim {
 
@@ -53,6 +56,126 @@ Money mineDailyOpex(const Content& content, const WorldState& world, const Compa
             return Money::zero();
     }
     return Money::zero();
+}
+
+namespace {
+
+// Money arithmetic for the derived mine figures: every step is clamped to
+// +/- kMaxCashCents, so nothing here can overflow or abort.
+std::int64_t clampCash(std::int64_t cents) {
+    return std::clamp(cents, -kMaxCashCents, kMaxCashCents);
+}
+
+// a * b / c, clamped; `whenTooLarge` when the quotient does not fit.
+std::int64_t saturatingMulDiv(std::int64_t a, std::int64_t b, std::int64_t c,
+                              std::int64_t whenTooLarge) {
+    return clampCash(checkedMulDiv(a, b, c).value_or(whenTooLarge));
+}
+
+// The mine's output of one ore on its most recent operating day, and the
+// price it is valued at; nothing when either is missing or negative.
+std::int64_t outputTonnes(const Mine& mine, std::size_t resource) {
+    return resource < mine.lastOutputTonnes.size()
+               ? std::max<std::int64_t>(0, mine.lastOutputTonnes[resource])
+               : 0;
+}
+
+std::int64_t priceCents(std::span<const Money> prices, std::size_t resource) {
+    return resource < prices.size() ? std::max<std::int64_t>(0, prices[resource].cents()) : 0;
+}
+
+std::int64_t revenueCents(const Mine& mine, std::span<const Money> prices, std::size_t resource) {
+    return saturatingMulDiv(outputTonnes(mine, resource), priceCents(prices, resource), 1,
+                            kMaxCashCents);
+}
+
+// The highest running cost among the mine's cost ores (see mines.h), before
+// multipliers. Reads observed output and the owner's unlocks only.
+std::int64_t costOreOpexCents(const Content& content, const Company& company, const Mine& mine) {
+    std::int64_t produced = 0;
+    std::int64_t extractable = 0;
+    bool producing = false;
+    for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
+        const std::int64_t opex = content.resources[r].mineOpexPerDay.cents();
+        if (outputTonnes(mine, r) > 0) {
+            produced = std::max(produced, opex);
+            producing = true;
+        } else if (resourceUnlocked(content, company, ResourceId(r))) {
+            extractable = std::max(extractable, opex);
+        }
+    }
+    // Every ore with output is unlocked, so when nothing is produced the
+    // second figure covers all the owner can extract.
+    return producing ? produced : extractable;
+}
+
+// The ore earning most at `prices` among those the mine produces, the
+// lowest id on a tie; nullopt when it produces nothing.
+std::optional<std::size_t> principalOre(const Content& content, const Mine& mine,
+                                        std::span<const Money> prices) {
+    std::optional<std::size_t> best;
+    for (std::size_t r = 0; r < content.resources.size(); ++r) {
+        if (outputTonnes(mine, r) <= 0) {
+            continue;
+        }
+        if (!best || compareProducts(outputTonnes(mine, r), priceCents(prices, r),
+                                     outputTonnes(mine, *best), priceCents(prices, *best)) > 0) {
+            best = r;
+        }
+    }
+    return best;
+}
+
+}  // namespace
+
+Money mineRunningCost(const Content& content, const WorldState& world, const Company& company,
+                      const Mine& mine, MineState as) {
+    if (as != MineState::Operating && as != MineState::Mothballed) {
+        return Money::zero();
+    }
+    const std::int64_t mult =
+        checkedMulDiv(techMultiplier(content, company, TechEffectType::OpexMult).raw(),
+                      eventMultiplier(content, world, EventEffectType::OpexMult).raw(),
+                      Fixed::kScale)
+            .value_or(kMaxCashCents);
+    std::int64_t cents = saturatingMulDiv(costOreOpexCents(content, company, mine), mult,
+                                          Fixed::kScale, kMaxCashCents);
+    if (as == MineState::Mothballed) {
+        cents = saturatingMulDiv(cents, content.balance.mineMothballOpexMult.raw(), Fixed::kScale,
+                                 kMaxCashCents);
+    }
+    return Money::fromCents(cents);
+}
+
+Money mineDailyMargin(const Content& content, const WorldState& world, const Company& company,
+                      const Mine& mine, std::span<const Money> prices) {
+    std::int64_t revenue = 0;
+    for (std::size_t r = 0; r < content.resources.size(); ++r) {
+        revenue = clampCash(revenue + revenueCents(mine, prices, r));
+    }
+    const Money cost = mineRunningCost(content, world, company, mine, MineState::Operating);
+    return Money::fromCents(clampCash(revenue - cost.cents()));
+}
+
+Money mineBreakEvenPrice(const Content& content, const WorldState& world, const Company& company,
+                         const Mine& mine, std::span<const Money> prices) {
+    const std::optional<std::size_t> principal = principalOre(content, mine, prices);
+    const std::int64_t tonnes = principal ? outputTonnes(mine, *principal) : 0;
+    if (!principal || tonnes <= 0) {
+        return Money::zero();  // no output to price
+    }
+    std::int64_t others = 0;
+    for (std::size_t r = 0; r < content.resources.size(); ++r) {
+        if (r != *principal) {
+            others = clampCash(others + revenueCents(mine, prices, r));
+        }
+    }
+    const Money cost = mineRunningCost(content, world, company, mine, MineState::Operating);
+    const std::int64_t needed = clampCash(cost.cents() - others);
+    if (needed <= 0) {
+        return Money::zero();
+    }
+    return Money::fromCents(needed / tonnes + (needed % tonnes != 0 ? 1 : 0));
 }
 
 std::int64_t mineDailyOutput(const Content& content, const Company& company, ResourceId resource,
@@ -311,8 +434,8 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
             // The whole vector is replaced so a resource that ran out reads zero.
             mine.lastOutputTonnes = mine.lastDayTonnes;
             // Today's production day is paid for even if it emptied the mine.
-            owner.cash =
-                debitCash(owner.cash, mineDailyOpex(content, state, owner, MineState::Operating));
+            owner.cash = debitCash(
+                owner.cash, mineRunningCost(content, state, owner, mine, MineState::Operating));
             if (!anythingLeft) {
                 mine.state = MineState::Depleted;
                 if (!foundNothing) {
@@ -322,7 +445,8 @@ void runMines(const Content& content, WorldState& state, TickReport& report) {
             continue;
         }
 
-        owner.cash = debitCash(owner.cash, mineDailyOpex(content, state, owner, mine.state));
+        owner.cash =
+            debitCash(owner.cash, mineRunningCost(content, state, owner, mine, mine.state));
     }
 }
 
