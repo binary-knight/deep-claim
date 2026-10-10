@@ -159,7 +159,8 @@ struct Mine {
     // Zero after a day at break-even or better and while it is not operating.
     std::uint32_t lossDays = 0;
     // Set when the losing-mine notice is raised for this run of losing days,
-    // so it is said once; cleared whenever lossDays returns to zero.
+    // so it is said once; cleared by a day of strictly positive margin or
+    // when the mine stops operating (a break-even day leaves it set).
     std::uint8_t lossAnnounced = 0;
 };
 

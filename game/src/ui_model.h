@@ -97,8 +97,10 @@ struct MineFigures {
     bool mothballed = false;  // `earns` is the mothballed cost; `reopen` has the margin
     std::string reopen;       // mothballed only: "+$12.3k/day" if reopened today, else ""
     bool reopen_loss = false;
-    std::string break_even;  // "Break-even $41.20/t" or ""
-    std::string note;        // "at today's price" beside a margin, else ""
+    // "Break-even $1,430.00/t" or "": exact to the cent (exactPrice), never
+    // abbreviated, because the player sells against it.
+    std::string break_even;
+    std::string note;  // "at today's price" beside a margin, else ""
 };
 
 // A plot the player owns, on the dashboard board and the Plots tab.
@@ -369,7 +371,21 @@ struct UiModel {
     std::string ui_cancel;
     std::string ui_cancel_all;
     std::string ui_not_covered;
+    // Labels for a mine's figures (spec 008): the words beside a row's
+    // figures, and the keys on the selected-plot panel.
+    std::string ui_mine_loss;             // "loss"
+    std::string ui_mine_if_reopened;      // "if reopened"
+    std::string ui_mine_earns;            // "Earns"
+    std::string ui_mine_loses;            // "Loses"
+    std::string ui_mine_mothballed;       // "Mothballed"
+    std::string ui_mine_if_reopened_key;  // "If reopened"
 };
+
+// A price per tonne as the player must be able to act on it: every dollar
+// and cent, with thousands separators, never abbreviated ("$1,430.00",
+// "$41.20", "-$0.05"). formatMoney rounds $1,430 to "$1.4k", which is no
+// use as a threshold.
+[[nodiscard]] std::string exactPrice(sim::Money amount);
 
 // Rebuilds every field of `model` from the session.
 void refreshModel(const Session& session, UiModel& model);

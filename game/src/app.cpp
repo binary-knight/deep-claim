@@ -556,6 +556,12 @@ void App::bindModel() {
     ctor.Bind("ui_cancel", &model_.ui_cancel);
     ctor.Bind("ui_cancel_all", &model_.ui_cancel_all);
     ctor.Bind("ui_not_covered", &model_.ui_not_covered);
+    ctor.Bind("ui_mine_loss", &model_.ui_mine_loss);
+    ctor.Bind("ui_mine_if_reopened", &model_.ui_mine_if_reopened);
+    ctor.Bind("ui_mine_earns", &model_.ui_mine_earns);
+    ctor.Bind("ui_mine_loses", &model_.ui_mine_loses);
+    ctor.Bind("ui_mine_mothballed", &model_.ui_mine_mothballed);
+    ctor.Bind("ui_mine_if_reopened_key", &model_.ui_mine_if_reopened_key);
 
     const auto intArg = [](const Rml::VariantList& args, std::size_t i) {
         return i < args.size() ? args[i].Get<int>() : 0;

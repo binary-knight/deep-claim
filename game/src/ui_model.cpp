@@ -341,6 +341,25 @@ std::string signedMoney(sim::Money amount) {
     return (amount >= sim::Money::zero() ? "+" : "") + formatMoney(amount);
 }
 
+}  // namespace
+
+std::string exactPrice(sim::Money amount) {
+    // exactMoney is "-1430.00": the sign, the dollars, a point and two cents.
+    std::string digits = exactMoney(amount);
+    const bool negative = digits.starts_with('-');
+    if (negative) {
+        digits.erase(0, 1);
+    }
+    constexpr std::size_t kCentsAndPoint = 3;
+    constexpr std::size_t kGroup = 3;
+    for (std::size_t at = digits.size() - kCentsAndPoint; at > kGroup; at -= kGroup) {
+        digits.insert(at - kGroup, ",");
+    }
+    return (negative ? "-$" : "$") + digits;
+}
+
+namespace {
+
 // What a mine earns a day and the price at which that is nothing (spec 008),
 // as the sim worked them out for the view: formatted here, never recomputed.
 // A mothballed mine leads with what it costs to keep, written as the loss it
@@ -370,7 +389,7 @@ MineFigures mineFigures(const sim::Content& content, const sim::MineView& mine) 
     figures.loss = shownFirst < sim::Money::zero();
     if (mine.hasEarnings) {
         figures.break_even =
-            text(content, "ui.mine_break_even", {{"amount", formatMoney(mine.breakEvenPrice)}});
+            text(content, "ui.mine_break_even", {{"amount", exactPrice(mine.breakEvenPrice)}});
         figures.note = text(content, "ui.mine_margin_note");
     }
     return figures;
@@ -569,6 +588,12 @@ void fillPending(const Session& session, const Orders& orders, UiModel& model) {
     model.ui_cancel = text(content, "ui.cancel");
     model.ui_cancel_all = text(content, "ui.cancel_all");
     model.ui_not_covered = text(content, "ui.pending_not_covered");
+    model.ui_mine_loss = text(content, "ui.mine_loss");
+    model.ui_mine_if_reopened = text(content, "ui.mine_if_reopened");
+    model.ui_mine_earns = text(content, "ui.mine_earns");
+    model.ui_mine_loses = text(content, "ui.mine_loses");
+    model.ui_mine_mothballed = text(content, "ui.mine_mothballed");
+    model.ui_mine_if_reopened_key = text(content, "ui.mine_if_reopened_key");
 }
 
 // ---- header and strip ----

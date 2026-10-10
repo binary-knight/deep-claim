@@ -1244,12 +1244,18 @@ bool playLosingMine(game::App& app, const game::AutoPause& rules, LosingMine& lo
 
 // What the mine's row and panel must read, formatted from the sim's view the
 // way the client formats it (ui_model.cpp mineFigures; for a loss its signed
-// money is formatMoney's own minus sign).
+// money is formatMoney's own minus sign, and the break-even price is exact
+// to the cent, game::exactPrice), with the catalogue's labels for them.
 struct LosingFigures {
     std::string plot;       // "#18"
     std::string earns;      // "-$12.36M/day"
-    std::string breakEven;  // "Break-even $31.0k/t"
+    std::string breakEven;  // "Break-even $31,000.00/t"
     std::string note;       // "at today's price"
+    std::string lossWord;   // "loss", beside the row's figure
+    std::string losesKey;   // "Loses", the panel's key for an operating mine's loss
+    // Every key the panel can put on a mine's earnings lines: Loses, Earns,
+    // Mothballed, If reopened.
+    std::array<std::string, 4> panelKeys;
 };
 
 // The sim's figures for the mine: a loss, and a break-even price above what
@@ -1285,13 +1291,36 @@ LosingFigures simFigures(const game::Session& session, const LosingMine& losing,
     figures.earns =
         game::text(content, "ui.mine_margin", {{"amount", game::formatMoney(mine->dailyMargin)}});
     figures.breakEven = game::text(content, "ui.mine_break_even",
-                                   {{"amount", game::formatMoney(mine->breakEvenPrice)}});
+                                   {{"amount", game::exactPrice(mine->breakEvenPrice)}});
     figures.note = game::text(content, "ui.mine_margin_note");
+    figures.lossWord = game::text(content, "ui.mine_loss");
+    figures.losesKey = game::text(content, "ui.mine_loses");
+    figures.panelKeys = {figures.losesKey, game::text(content, "ui.mine_earns"),
+                         game::text(content, "ui.mine_mothballed"),
+                         game::text(content, "ui.mine_if_reopened_key")};
     std::cout << std::format("  sim: margin {} a day ({} cents), break-even {} against {} at {}\n",
                              game::formatMoney(mine->dailyMargin), mine->dailyMargin.cents(),
-                             game::formatMoney(mine->breakEvenPrice),
+                             game::exactPrice(mine->breakEvenPrice),
                              content.resources[principal].name, game::formatMoney(price));
     return figures;
+}
+
+// A break-even price is a threshold the player sells against, so it is
+// written out in full (Codex finding 5 on spec 008: a nickel mine's $1,430
+// read "$1.4k/t", though selling at $1,400 loses money).
+void checkExactPrices(Checks& checks) {
+    const auto shown = [&](std::int64_t cents, const std::string& expected) {
+        checks.same(std::format("exact price of {} cents", cents),
+                    game::exactPrice(sim::Money::fromCents(cents)), expected);
+    };
+    shown(143'000, "$1,430.00");
+    shown(4'120, "$41.20");
+    shown(5, "$0.05");
+    shown(99'999, "$999.99");
+    shown(100'000, "$1,000.00");
+    shown(3'100'045, "$31,000.45");
+    shown(123'456'789, "$1,234,567.89");
+    shown(-143'000, "-$1,430.00");
 }
 
 void checkModelFigures(std::string_view where, const game::MineFigures& shown,
@@ -1346,10 +1375,10 @@ void widestWord(Rml::Element* e, float& widest, std::string& word) {
 
 // The mine's row as the player reads it, on the tab showing: the sim's loss
 // with the word "loss" beside it in the warning colour, and the break-even
-// price under it. "loss" and the panel's "Loses" are literals of main.rml
-// (static labels, exempt from the catalogue by R-002), so they are literals
-// here. Returns how far the row's widest word runs past its Output cell
-// (zero or less when it fits), which is reported, not judged, here.
+// price under it, exact to the cent. "loss" and the panel's "Loses" come
+// from the catalogue through the UI model (ui.mine_loss, ui.mine_loses), so
+// they are read from the catalogue here. Returns how far the row's widest word runs past its Output
+// cell (zero or less when it fits), which is reported, not judged, here.
 float checkLosingRow(Rml::Context& context, std::string_view where, const LosingFigures& expected,
                      Checks& checks) {
     settle(context);
@@ -1365,13 +1394,20 @@ float checkLosingRow(Rml::Context& context, std::string_view where, const Losing
     checks.same(std::format("{}: lines under the output", where), subs.size(), std::size_t{2});
     if (subs.size() == 2) {
         checks.same(std::format("{}: daily figure on screen", where),
-                    squeezed(visibleText(subs[0])), squeezed(expected.earns + "loss"));
+                    squeezed(visibleText(subs[0])), squeezed(expected.earns + expected.lossWord));
         checks.expect(subs[0]->IsClassSet("warn"),
                       std::format("{}: the loss is not in the warning colour", where));
         checks.same(std::format("{}: break-even on screen", where), visibleText(subs[1]),
                     expected.breakEven);
         checks.expect(!subs[1]->IsClassSet("warn"),
                       std::format("{}: the break-even price is in the warning colour", where));
+        // The exact price is the longest thing the break-even line writes;
+        // it is inside the cell-wide measure below, and reported on its own.
+        float priceWidth = 0.0F;
+        std::string price;
+        widestWord(subs[1], priceWidth, price);
+        std::cout << std::format("    {}: break-even word \"{}\" {:.1f}dp\n", where, price,
+                                 priceWidth);
     }
     const float room = cell->GetBox().GetSize(Rml::BoxArea::Content).x;
     float widest = 0.0F;
@@ -1392,10 +1428,11 @@ void checkLosingPanel(Rml::Context& context, std::string_view where, const Losin
     settle(context);
     Rml::Element* content = context.GetDocument(0)->GetElementById("content");
     std::vector<Rml::Element*> lines = visibleElements(content, "div", "kv");
-    std::erase_if(lines, [](Rml::Element* line) {
+    std::erase_if(lines, [&](Rml::Element* line) {
         const std::string shown = visibleText(line);
-        return !shown.starts_with("Loses") && !shown.starts_with("Earns") &&
-               !shown.starts_with("Mothballed") && !shown.starts_with("If reopened");
+        return std::ranges::none_of(expected.panelKeys, [&](const std::string& key) {
+            return !key.empty() && shown.starts_with(key);
+        });
     });
     checks.same(std::format("{}: earnings lines on the panel", where), lines.size(),
                 std::size_t{1});
@@ -1404,7 +1441,7 @@ void checkLosingPanel(Rml::Context& context, std::string_view where, const Losin
     }
     checks.same(std::format("{}: the panel's earnings line", where),
                 squeezed(visibleText(lines.front())),
-                squeezed("Loses" + expected.earns + expected.note + expected.breakEven));
+                squeezed(expected.losesKey + expected.earns + expected.note + expected.breakEven));
     const std::vector<Rml::Element*> figure =
         visibleElements(lines.front(), "span", "line", expected.earns);
     checks.expect(figure.size() == 1 && figure.front()->IsClassSet("warn"),
@@ -1550,6 +1587,7 @@ int probeLosingMine(Rml::Context& context, game::App& app, LoggingSystem& system
         stopped.speed == game::Speed::Paused ? "stopped" : "running", stopped.stopped,
         stopped.noticeDay, stopped.noticeText, stopped.status);
     checkNotice(app, content, stopped, true, checks);
+    checkExactPrices(checks);
     const LosingFigures expected = simFigures(app.session(), stopped, checks);
     if (expected.earns.size() != kWidestFigure) {
         std::cout << std::format("SCENARIO (losing mine): the figure \"{}\" is not {} characters\n",
