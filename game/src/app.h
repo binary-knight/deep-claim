@@ -3,6 +3,7 @@
 // The client application: owns the content, the session, the RmlUi document
 // and the data model, and turns interface events into sim commands.
 
+#include "sim/commands.h"
 #include "sim/content.h"
 
 #include "game/auto_pause.h"
@@ -64,6 +65,7 @@ public:
     void startGame(std::uint64_t seed);
     void selectPlot(int index);
     void showPauseMenu(bool on);
+    void showPendingList(bool on);
     void setLogFilter(int filter);
     void refreshNow();
     [[nodiscard]] Session& session() { return *session_; }
@@ -79,6 +81,9 @@ private:
     void refresh();
     void setStatus(std::string text, bool danger = false);
     void applyDeck(bool on);
+    // The auto-pause menu and the waiting-orders list hang from the same
+    // corner of the header: at most one is open.
+    void showPopover(bool pauseMenu, bool pendingList);
     // Auto-pause rules live in a small text file in the per-user directory.
     void loadPauseRules();
     void savePauseRules();
@@ -91,6 +96,9 @@ private:
     void onSelectResource(int index);
     void onNeedAction(int action, int target);
     void onTogglePause(int index);
+    // Queues an order with the session and redraws, so its control shows
+    // it pending straight away.
+    void order(const sim::Command& command);
     void onSurvey(int plotIndex);
     void onBid(int plotIndex);
     void onBuild(int plotIndex);
@@ -110,6 +118,9 @@ private:
     void syncLoanInput();
     void resetLoanInput();
     void onResearch(int techIndex);
+    // Orders waiting for the clock (spec 007): withdraw one, or all of them.
+    void onCancel(int orderId);
+    void onCancelAll();
     void onSave();
     void onLoad();
     void onNewGame();
@@ -127,6 +138,10 @@ private:
     std::size_t seenLogEntries_ = 0;  // log entries already checked for rejections
     AutoPause pauseRules_ = AutoPause::defaults();
     bool deckForced_ = false;
+    bool showPendingList_ = false;  // the waiting-orders list is open
+    // A mine order is waiting in the owned-plots tables: their action
+    // column widens to hold the chip and Cancel.
+    bool ownedOrders_ = false;
     std::string loanPrefill_;  // what syncLoanInput last put in the field
     bool loanEdited_ = false;  // the player has typed over it
 

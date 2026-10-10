@@ -62,6 +62,10 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
 .nowrap { white-space: nowrap; }
 .hrow { display: flex; flex-direction: row; align-items: center; }
 .grow { flex: 1 1 0; width: 8dp; }
+/* A pending chip beside its Cancel button. */
+.hrow .chip { margin-right: 8dp; }
+.actions .hrow { flex-wrap: wrap; }
+.actions .hrow .chip { margin-bottom: 8dp; }
 .gap { margin-right: 10dp; }
 
 /* ---- Header ---- */
@@ -85,8 +89,9 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
 #header .sys { display: flex; flex-direction: row; align-items: center; }
 #header .sys button:last-child { margin-right: 0; }
 
-/* Auto-pause popover under the header's right edge. */
-#pausemenu {
+/* Auto-pause popover under the header's right edge; the list of orders
+   waiting for the clock (spec 007) hangs from the same corner. */
+#pausemenu, #pendinglist {
     position: absolute;
     top: 56dp;
     right: 16dp;
@@ -97,7 +102,16 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
     border-radius: 2dp;
     z-index: 10;
 }
-#pausemenu .title { display: block; font-weight: 600; margin-bottom: 8dp; }
+#pausemenu .title, #pendinglist > .title { display: block; font-weight: 600; margin-bottom: 8dp; }
+#pendinglist { top: 80dp; width: 440dp; }
+#pendinglist .needs { max-height: 480dp; overflow-y: auto; }
+#pendinglist .foot { display: block; text-align: right; padding-top: 8dp; border-top: 1dp #243249; }
+#pendinglist .foot button { margin: 0; }
+/* The count of waiting orders, under the speed buttons and out of the row. */
+#header .speed { position: relative; }
+#header .speed .waiting { position: absolute; top: 100%; left: 0; margin-top: 1dp; font-size: 12dp; line-height: 16dp; font-weight: 600; color: #2f8cff; white-space: nowrap; cursor: pointer; }
+#header .speed .waiting:hover { color: #4a9cff; }
+#header .speed .waiting.active { color: #ffffff; }
 #pausemenu .check { display: flex; flex-direction: row; align-items: center; height: 28dp; cursor: pointer; white-space: nowrap; }
 
 /* ---- Status strip (dashboard only) ---- */
@@ -273,6 +287,8 @@ th.w-over { width: 150dp; }
 .kv .v .subline.major { color: #2f8cff; font-weight: 600; }
 th.w-mine { width: 104dp; }
 th.w-act { width: 104dp; }
+/* A mine order waiting for the clock puts its chip and Cancel in the column. */
+th.w-act.wide { width: 208dp; }
 th.w-res { width: 230dp; }
 th.w-chart { width: 150dp; }
 th.w-price { width: 170dp; }
@@ -321,6 +337,7 @@ tr:hover td.sel { background-color: #163058; }
 .chip.warn, .pill.warn { color: #f0b340; border-color: #f0b340; }
 .chip.danger, .pill.danger { color: #ff6e6e; border-color: #ff6e6e; }
 .chip.muted { color: #8fa0ba; border-color: #8fa0ba; }
+td .pill.accent { margin-right: 4dp; }
 
 /* ---- Key/value rows ---- */
 .kv { display: flex; flex-direction: row; align-items: flex-start; min-height: 24dp; margin-bottom: 4dp; }
@@ -343,8 +360,10 @@ tr:hover td.sel { background-color: #163058; }
 .needs .t .title { display: block; }
 .needs .t .sub { font-size: 12dp; line-height: 16dp; }
 .needs .days { display: block; font-family: "JetBrains Mono"; white-space: nowrap; color: #c9d4e6; width: 92dp; text-align: right; margin-right: 16dp; }
-.needs .act { display: block; width: 110dp; text-align: right; }
+.needs .act { display: block; flex: 0 0 auto; min-width: 110dp; text-align: right; white-space: nowrap; }
 .needs .act button { margin: 0; }
+.needs .act .chip { margin-right: 8dp; }
+td.act .chip { margin-left: 4dp; }
 .needs .none { color: #8fa0ba; padding: 8dp 0; }
 
 /* ---- Finance stat row ---- */
@@ -427,6 +446,9 @@ body.deck th.w-res { width: 200dp; }
 body.deck th.w-chart { width: 120dp; }
 body.deck price-chart.table { width: 120dp; }
 body.deck th.w-mine { width: 116dp; }
+body.deck th.w-act.wide { width: 224dp; }
+body.deck th.w-start { width: 220dp; }
+body.deck #header .speed .waiting { margin-top: 0; font-size: 14dp; line-height: 18dp; }
 body.deck .sub, body.deck .subline, body.deck #header .label, body.deck th, body.deck .chip, body.deck .pill,
 body.deck .log .d, body.deck #status, body.deck #status .lbl, body.deck #strip, body.deck .needs .n,
 body.deck .needs .t .sub, body.deck .finrow .stat .sub, body.deck .finrow .stat .label, body.deck .notice,
