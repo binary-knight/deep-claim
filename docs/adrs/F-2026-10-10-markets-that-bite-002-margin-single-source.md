@@ -1,0 +1,7 @@
+# ADR-F-2026-10-10-markets-that-bite-002: Mine margin is one sim function; only the losing-days counter is stored
+
+**Date:** 2026-10-10
+**Status:** Accepted
+**Context:** Three parties need to know what a mine earns: the player (to decide whether to idle it), the AI (which until now worked out revenue itself and compared it with a single cost quote), and the balance runner (to measure how often mines run at a loss). Rule R-001 makes the sim the only authority. The losing-mine notice needs memory across days; nothing else does.
+**Decision:** `sim::mineDailyMargin` and `sim::mineBreakEvenPrice` are pure functions of content, state and a set of prices. The mines step calls them with the price as it stands when that step runs; the view calls them with the current price when it is built; the runner calls them each day. The AI's idle and reopen decisions read the view's margin. The only new saved state is two fields per mine: `lossDays` (consecutive losing days while operating) and `lossAnnounced` (the notice has been raised for this episode). `kSaveVersion` stays at 1.
+**Consequences:** The AI, the player and the runner cannot disagree about a mine's margin, and no derived value can go stale in a save. The view recomputes margin for every mine each time it is built, bounded at 120 mines by 4 ores. The notice counter runs on the price one market update behind the figure on screen, so the two can differ for a day around zero; the threshold of consecutive days absorbs that. The golden hash moves because mine state grows.
