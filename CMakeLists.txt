@@ -13,22 +13,29 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Short git revision, recorded in playtest traces so a trace can be matched
-# to the code that produced it. Captured at configure time; reconfigure
-# after committing if it matters.
-set(DC_BUILD_ID "unknown")
+# to the code that produced it. It is read on every build, not at configure
+# time, so a build made after a commit names that commit: the dc_build_id
+# target runs cmake/BuildId.cmake, which writes generated/dc_build_id.h only
+# when the revision has changed. The id is "unknown" outside a git checkout.
+# A target that consumes the header depends on dc_build_id and adds
+# DC_BUILD_ID_INCLUDE_DIR to its include path (see game/CMakeLists.txt).
+set(DC_BUILD_ID_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
+set(DC_BUILD_ID_HEADER "${DC_BUILD_ID_INCLUDE_DIR}/dc_build_id.h")
 find_package(Git QUIET)
-if(GIT_FOUND)
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        OUTPUT_VARIABLE DC_GIT_REV
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE DC_GIT_RESULT
-        ERROR_QUIET)
-    if(DC_GIT_RESULT EQUAL 0)
-        set(DC_BUILD_ID "${DC_GIT_REV}")
-    endif()
-endif()
+set(DC_BUILD_ID_COMMAND
+    "${CMAKE_COMMAND}" "-DDC_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    "-DDC_BUILD_ID_HEADER=${DC_BUILD_ID_HEADER}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+    -P "${CMAKE_SOURCE_DIR}/cmake/BuildId.cmake")
+# Once at configure time as well, so the header exists for tools that read
+# compile_commands.json without building first.
+execute_process(COMMAND ${DC_BUILD_ID_COMMAND})
+# BYPRODUCTS tells Ninja where the header comes from; a custom target is
+# always out of date, so the script runs on every build.
+add_custom_target(dc_build_id ALL
+    COMMAND ${DC_BUILD_ID_COMMAND}
+    BYPRODUCTS "${DC_BUILD_ID_HEADER}"
+    COMMENT "Reading the build id"
+    VERBATIM)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(Warnings)
