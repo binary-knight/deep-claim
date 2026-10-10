@@ -483,9 +483,12 @@ TEST_CASE("Market clamps must be above zero and each min below its max", "[conte
     CHECK_FALSE(hasError(notPositive, "balance.json", "market_ratio_max", ""));
     CHECK_FALSE(hasError(notPositive, "balance.json", "demand_factor_max", ""));
 
+    // The ratio clamp has to straddle 1, so its two ends can only meet there.
     content::Sources equal = goodSources();
     equal.balance =
-        replaceOnce(equal.balance, R"("market_ratio_max": 5)", R"("market_ratio_max": 0.2)");
+        replaceOnce(equal.balance, R"("market_ratio_min": 0.2)", R"("market_ratio_min": 1)");
+    equal.balance =
+        replaceOnce(equal.balance, R"("market_ratio_max": 5)", R"("market_ratio_max": 1)");
     equal.balance =
         replaceOnce(equal.balance, R"("demand_factor_max": 1000)", R"("demand_factor_max": 0.01)");
     const auto notBelow = content::loadFromStrings(equal);
@@ -496,12 +499,53 @@ TEST_CASE("Market clamps must be above zero and each min below its max", "[conte
                    "must be greater than demand_factor_min"));
 
     content::Sources inverted = goodSources();
-    inverted.balance =
-        replaceOnce(inverted.balance, R"("market_ratio_min": 0.2)", R"("market_ratio_min": 6)");
+    inverted.balance = replaceOnce(inverted.balance, R"("demand_factor_min": 0.01)",
+                                   R"("demand_factor_min": 500)");
+    inverted.balance = replaceOnce(inverted.balance, R"("demand_factor_max": 1000)",
+                                   R"("demand_factor_max": 100)");
     const auto above = content::loadFromStrings(inverted);
     CHECK_FALSE(above.ok());
-    CHECK(hasError(above, "balance.json", "market_ratio_max",
-                   "must be greater than market_ratio_min"));
+    CHECK(hasError(above, "balance.json", "demand_factor_max",
+                   "must be greater than demand_factor_min"));
+}
+
+TEST_CASE("The market ratio clamp must straddle 1", "[content]") {
+    // Base price is the price at a ratio of 1. A minimum above 1 or a maximum
+    // below 1 would put the price permanently on one side of base, and the AI
+    // clamps its supply discount between the minimum and 1.
+    content::Sources high = goodSources();
+    high.balance =
+        replaceOnce(high.balance, R"("market_ratio_min": 0.2)", R"("market_ratio_min": 2)");
+    const auto minAboveOne = content::loadFromStrings(high);
+    CHECK_FALSE(minAboveOne.ok());
+    CHECK(hasError(minAboveOne, "balance.json", "market_ratio_min",
+                   "must be between 0.010000 and 1.000000"));
+    // The rejected minimum is reported once, not again as an ordering error.
+    CHECK_FALSE(hasError(minAboveOne, "balance.json", "market_ratio_max", ""));
+
+    content::Sources low = goodSources();
+    low.balance =
+        replaceOnce(low.balance, R"("market_ratio_max": 5)", R"("market_ratio_max": 0.5)");
+    const auto maxBelowOne = content::loadFromStrings(low);
+    CHECK_FALSE(maxBelowOne.ok());
+    CHECK(hasError(maxBelowOne, "balance.json", "market_ratio_max",
+                   "must be between 1.000000 and 10.000000"));
+    CHECK_FALSE(hasError(maxBelowOne, "balance.json", "market_ratio_min", ""));
+
+    // Either end may sit exactly on 1, as long as the other does not.
+    content::Sources pinnedLow = goodSources();
+    pinnedLow.balance =
+        replaceOnce(pinnedLow.balance, R"("market_ratio_min": 0.2)", R"("market_ratio_min": 1)");
+    const auto minAtOne = content::loadFromStrings(pinnedLow);
+    INFO(content::formatErrors(minAtOne.errors));
+    CHECK(minAtOne.ok());
+
+    content::Sources pinnedHigh = goodSources();
+    pinnedHigh.balance =
+        replaceOnce(pinnedHigh.balance, R"("market_ratio_max": 5)", R"("market_ratio_max": 1)");
+    const auto maxAtOne = content::loadFromStrings(pinnedHigh);
+    INFO(content::formatErrors(maxAtOne.errors));
+    CHECK(maxAtOne.ok());
 }
 
 TEST_CASE("Market clamps are bounded so the price arithmetic cannot overflow", "[content]") {

@@ -328,3 +328,9 @@ ui.mine_margin	{amount}/day
 ui.mine_break_even	Break-even {amount}/t
 ui.mine_no_figure	not producing yet
 ui.mine_margin_note	at today's price
+ui.mine_loss	loss
+ui.mine_if_reopened	if reopened
+ui.mine_earns	Earns
+ui.mine_loses	Loses
+ui.mine_mothballed	Mothballed
+ui.mine_if_reopened_key	If reopened

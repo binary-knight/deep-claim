@@ -770,24 +770,37 @@ void parseEvents(const json& document, sim::Content& content, ErrorSink& sink) {
 // ratio of 1/100 keeps elasticity x ln(ratio) inside fixedExp's range. The
 // demand factor multiplies a base demand of up to 1e9 tonnes, so 1000 is the
 // most that still fits Fixed.
+//
+// The ratio clamp must also straddle 1: the minimum may not exceed 1 and the
+// maximum may not fall below it. Base price is the price at a ratio of 1, so
+// a clamp wholly on one side would hold every price above or below base for
+// good, and the AI clamps its supply discount between the minimum and 1
+// (sim/src/ai_controller.cpp), which a minimum above 1 turns into a premium.
+// The demand factor has no such pivot: each end may sit anywhere in its range.
 const sim::Fixed kMarketRatioMin = sim::Fixed::fromRatio(1, 100);
 const sim::Fixed kMarketRatioMax = sim::Fixed::fromInt(10);
 const sim::Fixed kDemandFactorMin = sim::Fixed::fromRaw(1);  // the smallest value above zero
 const sim::Fixed kDemandFactorMax = sim::Fixed::fromInt(1000);
 
+// The lower end must lie in [lowest, minCeiling] and the upper end in
+// [maxFloor, highest].
 struct ClampSpec {
     std::string_view minKey;
     std::string_view maxKey;
     sim::Fixed lowest;
+    sim::Fixed minCeiling;
+    sim::Fixed maxFloor;
     sim::Fixed highest;
 };
 
-// One clamp: both ends inside the bounds and the lower strictly below the
+// One clamp: each end inside its bounds and the lower strictly below the
 // upper. The order is checked only when both ends are usable, so a value
 // already rejected is reported once.
 void parseClamp(const Node& node, const ClampSpec& spec, sim::Fixed& min, sim::Fixed& max) {
-    const std::optional<sim::Fixed> low = node.fixed(spec.minKey, true, spec.lowest, spec.highest);
-    const std::optional<sim::Fixed> high = node.fixed(spec.maxKey, true, spec.lowest, spec.highest);
+    const std::optional<sim::Fixed> low =
+        node.fixed(spec.minKey, true, spec.lowest, spec.minCeiling);
+    const std::optional<sim::Fixed> high =
+        node.fixed(spec.maxKey, true, spec.maxFloor, spec.highest);
     if (low && high && *low >= *high) {
         node.report(spec.maxKey, "must be greater than " + std::string(spec.minKey));
     }
@@ -796,10 +809,20 @@ void parseClamp(const Node& node, const ClampSpec& spec, sim::Fixed& min, sim::F
 }
 
 void parseMarketClamps(const Node& node, sim::BalanceParams& balance) {
-    parseClamp(node, {"market_ratio_min", "market_ratio_max", kMarketRatioMin, kMarketRatioMax},
-               balance.marketRatioMin, balance.marketRatioMax);
-    parseClamp(node, {"demand_factor_min", "demand_factor_max", kDemandFactorMin, kDemandFactorMax},
-               balance.demandFactorMin, balance.demandFactorMax);
+    const ClampSpec ratio{.minKey = "market_ratio_min",
+                          .maxKey = "market_ratio_max",
+                          .lowest = kMarketRatioMin,
+                          .minCeiling = sim::Fixed::one(),
+                          .maxFloor = sim::Fixed::one(),
+                          .highest = kMarketRatioMax};
+    const ClampSpec demand{.minKey = "demand_factor_min",
+                           .maxKey = "demand_factor_max",
+                           .lowest = kDemandFactorMin,
+                           .minCeiling = kDemandFactorMax,
+                           .maxFloor = kDemandFactorMin,
+                           .highest = kDemandFactorMax};
+    parseClamp(node, ratio, balance.marketRatioMin, balance.marketRatioMax);
+    parseClamp(node, demand, balance.demandFactorMin, balance.demandFactorMax);
 }
 
 void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& sink) {
@@ -1274,6 +1297,12 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.mine_break_even", "amount"},
     {"ui.mine_no_figure", ""},
     {"ui.mine_margin_note", ""},
+    {"ui.mine_loss", ""},
+    {"ui.mine_if_reopened", ""},
+    {"ui.mine_earns", ""},
+    {"ui.mine_loses", ""},
+    {"ui.mine_mothballed", ""},
+    {"ui.mine_if_reopened_key", ""},
 });
 
 // Names of the {placeholders} a template uses. Braces that do not form a
