@@ -58,6 +58,44 @@ void playTraced(game::Session& session, game::TraceWriter& trace) {
     session.stepOneDay();
 }
 
+std::vector<std::string> linesWith(const std::string& text, const std::string& needle) {
+    std::vector<std::string> found;
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.find(needle) != std::string::npos) {
+            found.push_back(line);
+        }
+    }
+    return found;
+}
+
+std::vector<game::TraceRecord> parseTrace(const std::string& text) {
+    std::vector<game::TraceRecord> records;
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line)) {
+        game::TraceRecord record;
+        std::string error;
+        REQUIRE(game::parseTraceLine(line, record, error));
+        records.push_back(record);
+    }
+    return records;
+}
+
+std::vector<game::TraceRecord> commandRecords(const std::string& text) {
+    std::vector<game::TraceRecord> commands;
+    for (const game::TraceRecord& record : parseTrace(text)) {
+        if (record.type == "command") {
+            commands.push_back(record);
+        }
+    }
+    return commands;
+}
+
+const std::string kQueued = R"("kind":"order_queued")";
+const std::string kCancelled = R"("kind":"order_cancelled")";
+
 }  // namespace
 
 TEST_CASE("Every command survives a trip through trace JSON", "[trace]") {
@@ -409,6 +447,8 @@ TEST_CASE("StartResearch records carry the tech id and still decode by index", "
     session.setTrace(&trace);
     session.submit(sim::StartResearch{{}, sim::TechId(1)});
     session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(1'000'000)});
+    // Orders are recorded as commands when the clock hands them to the sim.
+    session.stepOneDay();
 
     std::istringstream lines(out.str());
     std::string line;
@@ -434,4 +474,162 @@ TEST_CASE("StartResearch records carry the tech id and still decode by index", "
     game::TraceWriter plain(bare);
     plain.command(3, sim::StartResearch{{}, sim::TechId(0)});
     CHECK(bare.str().find("tech_id") == std::string::npos);
+}
+
+TEST_CASE("A cancelled order is traced as queued and cancelled, never as a command", "[trace]") {
+    const sim::Content content = test::makeContent();
+    const sim::Seed seed = 3;
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, seed, test::setup());
+    session.setTrace(&trace);
+    const sim::PlotId plot = firstListed(session);
+    REQUIRE(plot.valid());
+    const sim::Command loan = sim::TakeLoan{{}, sim::Money::fromUnits(1'000'000)};
+
+    SECTION("one order withdrawn, the other given") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.submit(loan);
+        const std::uint64_t surveyId = session.pendingOrders().front().id;
+        REQUIRE(session.cancel(surveyId));
+        session.stepOneDay();
+
+        CHECK(linesWith(out.str(), kQueued).size() == 2);
+        const std::vector<std::string> cancelled = linesWith(out.str(), kCancelled);
+        REQUIRE(cancelled.size() == 1);
+        CHECK(cancelled.front().find("\"t\":\"ui\"") != std::string::npos);
+        CHECK(cancelled.front().find("#" + std::to_string(surveyId) + " ") != std::string::npos);
+        CHECK(cancelled.front().find("CommissionSurvey") != std::string::npos);
+        // The queued record of the same order names the same id.
+        const std::vector<std::string> queued = linesWith(out.str(), kQueued);
+        CHECK(queued.front().find("#" + std::to_string(surveyId) + " ") != std::string::npos);
+        CHECK(queued.front().find("CommissionSurvey") != std::string::npos);
+
+        const std::vector<game::TraceRecord> commands = commandRecords(out.str());
+        REQUIRE(commands.size() == 1);
+        CHECK(std::holds_alternative<sim::TakeLoan>(commands.front().command.value()));
+
+        // The game is the one in which the survey was never ordered, and not
+        // the one in which it was.
+        game::Session never(content, seed, test::setup());
+        never.submit(loan);
+        never.stepOneDay();
+        CHECK(session.stateHash() == never.stateHash());
+        game::Session given(content, seed, test::setup());
+        given.submit(sim::CommissionSurvey{{}, plot});
+        given.submit(loan);
+        given.stepOneDay();
+        CHECK(session.stateHash() != given.stateHash());
+    }
+    SECTION("everything withdrawn at once") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.submit(loan);
+        session.cancelAll();
+        session.stepOneDay();
+
+        CHECK(linesWith(out.str(), kQueued).size() == 2);
+        CHECK(linesWith(out.str(), kCancelled).size() == 2);
+        CHECK(commandRecords(out.str()).empty());
+        CHECK(linesWith(out.str(), "\"t\":\"command\"").empty());
+    }
+}
+
+TEST_CASE("A command record carries the day its order was given", "[trace]") {
+    const sim::Content content = test::makeContent();
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 7, test::setup());
+    session.setTrace(&trace);
+    game::AutoPause never;
+    never.enabled.fill(false);
+    session.setAutoPause(never);
+
+    std::vector<sim::Day> given;
+    const auto borrow = [&session, &given] {
+        given.push_back(session.day());
+        session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(100'000)});
+    };
+    borrow();  // day 0, clock stopped
+    session.stepOneDay();
+    session.stepOneDay();
+    session.stepOneDay();
+    borrow();  // day 3, clock stopped
+    session.setSpeed(game::Speed::Fastest);
+    REQUIRE(session.advance(1.0) == 20);
+    borrow();  // day 23, clock running
+    REQUIRE(session.advance(1.0) == 20);
+    REQUIRE(given == std::vector<sim::Day>{0, 3, 23});
+
+    // Each order is recorded on the day it was given, after that day's tick
+    // record and before the next one: where it stood before orders waited.
+    std::vector<sim::Day> recorded;
+    sim::Day lastTick = 0;
+    for (const game::TraceRecord& record : parseTrace(out.str())) {
+        if (record.type == "day") {
+            lastTick = record.day;
+        } else if (record.type == "command") {
+            CHECK(record.day == lastTick);
+            recorded.push_back(record.day);
+        }
+    }
+    CHECK(recorded == given);
+    // The record of the order being given carries that day too.
+    std::vector<sim::Day> queued;
+    for (const std::string& line : linesWith(out.str(), kQueued)) {
+        game::TraceRecord record;
+        std::string error;
+        REQUIRE(game::parseTraceLine(line, record, error));
+        queued.push_back(record.day);
+    }
+    CHECK(queued == given);
+}
+
+TEST_CASE("A trace with queued and cancelled orders replays to the same game", "[trace][replay]") {
+    const sim::Content content = test::makeContent();
+    const sim::Seed seed = 17;
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    trace.newGame(seed, test::setup(), sim::hashContent(content), "test");
+    game::Session live(content, seed, test::setup());
+    live.setTrace(&trace);
+    game::AutoPause never;
+    never.enabled.fill(false);
+    live.setAutoPause(never);
+    const sim::PlotId plot = firstListed(live);
+    REQUIRE(plot.valid());
+
+    // Day 0: a loan that stays and a survey that is taken back.
+    live.submit(sim::TakeLoan{{}, sim::Money::fromUnits(1'000'000)});
+    live.submit(sim::CommissionSurvey{{}, plot});
+    REQUIRE(live.cancel(live.pendingOrders().back().id));
+    live.stepOneDay();
+    // Day 1: two orders withdrawn together, then a bid that stays.
+    live.submit(sim::TakeLoan{{}, sim::Money::fromUnits(2'000'000)});
+    live.submit(sim::StartResearch{{}, sim::TechId(0)});
+    live.cancelAll();
+    live.submit(sim::BidOnPlot{{}, plot, live.view().plots[plot.index()].askPrice});
+    live.setSpeed(game::Speed::Fastest);
+    for (int i = 0; i < 3; ++i) {
+        live.advance(1.0);
+    }
+    // Clock running: one more order that stays.
+    live.submit(sim::StartResearch{{}, sim::TechId(0)});
+    live.advance(1.0);
+    trace.end(live.day());
+
+    REQUIRE(linesWith(out.str(), kQueued).size() == 6);
+    REQUIRE(linesWith(out.str(), kCancelled).size() == 3);
+
+    std::istringstream in(out.str());
+    const game::ReplayResult result = game::replayTrace(content, in, {});
+    REQUIRE(result.ok());
+    REQUIRE(result.session != nullptr);
+    CHECK_FALSE(result.firstDivergence.has_value());
+    CHECK(result.commands == 3);  // the loan, the bid and the research; nothing withdrawn
+    CHECK(result.daysTicked == live.day());
+    CHECK(result.session->day() == live.day());
+    CHECK(result.session->stateHash() == live.stateHash());
+    CHECK(result.session->pendingOrders().empty());
+    CHECK(result.session->view().loans.size() == 1);
+    CHECK(result.session->log().size() == live.log().size());
 }

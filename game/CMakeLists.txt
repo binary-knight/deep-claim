@@ -36,8 +36,13 @@ target_link_libraries(deep_claim PRIVATE dc::game_session dc::content dc::platfo
 # from the build tree. Shipped builds find both next to the executable.
 target_compile_definitions(deep_claim PRIVATE DC_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
                                               DC_ASSETS_DIR="${CMAKE_SOURCE_DIR}/game/assets"
-                                              DC_PLAYTEST_DIR="${CMAKE_SOURCE_DIR}/playtest"
-                                              DC_BUILD_ID="${DC_BUILD_ID}")
+                                              DC_PLAYTEST_DIR="${CMAKE_SOURCE_DIR}/playtest")
+# DC_BUILD_ID comes from a header regenerated on every build (see the root
+# CMakeLists.txt), not from a compile definition: a definition is fixed at
+# configure time, and changing it would recompile every source of the target
+# rather than main.cpp alone.
+target_include_directories(deep_claim PRIVATE "${DC_BUILD_ID_INCLUDE_DIR}")
+add_dependencies(deep_claim dc_build_id)
 
 # Copy data and assets next to the binary so a zipped build directory runs.
 # A separate target that always runs, so editing an .rml or .json and

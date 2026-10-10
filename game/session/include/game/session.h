@@ -4,6 +4,12 @@
 // competitors, time control, the player's orders and a log of what happened.
 // The UI reads views and the log, and sends commands; it never touches the
 // sim's world state.
+//
+// Orders wait here, not in the sim, until the clock next moves (spec 007):
+// the interface can show each one the moment it is given and withdraw it
+// before it counts. The sim still sees them in the order given, on the day
+// they were given, so the game plays out exactly as if they had gone
+// straight to it.
 
 #include "sim/ai_controller.h"
 #include "sim/commands.h"
@@ -21,6 +27,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace game {
@@ -29,6 +36,12 @@ class TraceWriter;
 
 enum class Speed : std::uint8_t { Paused, Normal, Fast, Fastest };
 [[nodiscard]] int daysPerSecond(Speed speed);  // 0, 1, 5, 20
+
+// An order the player has given that the sim has not been handed yet.
+struct PendingOrder {
+    std::uint64_t id = 0;  // unique within a session, never handed out twice
+    sim::Command command;  // bound to the player
+};
 
 struct LogEntry {
     sim::Day day = 0;
@@ -62,7 +75,25 @@ public:
     [[nodiscard]] std::optional<sim::Notice> takePausedBy();
 
     // ---- player ----
-    void submit(sim::Command command);  // always bound to the player
+    // Queues an order, always bound to the player. It reaches the sim at the
+    // start of the next tick; until then it can be cancelled.
+    void submit(sim::Command command);
+    // What is waiting for the clock, in the order given.
+    [[nodiscard]] const std::vector<PendingOrder>& pendingOrders() const { return pending_; }
+    // Withdraws one waiting order; false when no order has that id (it was
+    // given to the sim or cancelled already).
+    bool cancel(std::uint64_t id);
+    void cancelAll();
+    // Money the waiting orders will take when they are given, at today's
+    // quotes: survey fee, bid (less a standing bid on the same plot, which is
+    // reserved already), mine capex, tech cost, loan repayment. For display
+    // and button state only (R-001): the sim decides what it accepts.
+    [[nodiscard]] sim::Money committed() const;
+    // Principal of the waiting loans: money the orders after them can spend.
+    [[nodiscard]] sim::Money pendingBorrowed() const;
+    // What one order adds to committed(); zero for an order that costs
+    // nothing up front or names something the view does not show.
+    [[nodiscard]] sim::Money orderCost(const sim::Command& command) const;
     [[nodiscard]] const sim::CompanyView& view() const { return view_; }
     [[nodiscard]] const std::vector<LogEntry>& log() const { return log_; }
     [[nodiscard]] bool gameOver() const { return view_.bankrupt; }
@@ -77,7 +108,11 @@ public:
     [[nodiscard]] const std::vector<sim::Money>& cashHistory() const { return cashHistory_; }
 
     // ---- persistence ----
-    [[nodiscard]] std::vector<std::uint8_t> save() const { return simulation_.save(); }
+    // The save holds the waiting orders as the current day's orders, so a
+    // game loaded from it plays on as this one will. This session is left as
+    // it was: the orders still wait here and can still be cancelled.
+    [[nodiscard]] std::vector<std::uint8_t> save() const;
+    // On success the waiting orders are discarded with the old game.
     [[nodiscard]] bool load(std::span<const std::uint8_t> bytes);
 
     [[nodiscard]] const sim::Content& content() const { return *content_; }
@@ -93,6 +128,10 @@ public:
 
 private:
     void tickOnce();
+    // Hands the waiting orders to the sim in the order given and records
+    // each in the trace as a command.
+    void giveOrders();
+    void traceOrder(std::string_view kind, const PendingOrder& order);
     // Pauses the clock when the last tick raised a pausing notice.
     bool stopIfPaused();
     void refreshView();
@@ -119,6 +158,8 @@ private:
     // Plots the player ordered a bid on since the last tick (the bid and the
     // auction's close can be processed in the same day).
     std::vector<sim::PlotId> submittedBids_;
+    std::vector<PendingOrder> pending_;
+    std::uint64_t nextOrderId_ = 1;
 };
 
 }  // namespace game

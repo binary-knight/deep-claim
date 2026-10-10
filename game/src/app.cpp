@@ -260,6 +260,18 @@ void App::bindModel() {
         Rml::Log::Message(Rml::Log::LT_ERROR, "Could not create the game data model");
         return;
     }
+    // The order marks first: the rows and the panel below hold them.
+    if (auto h = ctor.RegisterStruct<OrderMark>()) {
+        h.RegisterMember("pending", &OrderMark::pending);
+        h.RegisterMember("text", &OrderMark::text);
+        h.RegisterMember("id", &OrderMark::id);
+        h.RegisterMember("not_covered", &OrderMark::not_covered);
+    }
+    if (auto h = ctor.RegisterStruct<PendingRow>()) {
+        h.RegisterMember("id", &PendingRow::id);
+        h.RegisterMember("text", &PendingRow::text);
+        h.RegisterMember("not_covered", &PendingRow::not_covered);
+    }
     if (auto h = ctor.RegisterStruct<NeedRow>()) {
         h.RegisterMember("number", &NeedRow::number);
         h.RegisterMember("title", &NeedRow::title);
@@ -268,6 +280,7 @@ void App::bindModel() {
         h.RegisterMember("action", &NeedRow::action);
         h.RegisterMember("target", &NeedRow::target);
         h.RegisterMember("act_label", &NeedRow::act_label);
+        h.RegisterMember("order", &NeedRow::order);
     }
     if (auto h = ctor.RegisterStruct<SaleRow>()) {
         h.RegisterMember("index", &SaleRow::index);
@@ -306,6 +319,8 @@ void App::bindModel() {
         h.RegisterMember("mine_operating", &OwnedRow::mine_operating);
         h.RegisterMember("can_build", &OwnedRow::can_build);
         h.RegisterMember("mine_index", &OwnedRow::mine_index);
+        h.RegisterMember("build_order", &OwnedRow::build_order);
+        h.RegisterMember("mine_order", &OwnedRow::mine_order);
     }
     if (auto h = ctor.RegisterStruct<EstimateRow>()) {
         h.RegisterMember("resource", &EstimateRow::resource);
@@ -337,6 +352,8 @@ void App::bindModel() {
         h.RegisterMember("can_survey", &PlotPanel::can_survey);
         h.RegisterMember("survey_label", &PlotPanel::survey_label);
         h.RegisterMember("survey_note", &PlotPanel::survey_note);
+        h.RegisterMember("can_afford_survey", &PlotPanel::can_afford_survey);
+        h.RegisterMember("survey_blocked", &PlotPanel::survey_blocked);
         h.RegisterMember("sale", &PlotPanel::sale);
         h.RegisterMember("can_build", &PlotPanel::can_build);
         h.RegisterMember("can_afford_mine", &PlotPanel::can_afford_mine);
@@ -345,6 +362,10 @@ void App::bindModel() {
         h.RegisterMember("can_toggle_mine", &PlotPanel::can_toggle_mine);
         h.RegisterMember("mine_operating", &PlotPanel::mine_operating);
         h.RegisterMember("mine_index", &PlotPanel::mine_index);
+        h.RegisterMember("survey_order", &PlotPanel::survey_order);
+        h.RegisterMember("bid_order", &PlotPanel::bid_order);
+        h.RegisterMember("build_order", &PlotPanel::build_order);
+        h.RegisterMember("mine_order", &PlotPanel::mine_order);
     }
     if (auto h = ctor.RegisterStruct<ResourceRow>()) {
         h.RegisterMember("index", &ResourceRow::index);
@@ -365,6 +386,8 @@ void App::bindModel() {
         h.RegisterMember("has_stock", &ResourceRow::has_stock);
         h.RegisterMember("policy_on", &ResourceRow::policy_on);
         h.RegisterMember("selected", &ResourceRow::selected);
+        h.RegisterMember("sale_order", &ResourceRow::sale_order);
+        h.RegisterMember("policy_order", &ResourceRow::policy_order);
     }
     if (auto h = ctor.RegisterStruct<TechRow>()) {
         h.RegisterMember("index", &TechRow::index);
@@ -379,6 +402,7 @@ void App::bindModel() {
         h.RegisterMember("blocked", &TechRow::blocked);
         h.RegisterMember("can_start", &TechRow::can_start);
         h.RegisterMember("researching", &TechRow::researching);
+        h.RegisterMember("order", &TechRow::order);
     }
     if (auto h = ctor.RegisterStruct<LoanRow>()) {
         h.RegisterMember("index", &LoanRow::index);
@@ -389,6 +413,7 @@ void App::bindModel() {
         h.RegisterMember("months", &LoanRow::months);
         h.RegisterMember("active", &LoanRow::active);
         h.RegisterMember("can_repay_all", &LoanRow::can_repay_all);
+        h.RegisterMember("repay_order", &LoanRow::repay_order);
     }
     if (auto h = ctor.RegisterStruct<LogRow>()) {
         h.RegisterMember("day", &LogRow::day);
@@ -409,12 +434,16 @@ void App::bindModel() {
     ctor.RegisterArray<std::vector<LoanRow>>();
     ctor.RegisterArray<std::vector<LogRow>>();
     ctor.RegisterArray<std::vector<PauseRow>>();
+    ctor.RegisterArray<std::vector<PendingRow>>();
 
     // Header and strip
     ctor.Bind("company", &model_.company);
     ctor.Bind("day", &model_.day);
     ctor.Bind("cash", &model_.cash);
     ctor.Bind("spendable", &model_.spendable);
+    ctor.Bind("available", &model_.available);
+    ctor.Bind("committed", &model_.committed);
+    ctor.Bind("has_committed", &model_.has_committed);
     ctor.Bind("debt", &model_.debt);
     ctor.Bind("speed_label", &model_.speed_label);
     ctor.Bind("speed", &model_.speed);
@@ -425,6 +454,14 @@ void App::bindModel() {
     ctor.Bind("status_danger", &model_.status_danger);
     ctor.Bind("show_pause_menu", &model_.show_pause_menu);
     ctor.Bind("pause_rows", &model_.pause_rows);
+    // Orders waiting for the clock (spec 007)
+    ctor.Bind("pending_orders", &model_.pending_orders);
+    ctor.Bind("pending_count", &model_.pending_count);
+    ctor.Bind("has_pending", &model_.has_pending);
+    ctor.Bind("pending_line", &model_.pending_line);
+    ctor.Bind("pending_shortfall", &model_.pending_shortfall);
+    ctor.Bind("show_pending_list", &showPendingList_);
+    ctor.Bind("owned_orders", &ownedOrders_);
     ctor.Bind("month_net", &model_.month_net);
     ctor.Bind("month_good", &model_.month_good);
     ctor.Bind("storage_month", &model_.storage_month);
@@ -471,6 +508,8 @@ void App::bindModel() {
     ctor.Bind("policy_floor_input", &model_.policy_floor_input);
     ctor.Bind("policy_enabled", &model_.policy_enabled);
     ctor.Bind("ui_policy_hint", &model_.ui_policy_hint);
+    ctor.Bind("policy_order", &model_.policy_order);
+    ctor.Bind("market_orders", &model_.market_orders);
     // Research
     ctor.Bind("lab_line", &model_.lab_line);
     ctor.Bind("lab_sub", &model_.lab_sub);
@@ -481,7 +520,10 @@ void App::bindModel() {
     ctor.Bind("loan_credit", &model_.loan_credit);
     ctor.Bind("loan_blocked", &model_.loan_blocked);
     ctor.Bind("can_take_loan", &model_.can_take_loan);
+    ctor.Bind("loan_order", &model_.loan_order);
+    ctor.Bind("finance_orders", &model_.finance_orders);
     ctor.Bind("cover_costs", &model_.cover_costs);
+    ctor.Bind("cover_order", &model_.cover_order);
     ctor.Bind("cover_check", &model_.cover_check);
     ctor.Bind("cover_explain", &model_.cover_explain);
     ctor.Bind("cover_last", &model_.cover_last);
@@ -499,6 +541,9 @@ void App::bindModel() {
     ctor.Bind("ui_shortcuts", &model_.ui_shortcuts);
     ctor.Bind("ui_game_over", &model_.ui_game_over);
     ctor.Bind("ui_pause_menu_title", &model_.ui_pause_menu_title);
+    ctor.Bind("ui_cancel", &model_.ui_cancel);
+    ctor.Bind("ui_cancel_all", &model_.ui_cancel_all);
+    ctor.Bind("ui_not_covered", &model_.ui_not_covered);
 
     const auto intArg = [](const Rml::VariantList& args, std::size_t i) {
         return i < args.size() ? args[i].Get<int>() : 0;
@@ -522,9 +567,16 @@ void App::bindModel() {
                                onNeedAction(intArg(a, 0), intArg(a, 1));
                            });
     ctor.BindEventCallback("toggle_pause_menu", [this](Rml::DataModelHandle, Rml::Event&, Args) {
-        model_.show_pause_menu = !model_.show_pause_menu;
-        handle_.DirtyVariable("show_pause_menu");
+        showPopover(!model_.show_pause_menu, false);
     });
+    ctor.BindEventCallback("toggle_pending_list", [this](Rml::DataModelHandle, Rml::Event&, Args) {
+        showPopover(false, !showPendingList_);
+    });
+    ctor.BindEventCallback("cancel", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onCancel(intArg(a, 0));
+    });
+    ctor.BindEventCallback("cancel_all",
+                           [this](Rml::DataModelHandle, Rml::Event&, Args) { onCancelAll(); });
     ctor.BindEventCallback("toggle_pause", [this, intArg](Rml::DataModelHandle, Rml::Event&,
                                                           Args a) { onTogglePause(intArg(a, 0)); });
     ctor.BindEventCallback("survey", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
@@ -605,8 +657,14 @@ void App::refresh() {
         }
     }
     seenLogEntries_ = log.size();
+    if (session_->pendingOrders().empty()) {
+        showPendingList_ = false;  // nothing left to list
+    }
     syncLoanInput();
     refreshModel(*session_, model_);
+    ownedOrders_ = std::ranges::any_of(model_.owned, [](const OwnedRow& row) {
+        return row.mine_order.pending || row.build_order.pending;
+    });
     if (handle_) {
         handle_.DirtyAllVariables();
     }
@@ -657,11 +715,21 @@ void App::setLogFilter(int filter) {
     onSetLogFilter(filter);
 }
 
-void App::showPauseMenu(bool on) {
-    model_.show_pause_menu = on;
+void App::showPopover(bool pauseMenu, bool pendingList) {
+    model_.show_pause_menu = pauseMenu;
+    showPendingList_ = pendingList;
     if (handle_) {
         handle_.DirtyVariable("show_pause_menu");
+        handle_.DirtyVariable("show_pending_list");
     }
+}
+
+void App::showPauseMenu(bool on) {
+    showPopover(on, false);
+}
+
+void App::showPendingList(bool on) {
+    showPopover(false, on);
 }
 
 void App::refreshNow() {
@@ -731,11 +799,10 @@ void App::onSetTab(int tab) {
         traceUi("tab", kTabNames.at(static_cast<std::size_t>(tab)));
     }
     model_.tab = tab;
-    model_.show_pause_menu = false;
     if (handle_) {
         handle_.DirtyVariable("tab");
-        handle_.DirtyVariable("show_pause_menu");
     }
+    showPopover(false, false);
 }
 
 void App::onSetSpeed(int speed) {
@@ -841,22 +908,34 @@ void App::onApplyPolicy(bool enabled) {
     command.enabled = enabled ? std::uint8_t{1} : std::uint8_t{0};
     command.reserveTonnes = reserve;
     command.floorPrice = floor;
-    session_->submit(command);
+    order(command);
     const std::string& name = content_->resources[static_cast<std::size_t>(index)].name;
     setStatus(text(*content_, enabled ? "status.policy_starts" : "status.policy_stops",
                    {{"resource", name}}));
 }
 
 void App::onToggleCoverCosts() {
+    // A second click while the first is still waiting takes that order back
+    // rather than queueing its opposite behind it.
+    if (model_.cover_order.pending) {
+        onCancel(model_.cover_order.id);
+        return;
+    }
     const bool enable = !session_->view().coverCosts;
-    session_->submit(
-        sim::SetCoverCosts{Session::kPlayer, enable ? std::uint8_t{1} : std::uint8_t{0}});
+    order(sim::SetCoverCosts{Session::kPlayer, enable ? std::uint8_t{1} : std::uint8_t{0}});
     setStatus(text(*content_, enable ? "status.cover_on" : "status.cover_off"));
 }
 
+void App::order(const sim::Command& command) {
+    // Shown at once: with the clock stopped nothing else would redraw the
+    // control until the next tick (spec 007).
+    session_->submit(command);
+    refresh();
+}
+
 void App::onSurvey(int plotIndex) {
-    session_->submit(sim::CommissionSurvey{Session::kPlayer,
-                                           sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
+    order(sim::CommissionSurvey{Session::kPlayer,
+                                sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
     setStatus(text(*content_, "status.survey_queued"));
 }
 
@@ -866,14 +945,13 @@ void App::onBid(int plotIndex) {
         setStatus(text(*content_, "status.bid_prompt"), true);
         return;
     }
-    session_->submit(sim::BidOnPlot{Session::kPlayer,
-                                    sim::PlotId(static_cast<std::uint32_t>(plotIndex)), amount});
+    order(sim::BidOnPlot{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex)),
+                         amount});
     setStatus(text(*content_, "status.bid_queued", {{"amount", formatMoney(amount)}}));
 }
 
 void App::onBuild(int plotIndex) {
-    session_->submit(
-        sim::BuildMine{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
+    order(sim::BuildMine{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
     setStatus(text(*content_, "status.build_queued"));
 }
 
@@ -882,8 +960,8 @@ void App::onToggleMine(int mineIndex) {
     for (const sim::MineView& mine : session_->view().mines) {
         if (mine.id == id) {
             const bool operate = mine.state != sim::MineState::Operating;
-            session_->submit(sim::SetMineState{Session::kPlayer, id,
-                                               operate ? std::uint8_t{1} : std::uint8_t{0}});
+            order(sim::SetMineState{Session::kPlayer, id,
+                                    operate ? std::uint8_t{1} : std::uint8_t{0}});
             setStatus(text(*content_, operate ? "status.mine_reopen" : "status.mine_mothball"));
             return;
         }
@@ -901,8 +979,8 @@ void App::onSell(int resourceIndex, bool all) {
         return;
     }
     // The sim decides whether the quantity is valid; its reason shows in the log.
-    session_->submit(sim::SellOre{
-        Session::kPlayer, sim::ResourceId(static_cast<std::uint32_t>(resourceIndex)), tonnes});
+    order(sim::SellOre{Session::kPlayer, sim::ResourceId(static_cast<std::uint32_t>(resourceIndex)),
+                       tonnes});
     setStatus(text(*content_, "status.sale_queued", {{"tonnes", formatTonnes(tonnes)}}));
 }
 
@@ -937,14 +1015,10 @@ void App::onRepayAll(int loanIndex) {
     const sim::LoanId id(static_cast<std::uint32_t>(loanIndex));
     for (const sim::LoanView& loan : session_->view().loans) {
         if (loan.id == id && loan.active) {
-            // A click that outlived the button: cash has since fallen short.
-            const sim::CompanyView& view = session_->view();
-            if (view.bankrupt || loan.remaining > view.cash - view.reservedCash) {
-                setStatus(rejectReasonText(*content_, sim::RejectReason::InsufficientFunds), true);
-                return;
-            }
+            // No money is counted here: the button's state comes from the
+            // model, and the sim alone turns a repayment away (R-001).
             // The balance to the cent, read now rather than from the label.
-            session_->submit(sim::RepayLoan{Session::kPlayer, id, loan.remaining});
+            order(sim::RepayLoan{Session::kPlayer, id, loan.remaining});
             setStatus(text(*content_, "status.repayment_ordered",
                            {{"amount", formatMoney(loan.remaining)}}));
             return;
@@ -963,7 +1037,7 @@ void App::onTakeLoan() {
         setStatus(text(*content_, "status.loan_prompt"), true);
         return;
     }
-    session_->submit(sim::TakeLoan{Session::kPlayer, amount});
+    order(sim::TakeLoan{Session::kPlayer, amount});
     resetLoanInput();  // the field follows the credit that is left
     setStatus(text(*content_, "status.loan_requested", {{"amount", formatMoney(amount)}}));
 }
@@ -974,15 +1048,34 @@ void App::onRepay(int loanIndex) {
         setStatus(text(*content_, "status.repay_prompt"), true);
         return;
     }
-    session_->submit(sim::RepayLoan{Session::kPlayer,
-                                    sim::LoanId(static_cast<std::uint32_t>(loanIndex)), amount});
+    order(sim::RepayLoan{Session::kPlayer, sim::LoanId(static_cast<std::uint32_t>(loanIndex)),
+                         amount});
     setStatus(text(*content_, "status.repayment_ordered", {{"amount", formatMoney(amount)}}));
 }
 
 void App::onResearch(int techIndex) {
-    session_->submit(
-        sim::StartResearch{Session::kPlayer, sim::TechId(static_cast<std::uint32_t>(techIndex))});
+    order(sim::StartResearch{Session::kPlayer, sim::TechId(static_cast<std::uint32_t>(techIndex))});
     setStatus(text(*content_, "status.research_queued"));
+}
+
+void App::onCancel(int orderId) {
+    // Nothing is logged: the sim never saw the order. An id that is no
+    // longer waiting (the clock moved first) changes nothing.
+    if (orderId > 0 && session_->cancel(static_cast<std::uint64_t>(orderId))) {
+        refresh();
+        setStatus(text(*content_, "status.order_cancelled"));
+        return;
+    }
+    refresh();
+}
+
+void App::onCancelAll() {
+    if (session_->pendingOrders().empty()) {
+        return;
+    }
+    session_->cancelAll();
+    refresh();
+    setStatus(text(*content_, "status.order_cancelled"));
 }
 
 void App::onSave() {

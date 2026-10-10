@@ -7,6 +7,7 @@
 #include "app.h"
 #include "chart_element.h"
 #include "content/loader.h"
+#include "dc_build_id.h"
 #include "platform/services.h"
 #include "screenshot.h"
 

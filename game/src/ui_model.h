@@ -21,6 +21,27 @@
 
 namespace game {
 
+// The order a control has waiting for the clock (spec 007). A control with
+// `pending` set shows `text` as its chip or line in place of its button, and
+// Cancel withdraws order `id`. When several waiting orders belong to one
+// control (two repayments of one loan, say), this is the one given last.
+struct OrderMark {
+    bool pending = false;
+    std::string text;  // "Survey ordered", "Bid placed: $1.20M", ... or ""
+    int id = 0;        // Session::cancel's id; 0 when nothing is waiting
+    // The money available when the order's turn comes does not cover it (a
+    // loan given before it was cancelled). Display only: the sim decides.
+    bool not_covered = false;
+};
+
+// One waiting order, for the pending-orders list and the Finance and Market
+// sheets' pending lines.
+struct PendingRow {
+    int id = 0;  // Session::cancel's id
+    std::string text;
+    bool not_covered = false;
+};
+
 // One row of the dashboard's "Needs you" list.
 struct NeedRow {
     int number = 0;
@@ -33,6 +54,7 @@ struct NeedRow {
     int action = 0;
     int target = -1;  // plot index or mine index for actions 1 and 2
     std::string act_label;
+    OrderMark order;  // action 2 only: a mothball order waiting for this mine
 };
 
 // A listed plot on the Plots tab's "For sale" table.
@@ -77,6 +99,8 @@ struct OwnedRow {
     bool mine_operating = false;
     bool can_build = false;
     int mine_index = -1;
+    OrderMark build_order;  // a mine ordered here
+    OrderMark mine_order;   // mothball or reopening ordered for this mine
 };
 
 // A survey estimate line on the selected-plot panel.
@@ -115,6 +139,10 @@ struct PlotPanel {
     // Why a survey would be wasted: the report lands after the auction
     // closes, or the mine here is worked out (then the button is disabled).
     std::string survey_note;
+    // The money available covers the fee. When it does not, the button is
+    // disabled and survey_blocked says why (spec 007).
+    bool can_afford_survey = false;
+    std::string survey_blocked;
     bool can_build = false;
     bool can_afford_mine = false;
     std::string build_label;    // "Build mine ($2.00M)"
@@ -122,6 +150,12 @@ struct PlotPanel {
     bool can_toggle_mine = false;
     bool mine_operating = false;
     int mine_index = -1;
+    // Orders waiting on this plot. While one is pending its chip stands in
+    // for the button, whatever the button's own state would be.
+    OrderMark survey_order;
+    OrderMark bid_order;
+    OrderMark build_order;
+    OrderMark mine_order;  // mothball or reopening
 };
 
 struct ResourceRow {
@@ -141,8 +175,10 @@ struct ResourceRow {
     bool locked = false;
     bool ratio_warn = false;  // price below 0.7 of base
     bool has_stock = false;
-    bool policy_on = false;
+    bool policy_on = false;  // as it will stand once a waiting policy order is given
     bool selected = false;
+    OrderMark sale_order;    // a manual sale of this ore
+    OrderMark policy_order;  // a change to this ore's standing order
 };
 
 struct TechRow {
@@ -158,6 +194,7 @@ struct TechRow {
     std::string blocked;     // why Start is disabled, or ""
     bool can_start = false;
     bool researching = false;
+    OrderMark order;  // "Queued for the lab"; then can_start is off and blocked is ""
 };
 
 struct LoanRow {
@@ -168,7 +205,8 @@ struct LoanRow {
     std::string instalment;
     std::string months;
     bool active = false;
-    bool can_repay_all = false;  // spendable cash covers the balance
+    bool can_repay_all = false;  // the money available covers the balance
+    OrderMark repay_order;       // a repayment of this loan
 };
 
 struct LogRow {
@@ -190,7 +228,13 @@ struct UiModel {
     std::string company;
     std::string day;
     std::string cash;
-    std::string spendable;
+    std::string spendable;  // cash less what bids hold in reserve
+    // What is left to spend this turn: spendable, less what the waiting
+    // orders will cost, plus what the waiting loans bring in (spec 007).
+    // Every affordability check in the model uses this figure.
+    std::string available;
+    std::string committed;       // "Committed: $1.35M"
+    bool has_committed = false;  // a waiting order costs money
     std::string debt;
     std::string speed_label;
     int speed = 0;  // 0 paused, 1, 2, 3
@@ -201,6 +245,13 @@ struct UiModel {
     bool status_danger = false;
     bool show_pause_menu = false;
     std::vector<PauseRow> pause_rows;
+
+    // Orders waiting for the clock (spec 007), in the order given
+    std::vector<PendingRow> pending_orders;
+    int pending_count = 0;
+    bool has_pending = false;
+    std::string pending_line;        // "3 orders waiting for the clock" or ""
+    bool pending_shortfall = false;  // some waiting order is not covered
 
     // Status strip
     std::string month_net;  // "+$1.9M"
@@ -254,8 +305,10 @@ struct UiModel {
     std::string policy_summary;
     std::string policy_reserve_input;
     std::string policy_floor_input;
-    bool policy_enabled = false;
+    bool policy_enabled = false;  // as it will stand once a waiting order is given
     std::string ui_policy_hint;
+    OrderMark policy_order;                 // the selected ore's standing order
+    std::vector<PendingRow> market_orders;  // waiting manual sales
 
     // Research
     std::string lab_line;  // "One project at a time"
@@ -265,10 +318,13 @@ struct UiModel {
     std::vector<LoanRow> loans;
     std::string loan_rule;
     std::string loan_limits;
-    std::string loan_credit;     // "You can borrow up to $8.84M."
-    std::string loan_blocked;    // why Take loan is disabled, or ""
-    bool can_take_loan = false;  // credit covers the minimum loan and a slot is free
-    bool cover_costs = false;
+    std::string loan_credit;                 // "You can borrow up to $8.84M."
+    std::string loan_blocked;                // why Take loan is disabled, or ""
+    bool can_take_loan = false;              // credit covers the minimum loan and a slot is free
+    OrderMark loan_order;                    // the loan asked for last
+    std::vector<PendingRow> finance_orders;  // waiting loans and repayments
+    bool cover_costs = false;                // as it will stand once a waiting order is given
+    OrderMark cover_order;
     std::string cover_check;
     std::string cover_explain;
     std::string cover_last;  // "not needed" or what was sold last month
@@ -292,6 +348,9 @@ struct UiModel {
     std::string ui_shortcuts;
     std::string ui_game_over;
     std::string ui_pause_menu_title;
+    std::string ui_cancel;
+    std::string ui_cancel_all;
+    std::string ui_not_covered;
 };
 
 // Rebuilds every field of `model` from the session.

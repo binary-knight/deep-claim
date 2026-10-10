@@ -1,7 +1,9 @@
 #include "game/session.h"
 
+#include "sim/ai_controller.h"
 #include "sim/commands.h"
 #include "sim/fixed.h"
+#include "sim/ids.h"
 #include "sim/money.h"
 #include "sim/save.h"
 #include "sim/simulation.h"
@@ -15,11 +17,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <sstream>
 #include <string>
+#include <variant>
 #include <vector>
 
 TEST_CASE("Money, day and tonnage formatting", "[session][format]") {
@@ -546,4 +551,698 @@ TEST_CASE("A month's automatic sales are one log line", "[session][format]") {
         ++traced;
     }
     CHECK(traced == static_cast<std::size_t>(lines));
+}
+
+// ---- spec 007: orders wait in the session until the clock moves ----
+
+namespace {
+
+std::size_t countText(const std::string& haystack, const std::string& needle) {
+    std::size_t count = 0;
+    for (std::size_t at = haystack.find(needle); at != std::string::npos;
+         at = haystack.find(needle, at + 1)) {
+        ++count;
+    }
+    return count;
+}
+
+const std::string kCommandRecord = "\"t\":\"command\"";
+const std::string kQueuedRecord = "\"kind\":\"order_queued\"";
+const std::string kCancelledRecord = "\"kind\":\"order_cancelled\"";
+
+// The trace's command records, in file order.
+std::vector<game::TraceRecord> commandRecords(const std::string& trace) {
+    std::vector<game::TraceRecord> records;
+    std::istringstream in(trace);
+    std::string line;
+    while (std::getline(in, line)) {
+        game::TraceRecord record;
+        std::string error;
+        REQUIRE(game::parseTraceLine(line, record, error));
+        if (record.type == "command") {
+            records.push_back(record);
+        }
+    }
+    return records;
+}
+
+// One day of the game as it ran before spec 007: the player's orders go
+// straight to the sim, then the rivals decide, then the day is ticked.
+void tickDirect(sim::Simulation& simulation, sim::HeuristicController& ai,
+                std::span<const sim::Command> orders) {
+    for (sim::Command order : orders) {
+        sim::setCommandCompany(order, game::Session::kPlayer);
+        simulation.submit(order);
+    }
+    for (std::uint32_t c = 1; c < simulation.state().companies.size(); ++c) {
+        simulation.collectCommands(sim::CompanyId(c), ai);
+    }
+    simulation.tick();
+}
+
+}  // namespace
+
+TEST_CASE("An order waits in the session and reaches the sim on the next tick",
+          "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    CHECK(session.pendingOrders().empty());  // a new game has nothing waiting
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    const std::uint64_t before = session.stateHash();
+
+    session.submit(sim::CommissionSurvey{sim::CompanyId(1), plot});
+    REQUIRE(session.pendingOrders().size() == 1);
+    const auto* queued = std::get_if<sim::CommissionSurvey>(&session.pendingOrders()[0].command);
+    REQUIRE(queued != nullptr);
+    CHECK(queued->company == game::Session::kPlayer);  // rebound to the player
+    CHECK(queued->plot == plot);
+    // The sim has not been told yet: nothing in its save, nothing in its state.
+    CHECK(session.stateHash() == before);
+    CHECK(session.view().surveys.empty());
+
+    session.stepOneDay();
+    CHECK(session.pendingOrders().empty());
+    CHECK(session.view().surveys.size() == 1);
+    CHECK(session.view().cash == content.balance.startingCapital - content.balance.surveyCost);
+}
+
+TEST_CASE("Pending orders are listed in the order given, each with its own id",
+          "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    session.submit(sim::CommissionSurvey{{}, plot});
+    session.submit(sim::TakeLoan{{}, content.balance.loanMinPrincipal});
+    session.submit(sim::StartResearch{{}, sim::TechId(0)});
+
+    const std::vector<game::PendingOrder> orders = session.pendingOrders();
+    REQUIRE(orders.size() == 3);
+    CHECK(std::holds_alternative<sim::CommissionSurvey>(orders[0].command));
+    CHECK(std::holds_alternative<sim::TakeLoan>(orders[1].command));
+    CHECK(std::holds_alternative<sim::StartResearch>(orders[2].command));
+    CHECK(orders[0].id != orders[1].id);
+    CHECK(orders[1].id != orders[2].id);
+    CHECK(orders[0].id != orders[2].id);
+
+    SECTION("cancel removes exactly the one named and the rest keep their ids") {
+        CHECK(session.cancel(orders[1].id));
+        REQUIRE(session.pendingOrders().size() == 2);
+        CHECK(session.pendingOrders()[0].id == orders[0].id);
+        CHECK(session.pendingOrders()[1].id == orders[2].id);
+        CHECK_FALSE(session.cancel(orders[1].id));  // already gone
+        CHECK(session.pendingOrders().size() == 2);
+
+        // The cancelled loan never reaches the sim; the other two do.
+        session.stepOneDay();
+        CHECK(session.view().loans.empty());
+        CHECK(session.view().surveys.size() == 1);
+        CHECK(session.view().activeResearch.has_value());
+        CHECK(session.view().cash ==
+              content.balance.startingCapital - content.balance.surveyCost - content.techs[0].cost);
+        CHECK(countKind(session, sim::NoticeKind::LoanTaken) == 0);
+        CHECK(countKind(session, sim::NoticeKind::CommandRejected) == 0);
+    }
+    SECTION("an id is not handed out again after a cancel") {
+        CHECK(session.cancel(orders[2].id));
+        session.submit(sim::StartResearch{{}, sim::TechId(0)});
+        REQUIRE(session.pendingOrders().size() == 3);
+        for (const game::PendingOrder& earlier : orders) {
+            CHECK(session.pendingOrders()[2].id != earlier.id);
+        }
+    }
+    SECTION("cancel all removes every order and none is applied") {
+        session.cancelAll();
+        CHECK(session.pendingOrders().empty());
+        const sim::Money cash = session.view().cash;
+        session.stepOneDay();
+        CHECK(session.view().cash == cash);
+        CHECK(session.view().surveys.empty());
+        CHECK(session.view().loans.empty());
+        CHECK_FALSE(session.view().activeResearch.has_value());
+        CHECK(countKind(session, sim::NoticeKind::CommandRejected) == 0);
+    }
+}
+
+TEST_CASE("A game with no cancellations ticks to the same hashes as orders given directly",
+          "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 7, test::setup());
+    session.setAutoPause(neverPause());
+    sim::Simulation direct(content, 7, test::setup());
+    sim::HeuristicController ai(content);
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    const sim::Money ask = session.view().plots[plot.index()].askPrice;
+
+    // Borrow, then bid with the borrowed money: the order given matters.
+    const std::vector<sim::Command> dayZero = {
+        sim::CommissionSurvey{{}, plot}, sim::TakeLoan{{}, sim::Money::fromUnits(1'000'000)},
+        sim::BidOnPlot{{}, plot, ask}, sim::StartResearch{{}, sim::TechId(0)}};
+    const std::vector<sim::Command> dayTen = {sim::BidOnPlot{{}, plot, ask + ask / 10},
+                                              sim::SetCoverCosts{{}, 1}};
+    for (sim::Day day = 0; day < 120; ++day) {
+        std::span<const sim::Command> orders;
+        if (day == 0) {
+            orders = dayZero;
+        } else if (day == 10) {
+            orders = dayTen;
+        }
+        for (const sim::Command& order : orders) {
+            session.submit(order);
+        }
+        session.stepOneDay();
+        tickDirect(direct, ai, orders);
+        REQUIRE(session.stateHash() == direct.stateHash());
+    }
+    CHECK(session.view().loans.size() == 1);  // the orders did reach the sim
+}
+
+TEST_CASE("Pending orders survive the clock controls and are dropped by a load",
+          "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, test::setup());
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+
+    SECTION("speed changes and pause toggles while stopped keep the queue") {
+        session.submit(sim::StartResearch{{}, sim::TechId(0)});
+        session.setSpeed(game::Speed::Paused);
+        CHECK(session.pendingOrders().size() == 1);
+        CHECK(session.advance(5.0) == 0);  // a stopped clock gives no orders
+        CHECK(session.pendingOrders().size() == 1);
+        session.setSpeed(game::Speed::Fast);
+        CHECK(session.pendingOrders().size() == 1);
+        session.togglePause();
+        CHECK(session.pendingOrders().size() == 1);
+        session.togglePause();  // running again, at normal speed
+        CHECK(session.pendingOrders().size() == 1);
+        CHECK(session.advance(0.5) == 0);  // running, but no whole day yet
+        CHECK(session.pendingOrders().size() == 1);
+        CHECK(session.advance(0.5) == 1);
+        CHECK(session.pendingOrders().empty());
+        CHECK(session.view().activeResearch.has_value());
+    }
+    SECTION("an auto-pause leaves orders given at the stop waiting") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.setSpeed(game::Speed::Fastest);
+        for (int i = 0; i < 10 && session.speed() != game::Speed::Paused; ++i) {
+            session.advance(1.0);
+        }
+        REQUIRE(session.speed() == game::Speed::Paused);  // survey complete
+        session.submit(sim::StartResearch{{}, sim::TechId(0)});
+        const std::optional<sim::Notice> why = session.takePausedBy();
+        REQUIRE(why.has_value());
+        CHECK(session.advance(5.0) == 0);
+        REQUIRE(session.pendingOrders().size() == 1);
+        CHECK(std::holds_alternative<sim::StartResearch>(session.pendingOrders()[0].command));
+        CHECK_FALSE(session.view().activeResearch.has_value());
+    }
+    SECTION("an order given while the clock runs survives the auto-pause that follows") {
+        game::AutoPause rules = neverPause();
+        rules.set(game::PauseOn::SurveyComplete, true);
+        session.setAutoPause(rules);
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.setSpeed(game::Speed::Normal);
+        for (sim::Day i = 0; i <= content.balance.surveyDurationDays; ++i) {
+            REQUIRE(session.speed() == game::Speed::Normal);
+            if (i == content.balance.surveyDurationDays) {
+                // Given during the day whose tick stops the clock: it goes to
+                // the sim with that tick, as it did before spec 007.
+                session.submit(sim::StartResearch{{}, sim::TechId(0)});
+            }
+            session.stepOneDay();
+        }
+        CHECK(session.speed() == game::Speed::Paused);
+        CHECK(session.pendingOrders().empty());
+        CHECK(session.view().activeResearch.has_value());
+    }
+    SECTION("a load discards the queue") {
+        game::Session other(content, 9, test::setup());
+        const std::vector<std::uint8_t> bytes = other.save();
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.submit(sim::StartResearch{{}, sim::TechId(0)});
+        REQUIRE(session.load(bytes));
+        CHECK(session.pendingOrders().empty());
+        CHECK(session.committed() == sim::Money::zero());
+        const sim::Money cash = session.view().cash;
+        session.stepOneDay();
+        CHECK(session.view().cash == cash);
+        CHECK(session.view().surveys.empty());
+        CHECK_FALSE(session.view().activeResearch.has_value());
+    }
+    SECTION("a save that does not load leaves the queue alone") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        const std::vector<std::uint8_t> rubbish = {1, 2, 3};
+        CHECK_FALSE(session.load(rubbish));
+        CHECK(session.pendingOrders().size() == 1);
+    }
+}
+
+TEST_CASE("A save carries the pending orders and leaves them pending", "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 1, soloSetup());
+    session.setTrace(&trace);
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    const sim::Money ask = session.view().plots[plot.index()].askPrice;
+    const sim::Money raised = ask + sim::Money::fromUnits(10'000);
+    const sim::Money principal = sim::Money::fromUnits(1'000'000);
+    // A loan, a bid and its raise: the order they are given in decides what
+    // stands.
+    session.submit(sim::TakeLoan{{}, principal});
+    session.submit(sim::BidOnPlot{{}, plot, ask});
+    session.submit(sim::BidOnPlot{{}, plot, raised});
+    const std::vector<game::PendingOrder> before = session.pendingOrders();
+    const sim::Money committed = session.committed();
+    REQUIRE(committed == ask + raised);
+    REQUIRE(session.pendingBorrowed() == principal);
+    const std::uint64_t hash = session.stateHash();
+    const std::string traced = out.str();
+
+    const std::vector<std::uint8_t> bytes = session.save();
+
+    // The live game is as it was: the same orders wait, counted the same.
+    REQUIRE(session.pendingOrders().size() == before.size());
+    for (std::size_t i = 0; i < before.size(); ++i) {
+        CHECK(session.pendingOrders()[i].id == before[i].id);
+        CHECK(game::encodeCommand(session.pendingOrders()[i].command) ==
+              game::encodeCommand(before[i].command));
+    }
+    CHECK(session.committed() == committed);
+    CHECK(session.pendingBorrowed() == principal);
+    CHECK(session.stateHash() == hash);
+    CHECK(out.str() == traced);  // the save wrote nothing, a command record least of all
+    CHECK(commandRecords(out.str()).empty());
+
+    SECTION("the saved bytes hold the orders, in the order given") {
+        sim::Simulation saved(content, 9, soloSetup());
+        REQUIRE(saved.load(bytes));
+        REQUIRE(saved.pendingCommands().size() == before.size());
+        for (std::size_t i = 0; i < before.size(); ++i) {
+            CHECK(game::encodeCommand(saved.pendingCommands()[i]) ==
+                  game::encodeCommand(before[i].command));
+        }
+    }
+    SECTION("the loaded save and the live game tick to the same state") {
+        game::Session other(content, 9, soloSetup());
+        REQUIRE(other.load(bytes));
+        CHECK(other.pendingOrders().empty());
+        other.stepOneDay();
+        session.stepOneDay();
+        CHECK(other.stateHash() == session.stateHash());
+        CHECK(other.view().reservedCash == raised);
+        CHECK(session.view().reservedCash == raised);
+        CHECK(session.view().loans.size() == 1);
+        CHECK(session.pendingOrders().empty());
+        // Given once, by the tick.
+        CHECK(commandRecords(out.str()).size() == before.size());
+        session.stepOneDay();
+        CHECK(commandRecords(out.str()).size() == before.size());
+    }
+    SECTION("every order can still be cancelled, and then none is applied") {
+        for (const game::PendingOrder& order : before) {
+            CHECK(session.cancel(order.id));
+        }
+        CHECK(session.pendingOrders().empty());
+        CHECK(session.committed() == sim::Money::zero());
+        CHECK(countText(out.str(), kCancelledRecord) == before.size());
+        const sim::Money cash = session.view().cash;
+        session.stepOneDay();
+        CHECK(session.view().cash == cash);
+        CHECK(session.view().reservedCash == sim::Money::zero());
+        CHECK(session.view().loans.empty());
+        CHECK(commandRecords(out.str()).empty());
+    }
+    SECTION("a second save holds the orders once, not twice") {
+        CHECK(session.save() == bytes);
+    }
+}
+
+TEST_CASE("A game that saves plays out exactly as one that never does", "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    std::ostringstream savedOut;
+    std::ostringstream plainOut;
+    game::TraceWriter savedTrace(savedOut);
+    game::TraceWriter plainTrace(plainOut);
+    game::Session saver(content, 7, test::setup());
+    game::Session plain(content, 7, test::setup());
+    saver.setTrace(&savedTrace);
+    plain.setTrace(&plainTrace);
+    saver.setAutoPause(neverPause());
+    plain.setAutoPause(neverPause());
+    const sim::PlotId plot = firstListedPlot(saver);
+    REQUIRE(plot.valid());
+    const sim::Money ask = saver.view().plots[plot.index()].askPrice;
+
+    const std::vector<sim::Command> dayZero = {
+        sim::CommissionSurvey{{}, plot}, sim::TakeLoan{{}, sim::Money::fromUnits(1'000'000)},
+        sim::BidOnPlot{{}, plot, ask}, sim::StartResearch{{}, sim::TechId(0)}};
+    const std::vector<sim::Command> dayTen = {sim::BidOnPlot{{}, plot, ask + ask / 10},
+                                              sim::SetCoverCosts{{}, 1}};
+    for (sim::Day day = 0; day < 60; ++day) {
+        std::span<const sim::Command> orders;
+        if (day == 0) {
+            orders = dayZero;
+        } else if (day == 10) {
+            orders = dayTen;
+        }
+        for (const sim::Command& order : orders) {
+            saver.submit(order);
+            plain.submit(order);
+        }
+        // Saved every day, with orders waiting and without.
+        const std::vector<std::uint8_t> bytes = saver.save();
+        CHECK_FALSE(bytes.empty());
+        REQUIRE(saver.pendingOrders().size() == orders.size());
+        saver.stepOneDay();
+        plain.stepOneDay();
+        REQUIRE(saver.stateHash() == plain.stateHash());
+    }
+    CHECK(saver.view().loans.size() == 1);  // the orders did reach the sim
+    CHECK(saver.log().size() == plain.log().size());
+    CHECK(savedOut.str() == plainOut.str());  // saving left no mark on the trace
+}
+
+TEST_CASE("With nothing pending the session's save is the sim's own", "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 7, test::setup());
+    session.setAutoPause(neverPause());
+    sim::Simulation direct(content, 7, test::setup());
+    sim::HeuristicController ai(content);
+    CHECK(session.save() == direct.save());
+    for (sim::Day day = 0; day < 5; ++day) {
+        session.stepOneDay();
+        tickDirect(direct, ai, {});
+    }
+    CHECK(session.save() == direct.save());
+
+    SECTION("an order queued and withdrawn leaves the bytes as they were") {
+        session.submit(sim::StartResearch{{}, sim::TechId(0)});
+        CHECK(session.save() != direct.save());
+        session.cancelAll();
+        CHECK(session.save() == direct.save());
+    }
+    SECTION("a session that is not to be changed can still be saved") {
+        const game::Session& fixed = session;
+        CHECK(fixed.save() == direct.save());
+    }
+}
+
+TEST_CASE("Committed sums what the pending orders will cost at today's quotes",
+          "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, soloSetup());
+    session.setAutoPause(neverPause());
+    CHECK(session.committed() == sim::Money::zero());
+    CHECK(session.pendingBorrowed() == sim::Money::zero());
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    const sim::PlotView& plotView = session.view().plots[plot.index()];
+    const sim::Money ask = plotView.askPrice;
+    const sim::Money capex = plotView.mineCapexQuote;
+    REQUIRE(capex > sim::Money::zero());
+
+    SECTION("each kind of order that costs money") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        CHECK(session.committed() == content.balance.surveyCost);
+        session.submit(sim::BidOnPlot{{}, plot, ask + sim::Money::fromUnits(7)});
+        CHECK(session.committed() == content.balance.surveyCost + ask + sim::Money::fromUnits(7));
+        session.submit(sim::BuildMine{{}, plot});
+        session.submit(sim::StartResearch{{}, sim::TechId(1)});
+        const sim::Money expected = content.balance.surveyCost + ask + sim::Money::fromUnits(7) +
+                                    capex + content.techs[1].cost;
+        CHECK(session.committed() == expected);
+        CHECK(session.pendingBorrowed() == sim::Money::zero());
+
+        // Cancelling takes the order's cost back out.
+        CHECK(session.cancel(session.pendingOrders()[3].id));
+        CHECK(session.committed() == expected - content.techs[1].cost);
+        session.cancelAll();
+        CHECK(session.committed() == sim::Money::zero());
+    }
+    SECTION("loans are counted as borrowed, repayments as committed") {
+        session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(1'000'000)});
+        session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(250'000)});
+        CHECK(session.pendingBorrowed() == sim::Money::fromUnits(1'250'000));
+        CHECK(session.committed() == sim::Money::zero());
+        session.stepOneDay();
+        CHECK(session.pendingBorrowed() == sim::Money::zero());  // given: now it is cash
+        REQUIRE(session.view().loans.size() == 2);
+
+        session.submit(
+            sim::RepayLoan{{}, session.view().loans[0].id, sim::Money::fromUnits(300'000)});
+        session.submit(sim::RepayLoan{{}, session.view().loans[1].id, sim::Money::fromUnits(50)});
+        CHECK(session.committed() == sim::Money::fromUnits(300'050));
+        CHECK(session.pendingBorrowed() == sim::Money::zero());
+    }
+    SECTION("orders that cost nothing up front count toward neither figure") {
+        session.submit(sim::SellOre{{}, sim::ResourceId(0), 500});
+        session.submit(sim::SetMineState{{}, sim::MineId(0), 0});
+        sim::SetSellPolicy policy;
+        policy.resource = sim::ResourceId(0);
+        policy.enabled = 1;
+        policy.floorPrice = sim::Money::fromUnits(90);
+        session.submit(policy);
+        session.submit(sim::SetCoverCosts{{}, 1});
+        CHECK(session.pendingOrders().size() == 4);
+        CHECK(session.committed() == sim::Money::zero());
+        CHECK(session.pendingBorrowed() == sim::Money::zero());
+    }
+    SECTION("orders the sim will turn away are still listed and cost nothing known") {
+        // The session never rejects (R-001): it lists them and lets the sim rule.
+        session.submit(sim::BuildMine{{}, sim::PlotId(9'999)});
+        session.submit(sim::StartResearch{{}, sim::TechId(9'999)});
+        CHECK(session.pendingOrders().size() == 2);
+        CHECK(session.committed() == sim::Money::zero());
+        session.stepOneDay();
+        CHECK(countKind(session, sim::NoticeKind::CommandRejected) == 2);
+    }
+    SECTION("a survey or a bid on a plot that does not exist costs nothing") {
+        const sim::CommissionSurvey survey{{}, sim::PlotId(9'999)};
+        const sim::BidOnPlot bid{{}, sim::PlotId(9'999), ask};
+        CHECK(session.orderCost(survey) == sim::Money::zero());
+        CHECK(session.orderCost(bid) == sim::Money::zero());
+        CHECK(session.orderCost(sim::CommissionSurvey{}) == sim::Money::zero());  // no plot named
+        CHECK(session.orderCost(sim::BidOnPlot{{}, sim::PlotId(), ask}) == sim::Money::zero());
+        // The same orders on a plot that does exist still cost what they did.
+        CHECK(session.orderCost(sim::CommissionSurvey{{}, plot}) == content.balance.surveyCost);
+        CHECK(session.orderCost(sim::BidOnPlot{{}, plot, ask}) == ask);
+
+        session.submit(survey);
+        session.submit(bid);
+        CHECK(session.pendingOrders().size() == 2);  // listed all the same (R-001)
+        CHECK(session.committed() == sim::Money::zero());
+        session.stepOneDay();
+        CHECK(countKind(session, sim::NoticeKind::CommandRejected) == 2);
+    }
+    SECTION("raising a standing bid commits only the difference") {
+        session.submit(sim::BidOnPlot{{}, plot, ask});
+        session.stepOneDay();
+        REQUIRE(session.view().reservedCash == ask);  // the standing bid is reserved already
+        session.submit(sim::BidOnPlot{{}, plot, ask + sim::Money::fromUnits(40'000)});
+        CHECK(session.committed() == sim::Money::fromUnits(40'000));
+        session.stepOneDay();
+        CHECK(session.view().reservedCash == ask + sim::Money::fromUnits(40'000));
+        CHECK(countKind(session, sim::NoticeKind::CommandRejected) == 0);
+    }
+}
+
+TEST_CASE("Pending sums saturate at the largest amount instead of stopping the game",
+          "[session][pending]") {
+    // These figures are for display (R-001): an absurd order is the sim's to
+    // turn away on the next tick, and must not stop the client before then.
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, soloSetup());
+    session.setAutoPause(neverPause());
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    const sim::Money largest = sim::Money::fromCents(std::numeric_limits<std::int64_t>::max());
+    const sim::Money lowest = sim::Money::fromCents(std::numeric_limits<std::int64_t>::min());
+    // The most game::parseMoney accepts, so the most a player can type.
+    sim::Money typed;
+    REQUIRE(game::parseMoney("1,000,000,000,000,000", typed));
+    REQUIRE(typed == sim::Money::fromCents(sim::kMaxCashCents));
+    REQUIRE_FALSE(game::parseMoney("1,000,000,000,000,000.01", typed));
+
+    SECTION("two maximal bids") {
+        session.submit(sim::BidOnPlot{{}, plot, largest});
+        session.submit(sim::BidOnPlot{{}, plot, largest});
+        CHECK(session.committed() == largest);
+    }
+    SECTION("a maximal bid on top of an ordinary order") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.submit(sim::BidOnPlot{{}, plot, largest});
+        CHECK(session.committed() == largest);
+    }
+    SECTION("two maximal loans") {
+        session.submit(sim::TakeLoan{{}, largest});
+        session.submit(sim::TakeLoan{{}, largest});
+        CHECK(session.pendingBorrowed() == largest);
+        CHECK(session.committed() == sim::Money::zero());
+    }
+    SECTION("a maximal repayment") {
+        const sim::RepayLoan repay{{}, sim::LoanId(0), largest};
+        CHECK(session.orderCost(repay) == largest);
+        session.submit(repay);
+        CHECK(session.committed() == largest);
+        session.submit(sim::CommissionSurvey{{}, plot});
+        CHECK(session.committed() == largest);
+        session.submit(repay);
+        CHECK(session.committed() == largest);
+    }
+    SECTION("as many of the largest typed amounts as it takes") {
+        // No single typed amount overflows, and two do not either; a long
+        // enough queue of them does.
+        for (int i = 0; i < 100; ++i) {
+            session.submit(sim::TakeLoan{{}, typed});
+            session.submit(sim::BidOnPlot{{}, plot, typed});
+            session.submit(sim::RepayLoan{{}, sim::LoanId(0), typed});
+        }
+        CHECK(session.pendingBorrowed() == largest);
+        CHECK(session.committed() == largest);
+    }
+    SECTION("cancelling brings a saturated sum back down") {
+        session.submit(sim::TakeLoan{{}, largest});
+        session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(250'000)});
+        REQUIRE(session.pendingBorrowed() == largest);
+        CHECK(session.cancel(session.pendingOrders()[0].id));
+        CHECK(session.pendingBorrowed() == sim::Money::fromUnits(250'000));
+    }
+    SECTION("zero and negative amounts cost nothing") {
+        for (const sim::Money amount :
+             {sim::Money::zero(), sim::Money::fromCents(-1), -typed, -largest, lowest}) {
+            CHECK(session.orderCost(sim::BidOnPlot{{}, plot, amount}) == sim::Money::zero());
+            CHECK(session.orderCost(sim::RepayLoan{{}, sim::LoanId(0), amount}) ==
+                  sim::Money::zero());
+            session.submit(sim::BidOnPlot{{}, plot, amount});
+            session.submit(sim::RepayLoan{{}, sim::LoanId(0), amount});
+            session.submit(sim::TakeLoan{{}, amount});
+        }
+        CHECK(session.committed() == sim::Money::zero());
+        CHECK(session.pendingBorrowed() == sim::Money::zero());
+    }
+    SECTION("a negative raise of a standing bid costs nothing") {
+        const sim::Money ask = session.view().plots[plot.index()].askPrice;
+        session.submit(sim::BidOnPlot{{}, plot, ask});
+        session.stepOneDay();
+        REQUIRE(session.view().reservedCash == ask);
+        // Less than the standing bid by more than a Money can hold.
+        for (const sim::Money amount : {sim::Money::zero(), -largest, lowest}) {
+            CHECK(session.orderCost(sim::BidOnPlot{{}, plot, amount}) == sim::Money::zero());
+            session.submit(sim::BidOnPlot{{}, plot, amount});
+        }
+        CHECK(session.committed() == sim::Money::zero());
+        // A maximal raise is the difference, as any raise is.
+        CHECK(session.orderCost(sim::BidOnPlot{{}, plot, largest}) == largest - ask);
+    }
+}
+
+TEST_CASE("The trace records an order when it is given to the sim, not when it is queued",
+          "[session][pending]") {
+    const sim::Content content = test::makeContent();
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 1, test::setup());
+    session.setTrace(&trace);
+    session.setAutoPause(neverPause());
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    session.stepOneDay();
+    session.stepOneDay();  // day 2, so the record's day is not the default
+    out.str("");
+
+    SECTION("queued, then given on the tick with the day it was ordered on") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        CHECK(countText(out.str(), kQueuedRecord) == 1);
+        CHECK(countText(out.str(), kCommandRecord) == 0);
+        CHECK(out.str().find("\"day\":2") != std::string::npos);
+
+        session.stepOneDay();
+        const std::string text = out.str();
+        const std::vector<game::TraceRecord> given = commandRecords(text);
+        REQUIRE(given.size() == 1);
+        CHECK(given[0].day == 2);  // the day it was ordered on, as before
+        REQUIRE(given[0].command.has_value());
+        const auto* survey = std::get_if<sim::CommissionSurvey>(&*given[0].command);
+        REQUIRE(survey != nullptr);
+        CHECK(survey->plot == plot);
+        CHECK(survey->company == game::Session::kPlayer);
+        // Written before the tick it takes effect in, so a replay submits it
+        // ahead of that day's record.
+        CHECK(text.find(kCommandRecord) < text.find("\"t\":\"day\""));
+        CHECK(countText(text, kQueuedRecord) == 1);
+        session.stepOneDay();
+        CHECK(commandRecords(out.str()).size() == 1);  // given once
+    }
+    SECTION("a cancelled order is never a command record") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.submit(sim::StartResearch{{}, sim::TechId(0)});
+        CHECK(session.cancel(session.pendingOrders()[0].id));
+        CHECK(countText(out.str(), kQueuedRecord) == 2);
+        CHECK(countText(out.str(), kCancelledRecord) == 1);
+        CHECK_FALSE(session.cancel(9'999));  // nothing cancelled, nothing recorded
+        CHECK(countText(out.str(), kCancelledRecord) == 1);
+
+        session.stepOneDay();
+        const std::vector<game::TraceRecord> given = commandRecords(out.str());
+        REQUIRE(given.size() == 1);
+        CHECK(std::holds_alternative<sim::StartResearch>(*given[0].command));
+    }
+    SECTION("cancel all records each order it withdraws") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.submit(sim::TakeLoan{{}, content.balance.loanMinPrincipal});
+        session.cancelAll();
+        CHECK(countText(out.str(), kCancelledRecord) == 2);
+        session.stepOneDay();
+        CHECK(commandRecords(out.str()).empty());
+    }
+    SECTION("without a trace, queueing and cancelling still work") {
+        session.setTrace(nullptr);
+        session.submit(sim::CommissionSurvey{{}, plot});
+        CHECK(session.cancel(session.pendingOrders()[0].id));
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.stepOneDay();
+        CHECK(session.view().surveys.size() == 1);
+        CHECK(out.str().empty());
+    }
+}
+
+TEST_CASE("A bid given on the day its auction closes still counts as the player's stake",
+          "[session][pending]") {
+    sim::Content content = test::makeContent();
+    test::addStrings(content);
+    game::Session session(content, 1, soloSetup());
+    session.setAutoPause(neverPause());
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    REQUIRE(session.view().plots[plot.index()].auction.has_value());
+    const sim::Day closes = session.view().plots[plot.index()].auction->closesOnDay;
+    while (session.day() < closes) {
+        session.stepOneDay();
+    }
+    REQUIRE(session.view().plots[plot.index()].auction.has_value());
+    REQUIRE(session.view().surveys.empty());
+
+    SECTION("no bid: the relist is not news") {
+        session.stepOneDay();
+        CHECK(countKind(session, sim::NoticeKind::PlotRelisted) == 0);
+    }
+    SECTION("a bid the sim turns away on the closing day makes the relist news") {
+        // The bid is handed over and the auction closes in the same tick, so
+        // the view never shows it: the session's own note is the only stake.
+        const sim::Money ask = session.view().plots[plot.index()].askPrice;
+        session.submit(sim::BidOnPlot{{}, plot, ask - sim::Money::fromUnits(1)});
+        session.stepOneDay();
+        CHECK(countKind(session, sim::NoticeKind::CommandRejected) == 1);
+        REQUIRE(countKind(session, sim::NoticeKind::PlotRelisted) >= 1);
+        for (const game::LogEntry& entry : session.log()) {
+            if (entry.notice.kind == sim::NoticeKind::PlotRelisted) {
+                CHECK(entry.notice.plot == plot);
+            }
+        }
+    }
 }

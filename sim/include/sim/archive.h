@@ -5,11 +5,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <new>
 #include <optional>
 #include <span>
 #include <string>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace sim {
@@ -33,6 +35,11 @@ template <class T>
 struct IsOptional : std::false_type {};
 template <class T>
 struct IsOptional<std::optional<T>> : std::true_type {};
+
+template <class T>
+struct IsVariant : std::false_type {};
+template <class... Ts>
+struct IsVariant<std::variant<Ts...>> : std::true_type {};
 
 template <class Derived>
 class ArchiveBase {
@@ -94,11 +101,16 @@ private:
 
     // Smallest serialized size of one T, used to bound allocations when
     // reading. For aggregates it is measured once by serializing a default
-    // constructed value, whose nested containers are empty.
+    // constructed value, whose nested containers are empty. A variant's
+    // default is its first alternative, which need not be its smallest, so
+    // variants take the smallest alternative plus the tag.
     template <class T>
     static std::size_t minSerializedSize() {
         if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
             return sizeof(T);
+        } else if constexpr (IsVariant<T>::value) {
+            static const std::size_t kSize = minVariantSize(std::type_identity<T>{});
+            return kSize;
         } else {
             static const std::size_t kSize = serializedSizeOfDefault<T>();
             return kSize;
@@ -107,6 +119,18 @@ private:
 
     template <class T>
     static std::size_t serializedSizeOfDefault();
+
+    // The tag is whatever the variant's serialize() writes ahead of the
+    // alternative; it is measured on the default (first) alternative, so this
+    // header does not need to know its width.
+    template <class... Alternatives>
+    static std::size_t minVariantSize(std::type_identity<std::variant<Alternatives...>> /*tag*/) {
+        using Variant = std::variant<Alternatives...>;
+        using First = std::variant_alternative_t<0, Variant>;
+        const std::size_t tagSize =
+            serializedSizeOfDefault<Variant>() - serializedSizeOfDefault<First>();
+        return tagSize + std::min({minSerializedSize<Alternatives>()...});
+    }
 
     template <class T>
     void vector(std::vector<T>& values) {

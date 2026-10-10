@@ -1,5 +1,6 @@
 #include "sim/archive.h"
 
+#include "sim/commands.h"
 #include "sim/fixed.h"
 #include "sim/hash.h"
 #include "sim/ids.h"
@@ -11,9 +12,11 @@
 #include "test_content.h"
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -56,6 +59,24 @@ Sample makeSample() {
     s.ledger = {sim::Money::fromUnits(1), sim::Money::fromUnits(-2)};
     s.kind = Kind::Beta;
     return s;
+}
+
+// One command of each alternative of sim::Command, in variant order, with
+// every field set away from its default so a round trip is observable.
+std::vector<sim::Command> queuedCommandOfEveryKind() {
+    const sim::CompanyId player(0);
+    return {
+        sim::BidOnPlot{player, sim::PlotId(3), sim::Money::fromUnits(900'000)},
+        sim::CommissionSurvey{player, sim::PlotId(4)},
+        sim::BuildMine{player, sim::PlotId(5)},
+        sim::SetMineState{player, sim::MineId(0), 0},
+        sim::SellOre{player, sim::ResourceId(1), 250},
+        sim::TakeLoan{player, sim::Money::fromUnits(500'000)},
+        sim::RepayLoan{player, sim::LoanId(0), sim::Money::fromUnits(1'000)},
+        sim::StartResearch{player, sim::TechId(0)},
+        sim::SetSellPolicy{player, sim::ResourceId(0), 1, 100, sim::Money::fromUnits(55)},
+        sim::SetCoverCosts{player, 1},
+    };
 }
 
 }  // namespace
@@ -161,6 +182,60 @@ TEST_CASE("Simulation save and load reproduce the state exactly", "[archive][sav
     original.tick(100);
     restored.tick(100);
     CHECK(restored.stateHash() == original.stateHash());
+}
+
+TEST_CASE("A save with one queued command of any kind loads", "[archive][save]") {
+    const sim::Content content = test::makeContent();
+    const std::vector<sim::Command> kinds = queuedCommandOfEveryKind();
+    REQUIRE(kinds.size() == std::variant_size_v<sim::Command>);
+
+    for (std::size_t kind = 0; kind < kinds.size(); ++kind) {
+        CAPTURE(kind);
+        REQUIRE(kinds[kind].index() == kind);
+
+        sim::Simulation original(content, 9, test::setup());
+        original.tick(40);
+        original.submit(kinds[kind]);
+        const std::vector<std::uint8_t> bytes = original.save();
+
+        sim::Simulation restored(content, 1, test::setup());
+        const bool loaded = restored.load(bytes);
+        CHECK(loaded);
+        if (!loaded) {
+            continue;
+        }
+        CHECK(restored.stateHash() == original.stateHash());
+        // The state hash covers the world only, so compare the queue itself.
+        CHECK(sim::toBytes(restored.pendingCommands()) == sim::toBytes(original.pendingCommands()));
+        CHECK(restored.save() == bytes);
+
+        original.tick(1);
+        restored.tick(1);
+        CHECK(restored.stateHash() == original.stateHash());
+    }
+}
+
+TEST_CASE("Command vectors are bounded by the smallest command", "[archive][save]") {
+    // The smallest command is SetCoverCosts: a one-byte tag, a four-byte
+    // company id and a one-byte flag.
+    const std::vector<sim::Command> smallest{sim::SetCoverCosts{sim::CompanyId(0), 1}};
+    const std::vector<std::uint8_t> one = sim::toBytes(smallest);
+    REQUIRE(one.size() == 4 + 6);
+
+    // A prefix of 2 with room for one smallest command and one byte short of a
+    // second must fail before anything is decoded or allocated.
+    std::vector<std::uint8_t> bytes{2, 0, 0, 0};
+    bytes.resize(4 + 11, 0);
+    std::vector<sim::Command> commands;
+    CHECK_FALSE(sim::fromBytes(bytes, commands));
+    CHECK(commands.empty());
+
+    // Two of the smallest fit exactly and decode.
+    const std::vector<sim::Command> pair{sim::SetCoverCosts{sim::CompanyId(0), 1},
+                                         sim::SetCoverCosts{sim::CompanyId(1), 0}};
+    std::vector<sim::Command> decoded;
+    REQUIRE(sim::fromBytes(sim::toBytes(pair), decoded));
+    CHECK(sim::toBytes(decoded) == sim::toBytes(pair));
 }
 
 TEST_CASE("Invalid bool bytes and even RNG increments are rejected", "[archive][save]") {

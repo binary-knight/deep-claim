@@ -12,7 +12,7 @@
         <div class="stat company"><span class="label">Company</span><span class="value">{{company}}</span></div>
         <div class="stat"><span class="label">Date</span><span class="value">{{day}}</span></div>
         <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
-        <div class="stat"><span class="label">Spendable</span><span class="value">{{spendable}}</span></div>
+        <div class="stat"><span class="label">Available</span><span class="value">{{available}}</span></div>
         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span></div>
         <div class="stat"><span class="label">Cash, 90 days</span><price-chart class="spark" series="cash" days="90" mode="line"/></div>
         <div class="grow"></div>
@@ -22,12 +22,26 @@
             <button data-class-active="speed == 2" data-event-click="set_speed(2)">5x</button>
             <button data-class-active="speed == 3" data-event-click="set_speed(3)">20x</button>
             <button data-event-click="step"><span class="long">Step day</span><span class="short">Step</span></button>
+            <!-- Orders wait for the clock (spec 007): the count opens the list.
+                 It hangs under the buttons, out of the row, because the header
+                 has no width to spare once the company name is a long one. -->
+            <div class="waiting" data-if="has_pending" data-class-active="show_pending_list" data-event-click="toggle_pending_list">{{pending_line}}</div>
         </div>
         <div class="sys">
             <button data-class-active="show_pause_menu" data-event-click="toggle_pause_menu"><span class="long">Stops</span><span class="short">Stops</span></button>
             <button data-event-click="save">Save</button>
             <button data-event-click="load">Load</button>
             <button data-event-click="new_game"><span class="long">New game</span><span class="short">New</span></button>
+        </div>
+        <div id="pendinglist" data-if="show_pending_list && has_pending">
+            <span class="title">{{pending_line}}</span>
+            <div class="needs">
+                <div data-for="o : pending_orders" class="nrow">
+                    <span class="t"><span class="title">{{o.text}}</span></span>
+                    <span class="act"><span class="chip warn" data-if="o.not_covered">{{ui_not_covered}}</span><button class="sm" data-event-click="cancel(o.id)">{{ui_cancel}}</button></span>
+                </div>
+            </div>
+            <div class="foot"><button class="sm" data-event-click="cancel_all">{{ui_cancel_all}}</button></div>
         </div>
         <div id="pausemenu" data-if="show_pause_menu">
             <span class="title">{{ui_pause_menu_title}}</span>
@@ -41,6 +55,7 @@
         <span class="item"><span class="k">Solvency</span><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span> <span class="muted">{{solvency_sub}}</span></span>
         <span class="item"><span class="k">Next auction</span><span class="num">{{next_auction}}</span></span>
         <span class="item"><span class="k">Mines</span><span class="chip good" data-if="mines_operating != ''">{{mines_operating}}</span><span class="chip warn" data-if="mines_building != ''">{{mines_building}}</span><span class="chip muted" data-if="mines_mothballed != ''">{{mines_mothballed}}</span><span class="chip muted" data-if="mines_depleted != ''">{{mines_depleted}}</span><span class="muted" data-if="mines_operating == '' && mines_building == '' && mines_mothballed == '' && mines_depleted == ''">none</span></span>
+        <span class="item" data-if="has_committed"><span class="num">{{committed}}</span><span class="chip warn" data-if="pending_shortfall">{{ui_not_covered}}</span></span>
         <span class="brk"></span>
         <span class="item"><span class="k">Research</span><span class="num">{{research_strip}}</span></span>
         <span class="item" data-if="has_world"><span class="k">World</span><span class="chip warn">{{world_event}}</span> <span class="num">{{world_sub}}</span></span>
@@ -67,7 +82,7 @@
                             <span class="n">{{n.number}}</span>
                             <span class="t"><span class="title">{{n.title}}</span><span class="sub">{{n.sub}}</span></span>
                             <span class="days">{{n.days}}</span>
-                            <span class="act"><button class="sm" data-if="n.action > 0" data-class-primary="n.action == 1" data-event-click="need_action(n.action, n.target)">{{n.act_label}}</button></span>
+                            <span class="act"><button class="sm" data-if="n.action > 0 && !n.order.pending" data-class-primary="n.action == 1" data-event-click="need_action(n.action, n.target)">{{n.act_label}}</button><span class="chip accent" data-if="n.order.pending">{{n.order.text}}</span><button class="sm" data-if="n.order.pending" data-event-click="cancel(n.order.id)">{{ui_cancel}}</button></span>
                         </div>
                         <div class="none" data-if="needs_none != ''">{{needs_none}}</div>
                     </div>
@@ -77,14 +92,14 @@
                         <div class="sheet">
                             <h2><span class="idx">02</span>Plots and mines</h2>
                             <table>
-                                <tr><th class="w-plot">Plot</th><th class="w-region2">Region</th><th class="w-mine">Mine</th><th>Output</th><th>Remaining</th><th class="act w-act"></th></tr>
+                                <tr><th class="w-plot">Plot</th><th class="w-region2">Region</th><th class="w-mine">Mine</th><th>Output</th><th>Remaining</th><th class="act w-act" data-class-wide="owned_orders"></th></tr>
                                 <tr data-for="o : owned" class="row" data-event-click="select_plot(o.index)">
                                     <td class="name num">{{o.name}}</td>
                                     <td class="nw">{{o.region}} <span class="muted num">{{o.area}}</span></td>
                                     <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
                                     <td class="figure wrap">{{o.output}}</td>
                                     <td class="figure wrap">{{o.remaining}}</td>
-                                    <td class="act"><button class="sm" data-if="o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button></td>
+                                    <td class="act"><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button><span class="chip accent" data-if="o.mine_order.pending">{{o.mine_order.text}}</span><button class="sm" data-if="o.mine_order.pending" data-event-click="cancel(o.mine_order.id)">{{ui_cancel}}</button><span class="chip accent" data-if="o.build_order.pending">{{o.build_order.text}}</span><button class="sm" data-if="o.build_order.pending" data-event-click="cancel(o.build_order.id)">{{ui_cancel}}</button></td>
                                 </tr>
                             </table>
                             <div class="rivalline">{{rival_line}}</div>
@@ -107,7 +122,7 @@
                     <h2><span class="idx">04</span>Finance</h2>
                     <div class="finrow">
                         <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
-                        <div class="stat"><span class="label">Spendable</span><span class="value">{{spendable}}</span></div>
+                        <div class="stat"><span class="label">Available</span><span class="value">{{available}}</span></div>
                         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span><span class="sub">{{capacity_sub}}</span></div>
                         <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub">{{storage_sub}}</span></div>
                         <div class="stat"><span class="label">This month</span><span class="value" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span><span class="sub">{{instalment_sub}}</span></div>
@@ -163,14 +178,14 @@
                         <div class="sheet">
                             <h2><span class="idx">02</span>Owned</h2>
                             <table>
-                                <tr><th class="w-plot">Plot</th><th class="w-region">Region</th><th class="w-mine">Mine</th><th>Output</th><th>Remaining</th><th class="act w-act"></th></tr>
+                                <tr><th class="w-plot">Plot</th><th class="w-region">Region</th><th class="w-mine">Mine</th><th>Output</th><th>Remaining</th><th class="act w-act" data-class-wide="owned_orders"></th></tr>
                                 <tr data-for="o : owned" class="row" data-class-sel="o.index == selected_plot" data-event-click="select_plot(o.index)">
                                     <td class="name num">{{o.name}}</td>
                                     <td class="nw">{{o.region}}<span class="sub num">{{o.area}}</span></td>
                                     <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
                                     <td class="figure wrap">{{o.output}}</td>
                                     <td class="figure wrap">{{o.remaining}}</td>
-                                    <td class="act"><button class="sm" data-if="o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button></td>
+                                    <td class="act"><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button><span class="chip accent" data-if="o.mine_order.pending">{{o.mine_order.text}}</span><button class="sm" data-if="o.mine_order.pending" data-event-click="cancel(o.mine_order.id)">{{ui_cancel}}</button><span class="chip accent" data-if="o.build_order.pending">{{o.build_order.text}}</span><button class="sm" data-if="o.build_order.pending" data-event-click="cancel(o.build_order.id)">{{ui_cancel}}</button></td>
                                 </tr>
                             </table>
                         </div>
@@ -202,15 +217,25 @@
                                 <div class="notice" data-if="panel.notice != ''" data-class-danger="panel.notice_class == 'danger'"><span class="ic">!</span><span class="msg">{{panel.notice}}</span></div>
                                 <div class="notice" data-if="panel.contest != ''"><span class="ic">!</span><span class="msg">{{panel.contest}}</span></div>
                                 <div class="notice" data-if="panel.survey_note != ''"><span class="ic">!</span><span class="msg">{{panel.survey_note}}</span></div>
+                                <!-- Why the Survey button below is disabled: the money
+                                     available does not cover the fee. Not shown while a
+                                     survey order waits here; its own fee is counted already. -->
+                                <div class="notice" data-if="!panel.survey_order.pending && panel.can_survey && !panel.can_afford_survey"><span class="ic">!</span><span class="msg">{{panel.survey_blocked}}</span></div>
                                 <div class="actions">
-                                    <div class="field" data-if="panel.listed"><label>Bid</label><input class="text" type="text" data-value="bid_input"/></div>
-                                    <button class="primary" data-if="panel.listed" data-event-click="bid(panel.index)">Place bid</button>
-                                    <button data-if="panel.can_survey" data-event-click="survey(panel.index)">{{panel.survey_label}}</button>
-                                    <button class="disabled" data-if="!panel.can_survey">{{panel.survey_label}}</button>
-                                    <button class="primary" data-if="panel.can_build && panel.can_afford_mine" data-event-click="build(panel.index)">{{panel.build_label}}</button>
-                                    <button class="disabled" data-if="panel.can_build && !panel.can_afford_mine">{{panel.build_blocked}}</button>
-                                    <button data-if="panel.can_toggle_mine && panel.mine_operating" data-event-click="toggle_mine(panel.mine_index)">Mothball</button>
-                                    <button data-if="panel.can_toggle_mine && !panel.mine_operating" data-event-click="toggle_mine(panel.mine_index)">Reopen</button>
+                                    <!-- An order waiting for the clock stands in for its
+                                         control: the chip, and Cancel to take it back (spec 007). -->
+                                    <div class="field" data-if="panel.listed && !panel.bid_order.pending"><label>Bid</label><input class="text" type="text" data-value="bid_input"/></div>
+                                    <button class="primary" data-if="panel.listed && !panel.bid_order.pending" data-event-click="bid(panel.index)">Place bid</button>
+                                    <span class="hrow" data-if="panel.bid_order.pending"><span class="chip accent">{{panel.bid_order.text}}</span><span class="chip warn" data-if="panel.bid_order.not_covered">{{ui_not_covered}}</span><button data-event-click="cancel(panel.bid_order.id)">{{ui_cancel}}</button></span>
+                                    <button data-if="!panel.survey_order.pending && panel.can_survey && panel.can_afford_survey" data-event-click="survey(panel.index)">{{panel.survey_label}}</button>
+                                    <button class="disabled" data-if="!panel.survey_order.pending && (!panel.can_survey || !panel.can_afford_survey)">{{panel.survey_label}}</button>
+                                    <span class="hrow" data-if="panel.survey_order.pending"><span class="chip accent">{{panel.survey_order.text}}</span><span class="chip warn" data-if="panel.survey_order.not_covered">{{ui_not_covered}}</span><button data-event-click="cancel(panel.survey_order.id)">{{ui_cancel}}</button></span>
+                                    <button class="primary" data-if="!panel.build_order.pending && panel.can_build && panel.can_afford_mine" data-event-click="build(panel.index)">{{panel.build_label}}</button>
+                                    <button class="disabled" data-if="!panel.build_order.pending && panel.can_build && !panel.can_afford_mine">{{panel.build_blocked}}</button>
+                                    <span class="hrow" data-if="panel.build_order.pending"><span class="chip accent">{{panel.build_order.text}}</span><span class="chip warn" data-if="panel.build_order.not_covered">{{ui_not_covered}}</span><button data-event-click="cancel(panel.build_order.id)">{{ui_cancel}}</button></span>
+                                    <button data-if="!panel.mine_order.pending && panel.can_toggle_mine && panel.mine_operating" data-event-click="toggle_mine(panel.mine_index)">Mothball</button>
+                                    <button data-if="!panel.mine_order.pending && panel.can_toggle_mine && !panel.mine_operating" data-event-click="toggle_mine(panel.mine_index)">Reopen</button>
+                                    <span class="hrow" data-if="panel.mine_order.pending"><span class="chip accent">{{panel.mine_order.text}}</span><button data-event-click="cancel(panel.mine_order.id)">{{ui_cancel}}</button></span>
                                 </div>
                             </div>
                         </div>
@@ -241,9 +266,16 @@
                                 <span class="hrow" data-if="!r.locked && r.has_stock"><input class="text" type="text" data-value="sell_input" style="width: 90dp;"/><button class="sm" data-event-click="sell(r.index)">Sell</button><button class="sm" data-event-click="sell_all(r.index)">Sell all</button></span>
                                 <span class="muted" data-if="!r.locked && !r.has_stock">no stock</span>
                             </td>
-                            <td><span class="pill accent" data-if="r.policy_on">auto-sell</span><span class="pill" data-if="!r.policy_on">manual</span><span class="sub">{{r.policy}}</span><span class="sub">{{r.auto_sold}}</span></td>
+                            <td><span class="pill accent" data-if="r.policy_on">auto-sell</span><span class="pill" data-if="!r.policy_on">manual</span> <span class="pill accent" data-if="r.policy_order.pending">{{r.policy_order.text}}</span><span class="sub">{{r.policy}}</span><span class="sub">{{r.auto_sold}}</span></td>
                         </tr>
                     </table>
+                    <!-- Manual sales waiting for the clock. -->
+                    <div class="needs" data-if="market_orders.size > 0">
+                        <div data-for="o : market_orders" class="nrow">
+                            <span class="t"><span class="chip accent">{{o.text}}</span></span>
+                            <span class="act"><button class="sm" data-event-click="cancel(o.id)">{{ui_cancel}}</button></span>
+                        </div>
+                    </div>
                 </div>
                 <div class="sheet">
                     <h2><span class="idx">02</span>{{standing_title}}</h2>
@@ -253,6 +285,7 @@
                         <div class="field"><label>Reserve</label><input class="text" type="text" data-value="policy_reserve_input" style="width: 90dp;"/></div>
                         <div class="field"><label>Floor</label><input class="text" type="text" data-value="policy_floor_input" style="width: 90dp;"/></div>
                         <button class="sm primary" data-event-click="apply_policy">Apply</button>
+                        <span class="hrow" data-if="policy_order.pending"><span class="chip accent">{{policy_order.text}}</span><button class="sm" data-event-click="cancel(policy_order.id)">{{ui_cancel}}</button></span>
                     </div>
                     <span class="sub">{{ui_policy_hint}}</span>
                 </div>
@@ -292,7 +325,7 @@
                             <td class="n">{{t.cost}}</td>
                             <td class="n">{{t.days}}</td>
                             <td>{{t.effects}}</td>
-                            <td class="act"><button class="sm primary" data-if="t.can_start" data-event-click="research(t.index)">Start</button><span class="muted num" data-if="t.researching">{{t.until}}</span><span class="sub" data-if="t.blocked != ''">{{t.blocked}}</span></td>
+                            <td class="act"><button class="sm primary" data-if="t.can_start && !t.order.pending" data-event-click="research(t.index)">Start</button><span class="chip accent" data-if="t.order.pending">{{t.order.text}}</span><button class="sm" data-if="t.order.pending" data-event-click="cancel(t.order.id)">{{ui_cancel}}</button><span class="muted num" data-if="t.researching">{{t.until}}</span><span class="sub" data-if="t.blocked != ''">{{t.blocked}}</span></td>
                         </tr>
                     </table>
                 </div>
@@ -305,7 +338,7 @@
                     <h2><span class="idx">01</span>Finance</h2>
                     <div class="finrow">
                         <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
-                        <div class="stat"><span class="label">Spendable</span><span class="value">{{spendable}}</span></div>
+                        <div class="stat"><span class="label">Available</span><span class="value">{{available}}</span></div>
                         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span><span class="sub">{{capacity_sub}}</span></div>
                         <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub">{{storage_sub}}</span></div>
                         <div class="stat"><span class="label">This month</span><span class="value" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span><span class="sub">{{instalment_sub}}</span></div>
@@ -328,6 +361,13 @@
                                 </tr>
                             </table>
                             <span class="sub" data-if="loans.size == 0">No loans outstanding.</span>
+                            <!-- Loans and repayments waiting for the clock. -->
+                            <div class="needs" data-if="finance_orders.size > 0">
+                                <div data-for="o : finance_orders" class="nrow">
+                                    <span class="t"><span class="chip accent">{{o.text}}</span></span>
+                                    <span class="act"><span class="chip warn" data-if="o.not_covered">{{ui_not_covered}}</span><button class="sm" data-event-click="cancel(o.id)">{{ui_cancel}}</button></span>
+                                </div>
+                            </div>
                             <span class="sub">{{loan_rule}}</span>
                         </div>
                         <div class="sheet">
@@ -346,6 +386,7 @@
                         <div class="sheet">
                             <h2><span class="idx">04</span>Cover costs</h2>
                             <div class="check" data-class-on="cover_costs" data-event-click="toggle_cover_costs"><span class="box"></span>{{cover_check}}</div>
+                            <div class="hrow" data-if="cover_order.pending"><span class="chip accent">{{cover_order.text}}</span><button class="sm" data-event-click="cancel(cover_order.id)">{{ui_cancel}}</button></div>
                             <span class="sub">{{cover_explain}}</span>
                             <div class="kv" style="margin-top: 8dp;"><span class="k">Last month</span><span class="v"><span class="line wrapok">{{cover_last}}</span></span></div>
                         </div>
