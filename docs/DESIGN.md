@@ -1044,12 +1044,14 @@ column were never used for tuning):
 
 ## Markets that bite (spec 008)
 
-The spec is `spec/markets-that-bite.md`; its three decision records are
-`docs/adrs/F-2026-10-10-markets-that-bite-001` to `-003`. Two statements in
-those records did not survive the build and are corrected here, because
-accepted records are not edited: the golden hash did not move (see "Golden
-hash"), and the runner does not call the margin function (see "One margin
-function").
+The spec is `spec/markets-that-bite.md`; its decision records are
+`docs/adrs/F-2026-10-10-markets-that-bite-001` to `-004`. Statements in
+records 002 and 003 did not survive the build. Accepted records are not
+edited, so record 004 amends them: the runner does not call the margin
+function, the golden hash did not move, the 60-second ceiling became a
+180-second timeout, and "idled" means mothballed and then reopened. The
+detail is below. The review findings and their outcomes are in the spec
+under "Reviews".
 
 - **Why price never bit.** A mine cost 8,000 a day whatever it dug. At
   base output that is 22% of base price for iron (8,000 / 400 t / 90), 15%
@@ -1090,8 +1092,9 @@ function").
   `dailyMargin` is negative (or it has no earnings to show) and reopens a
   mothballed one when the margin reaches `reopen_margin` times
   `operatingOpex` less that cost.
-- **Correction to record 002: the runner has its own measure.** The
-  record says the runner calls the margin function each day. It does not.
+- **Correction to record 002 (now in record 004): the runner has its own
+  measure.** The record says the runner calls the margin function each
+  day. It does not.
   Its bite measure asks whether one mine at base output, with no research
   or event multiplier, would take less than the ore's cost at the day's
   price (`belowBaseBreakEven` in `sim_runner/main.cpp`): price times
@@ -1109,18 +1112,25 @@ function").
 - **The only new saved state** is two fields per mine: `lossDays`
   (uint32, consecutive days at a loss) and `lossAnnounced` (uint8),
   serialized after `lowWarnedSurvey`. A mine counts only while it is
-  operating, its owner is not bankrupt and it has output to price; a day at
-  break-even or better, or a day it does not count, sets both back to
-  zero. Margin and break-even are never stored, so nothing derived can go
-  stale in a save. `kSaveVersion` is still 1.
+  operating, its owner is not bankrupt and it has output to price. A day at
+  break-even or better sets `lossDays` back to zero. `lossAnnounced` is
+  cleared only by a profitable day or a day the mine does not count; a day
+  at exactly break-even leaves it set (changed after the Codex review,
+  finding 1). On load a save is refused when `lossAnnounced` is above 1,
+  or when `lossDays` is not zero on a mine that is neither operating nor
+  closed. Closed is allowed because the game itself writes a closed mine
+  with a count on the day its owner goes bankrupt. Margin and break-even
+  are never stored, so nothing derived can go stale in a save.
+  `kSaveVersion` is still 1.
 - **The losing-mine notice.** On the day `lossDays` is at or past
   `mine_loss_notice_days` (`balance.json`, shipped at 5) and the run has
   not been announced, the owner gets one private `MineLosingMoney` notice
   carrying the day's loss as a positive amount and the count of days, and
   `lossAnnounced` is set. "At or past", not "equal to", so a save that
   carries a longer run not yet announced is told on its next losing day
-  instead of never. Nothing more is said until the margin has been
-  non-negative and turned negative again. A mothballed mine never
+  instead of never. Nothing more is said until the mine has had a
+  profitable day, or has stopped operating, and has then run at a loss for
+  the set number of days again. A mothballed mine never
   triggers it. Because the counter runs one market update behind the
   figure on screen, the two can disagree for a day around zero; the run of
   consecutive days absorbs that.
@@ -1136,7 +1146,11 @@ function").
   pair to (0, 1000], each minimum strictly below its maximum: a ratio of
   10 keeps base price times ratio^elasticity inside int64 cents at the
   largest elasticity and price the loader allows, and 1/100 keeps the
-  exponent inside `fixedExp`'s range.
+  exponent inside `fixedExp`'s range. The ratio pair must also straddle
+  1: the minimum may not exceed 1 and the maximum may not fall below it
+  (added after review). Base price is the price at a ratio of 1, and the
+  AI clamps its supply discount between the minimum and 1, which a
+  minimum above 1 would turn into a premium.
 - **Content fingerprint.** The per-ore cost, the four clamps and
   `mine_loss_notice_days` are serialized with the content and so hashed;
   a test changes each in turn and shows the fingerprint moves and the
@@ -1162,8 +1176,14 @@ function").
   lowest and highest yearly mean price over base; per company, mine-days
   idled and cash at the end of year 10; and seeds with a bankruptcy in
   years 1 to 10 and in years 11 to 20, and seeds with an idled mine.
-  Idled means mothballed, whoever chose it and why; a seed has an idled
-  mine when one stood mothballed 30 days in a row.
+  Mine-days idled counts every mothballed day, whoever chose it and why.
+  A seed has an idled mine only when one stood mothballed 30 days or more
+  in a row and then went back to operating within the run
+  (`idle_reopen_spells` in each seed's row). A mine left mothballed,
+  because its extractable ore ran out or for any other reason, shows no
+  price decision and does not count. This is narrower than record 003's
+  "idled for at least 30 days" and was changed after the Codex review
+  (finding 4); record 004 holds the definition.
 - **The gates** (record 003) are on the sweep path only, are set for 50
   seeds over 20 years with one rival, and are evaluated only by a sweep
   that covers 20 years; a shorter one prints them as "not evaluated" and
@@ -1176,9 +1196,10 @@ function").
   sweep the whole-run `seeds_with_bankruptcy` check of spec 006 becomes
   reported only, because the years 1 to 10 gate takes its place. The gates
   of specs 005 and 006 still apply, including a median first operating
-  mine under day 250, which is stricter than this spec's 270. `--sanity`
-  belongs to single runs and is refused together with `--sweep`; a sweep
-  exits 3 on a failed gate without it.
+  mine under day 250, which is stricter than this spec's 270. A sweep
+  exits 3 on a failed gate. `--sanity` is accepted together with `--sweep`
+  and adds nothing, so the command the spec gives (AC-009) runs as
+  written; before the review round the runner refused the pair.
 - **The cash baseline.** `kBaselineCashY10` = 765,667,709: company 0's
   median cash at the end of year 10, in whole currency units, from
   `sim_runner --sweep 50 --years 20 --ai 1` (seeds 1 to 50, release build)
@@ -1197,8 +1218,9 @@ function").
   by sampling alone, so that run is judged by its output: every check
   must be printed, the four that judge each seed on its own must pass,
   and a sanitizer report fails it. `runner_bite_measures` (two seeds,
-  three years) checks that the summary carries the new measures and that
-  a short sweep reports the bite gates as not evaluated. This replaces the
+  three years) checks that the summary carries the new measures, that
+  each seed's row carries its idle-and-reopen spells, and that a short
+  sweep reports the bite gates as not evaluated. This replaces the
   ten-seed, eight-year `runner_sweep` of specs 005 and 006.
 - **The retune is data only.** No AI rule and no sim rule was added to
   pass a gate. The AI's valuation of a prospect now takes the dearest
@@ -1206,35 +1228,73 @@ function").
   `opex_reserve_days` of the dearest ore it can dig, because that is what
   the sim charges.
 
-Every value changed, with the reason. The break-even share is
-`mine_opex_per_day` / `base_output_tonnes_per_day` / `base_price`; a data
-test holds it to 0.5 to 0.7 for iron, copper and nickel and 0.4 to 0.6
-for lithium on the shipped files (the loader accepts any positive cost,
-so experiments with `--data` stay possible).
+Every value changed, with the reason and the sweep evidence behind it.
+The break-even share is `mine_opex_per_day` /
+`base_output_tonnes_per_day` / `base_price`; a data test holds it to 0.5
+to 0.7 for iron, copper and nickel and 0.4 to 0.6 for lithium on the
+shipped files (the loader accepts any positive cost, so experiments with
+`--data` stay possible).
 
-| File | Value | Old | New | Why |
-| --- | --- | --- | --- | --- |
-| resources | iron `elasticity` | 0.5 | 1.5 | a handful of mines must move the price |
-| resources | iron `base_demand_tonnes_per_day` | 1600 | 4000 | sized against the steeper response |
-| resources | iron `mine_opex_per_day` | 8000 (shared) | 18000 | break-even share 0.22 to 0.50 |
-| resources | copper `elasticity` | 0.7 | 1.5 | as iron |
-| resources | copper `base_demand_tonnes_per_day` | 200 | 540 | as iron |
-| resources | copper `mine_opex_per_day` | 8000 (shared) | 27000 | break-even share 0.15 to 0.50 |
-| resources | nickel `elasticity` | 0.8 | 1.5 | as iron |
-| resources | nickel `base_demand_tonnes_per_day` | 60 | 90 | as iron |
-| resources | nickel `mine_opex_per_day` | 8000 (shared) | 28600 | break-even share 0.18 to 0.65 |
-| resources | lithium `elasticity` | 1.0 | 2.0 | as iron; the late ore responds hardest |
-| resources | lithium `base_demand_tonnes_per_day` | 16 | 20 | as iron |
-| resources | lithium `mine_opex_per_day` | 8000 (shared) | 35000 | break-even share 0.11 to 0.50 |
-| ai | `opex_reserve_days` | 60 | 15 | the reserve is days of the dearest ore's cost; at the new costs 60 days stopped a one-mine company affording a second |
-| ai | `loan_floor` | 750000 | 5000000 | lets a one-mine company borrow to expand |
-| ai | `first_mine_recoverable_share` | 0.6 | 1.0 | small opening deposits get built, and they are the ones that deplete by year 8 |
-| ai | `reopen_margin` | 1.25 | 1.05 | output halves over a deposit's life, so mines sat mothballed with a remnant in the ground |
-| ai | `research_floor` | 2500000 | 1000000 | retuned with the others; no separate reason was recorded |
-| balance | `starting_capital` | 5000000 | 12000000 | margin against early bankruptcies and depletion failures (owner decision 2 below) |
-| balance | `market_ratio_min` / `max` | 0.2 / 5 in code | 0.2 / 5 in data | moved, not changed |
-| balance | `demand_factor_min` / `max` | 0.01 / 1000 in code | 0.01 / 1000 in data | moved, not changed |
-| balance | `mine_loss_notice_days` | none | 5 | new; the spec's starting value |
+The evidence is from the tuning task's report: about 216 sweeps in 20
+batches, each run with `sim_runner --sweep` against a scratch copy of the
+data. The table's last column cites these findings by letter.
+
+- **E1.** Running cost at a break-even share of 0.6, with elasticity at 2
+  or 3 times its old value and demand unchanged, put bite in range at
+  once. It left year-10 cash near 1M, the first mine at day 400 to 1000
+  and half the seeds with no depleted mine.
+- **E2.** Demand at 2 to 4 times its old value fixed the opening. It
+  exposed one-mine companies that never grow and go bankrupt, in 2 to 8 of
+  20 seeds.
+- **E3.** `opex_reserve_days` 15 and `loan_floor` 5M took stuck companies
+  and bankruptcies to about zero. Starting capital, the bootstrap loan,
+  the cash reserve and the required return, tried one at a time, did
+  less.
+- **E4.** Shares of 0.5, 0.6 and 0.7 at varying demand, and a uniform
+  elasticity of 0.75 to 1.5 all sat on one line that trades cash against
+  depletion. `required_return`, `payback_horizon_days`,
+  `max_open_prospects` and `idle_mine_grace_days` did nothing useful.
+  `supply_discount` below 1 caused 8 to 15 bankruptcies in 20 seeds.
+  None of those five was changed.
+- **E5.** `first_mine_recoverable_share` 1.0, starting capital of 10M to
+  15M, `research_floor` 1M and `reopen_margin` 1.05 gave the first full
+  passes at 20 seeds.
+- **E6.** Per-ore sensitivity: iron and copper demand buy depletions and
+  fewer bankruptcies; nickel and lithium demand buy only cash. Shifting
+  demand that way, with nickel's share at 0.65, gave the first passes at
+  50 seeds, with 40M to 70M of margin on the cash gate.
+- **E7.** Lithium's mean price over base was 0.85 to 0.95 at elasticity
+  1.0, about 0.94 at 1.5 and 1.22 at 2.0. Copper demand of 540, not 500,
+  lifted copper's mean from 0.698 to 0.72.
+- **Ablation.** Each of the five AI changes and the capital change was
+  removed alone from a near-identical base. Each removal failed the
+  depletion gate or the bankruptcy gate by 1 to 2 seeds.
+  `idle_mine_grace_days` 90 was tried and dropped as unnecessary; it
+  stays at 30.
+
+| File | Value | Old | New | Why | Sweep evidence |
+| --- | --- | --- | --- | --- | --- |
+| resources | iron `elasticity` | 0.5 | 1.5 | a handful of mines must move the price | E1: a steeper response with the new cost put bite in range. E4: 1.5 is the top of the uniform range tried |
+| resources | iron `base_demand_tonnes_per_day` | 1600 | 4000 | sized against the steeper response; iron demand buys depletions and fewer bankruptcies | E2, E6 |
+| resources | iron `mine_opex_per_day` | 8000 (shared) | 18000 | break-even share 0.22 to 0.50. The AI's valuation charges running cost for 1.3 times the nominal extraction time, so a higher share stops it building small deposits, which are the ones that deplete | E1, E4 |
+| resources | copper `elasticity` | 0.7 | 1.5 | as iron | E1, E4 |
+| resources | copper `base_demand_tonnes_per_day` | 200 | 540 | as iron | E2, E6. E7: 540 not 500 lifted the mean price from 0.698 to 0.72, inside the 0.7 to 1.3 aim |
+| resources | copper `mine_opex_per_day` | 8000 (shared) | 27000 | break-even share 0.15 to 0.50 | E4; no finding specific to copper's share was recorded |
+| resources | nickel `elasticity` | 0.8 | 1.5 | as iron. Not 2.4: demand growth of 4% a year raised to that elasticity gave yearly mean prices up to 4.6 times base | E1, E4 |
+| resources | nickel `base_demand_tonnes_per_day` | 60 | 90 | raised least of the three early ores, because nickel demand buys only cash | E6. A share of 0.7 at demand 80 put nickel's bite at 455 to 490 permille, too near the ceiling of 500 |
+| resources | nickel `mine_opex_per_day` | 8000 (shared) | 28600 | break-even share 0.18 to 0.65; the higher share cut year-10 cash by about 35M | E6 |
+| resources | lithium `elasticity` | 1.0 | 2.0 | puts lithium's mean price inside its 1.0 to 1.4 aim; the late ore responds hardest | E7: mean 0.85 to 0.95 at 1.0, about 0.94 at 1.5, 1.22 at 2.0 |
+| resources | lithium `base_demand_tonnes_per_day` | 16 | 20 | raised little, because lithium demand buys only cash | E6 |
+| resources | lithium `mine_opex_per_day` | 8000 (shared) | 35000 | break-even share 0.11 to 0.50, inside the 0.4 to 0.6 band | E4; no finding specific to lithium's share was recorded |
+| ai | `opex_reserve_days` | 60 | 15 | the reserve is days of the dearest ore's cost; at the new costs 60 days stopped a one-mine company affording a second | E3; ablation |
+| ai | `loan_floor` | 750000 | 5000000 | lets a one-mine company borrow to expand | E3; ablation |
+| ai | `first_mine_recoverable_share` | 0.6 | 1.0 | small opening deposits get built, and they are the ones that deplete by year 8 | E5; ablation |
+| ai | `reopen_margin` | 1.25 | 1.05 | output halves over a deposit's life, so mines sat mothballed with a remnant in the ground | E5; ablation |
+| ai | `research_floor` | 2500000 | 1000000 | earlier output and cost research keeps ageing mines running and narrows the gap to the leader | E5; ablation |
+| balance | `starting_capital` | 5000000 | 12000000 | margin against early bankruptcies and depletion failures (owner decision 2 below) | E5: 10M to 15M was in the first full passes. E3: on its own it did less than the two AI changes. Ablation |
+| balance | `market_ratio_min` / `max` | 0.2 / 5 in code | 0.2 / 5 in data | moved, not changed | none needed: a test shows prices identical to the old code |
+| balance | `demand_factor_min` / `max` | 0.01 / 1000 in code | 0.01 / 1000 in data | moved, not changed | none needed, as above |
+| balance | `mine_loss_notice_days` | none | 5 | new; the spec's starting value | not tuned |
 
 The final sweep, as reported by the tuning task: `sim_runner --sweep 50
 --years 20 --ai 1`, release build, seeds 1 to 50, exit 0. "Before" is the
@@ -1244,7 +1304,7 @@ A blank cell means the figure was not recorded.
 | Measure | Before | Gate or aim | After |
 | --- | --- | --- | --- |
 | Days in years 3 to 20 below break-even, permille, median seed: iron, copper, nickel | 0, 0, 0 | gate: 100 to 500 each | 202, 210, 384 |
-| Seeds with a mine mothballed 30 days in a row | 17 of 50 | gate: at least 40 | 50 of 50 |
+| Seeds with a mine mothballed 30 days or more and then reopened | 17 of 50 by the first measure (any 30 mothballed days in a row); no figure under the new one | gate: at least 40 | 50 of 50 by either measure |
 | Company 0's cash at the end of year 10, median | 765,667,709 | gate: at most 382,833,854 | 340,963,739 |
 | Seeds with a bankruptcy in years 1 to 10 | 0 | gate: at most 1 | 0 |
 | Seeds with a bankruptcy in years 11 to 20 | 0 | reported | 0 |
@@ -1259,6 +1319,9 @@ A blank cell means the figure was not recorded.
   an idled mine were mines left mothballed for thousands of days. After
   it, of 3,163 mines built across the 50 seeds, 1,866 were mothballed at
   some point and 1,862 of those reopened, typically after about 34 days.
+  After the Codex review the gate counts only a mine mothballed 30 days
+  or more and then reopened. No seed's result changed: 50 of 50 on seeds
+  1 to 50 and on seeds 51 to 100, with 68 to 213 such spells per seed.
 - **Owner decision 1 (2026-10-10): the tuned set is accepted for the
   playtest although it is fragile to the seed block.** On seeds 51 to 100,
   two gates fail narrowly: 2 seeds have a bankruptcy in years 1 to 10
@@ -1282,5 +1345,7 @@ A blank cell means the figure was not recorded.
 - **Open.** Listed in the spec under "Open after build". Among them: the
   losing-mine notice sentence is still the plain draft and is owed its
   polish pass before release; `kGoldenPlayed` has been computed on one
-  platform; the feature has not been seen on a display, run through CI on
-  Windows/MSVC, reviewed by Codex or playtested.
+  platform; the tuning was fitted to seeds 1 to 50; the feature has not
+  been seen on a display, run through CI on Windows/MSVC or playtested.
+  The reviews are done (2026-10-10) and their outcomes are in the spec
+  under "Reviews".
