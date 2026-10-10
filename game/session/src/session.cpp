@@ -107,7 +107,7 @@ void Session::submit(sim::Command command) {
     order.id = nextOrderId_++;
     order.command = command;
     traceOrder("order_queued", order);
-    pending_.push_back(std::move(order));
+    pending_.push_back(order);
 }
 
 bool Session::cancel(std::uint64_t id) {

@@ -373,9 +373,9 @@ int orderId(std::uint64_t id) {
                                                                              : 0;
 }
 
-// The chip or line for a waiting order. The two switches have no chip of
-// their own in the catalogue; their line is the sentence the status bar
-// gives when they are set.
+// The chip or line for a waiting order, from the catalogue. The two switches
+// have a label for each way they can be set: ui.pending_policy_on and _off
+// for a resource's auto-sell, ui.pending_cover_on and _off for cover costs.
 std::string pendingText(const sim::Content& content, const sim::Command& command) {
     return std::visit(
         Overloaded{

@@ -109,7 +109,7 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
 #pendinglist .foot button { margin: 0; }
 /* The count of waiting orders, under the speed buttons and out of the row. */
 #header .speed { position: relative; }
-#header .speed .waiting { position: absolute; top: 100%; left: 0; margin-top: 1dp; font-size: 12dp; line-height: 16dp; font-weight: 600; color: #2f8cff; white-space: nowrap; cursor: pointer; }
+#header .speed .waiting { position: absolute; top: 100%; left: 0; font-size: 12dp; line-height: 16dp; font-weight: 600; color: #2f8cff; white-space: nowrap; cursor: pointer; }
 #header .speed .waiting:hover { color: #4a9cff; }
 #header .speed .waiting.active { color: #ffffff; }
 #pausemenu .check { display: flex; flex-direction: row; align-items: center; height: 28dp; cursor: pointer; white-space: nowrap; }
@@ -448,7 +448,13 @@ body.deck price-chart.table { width: 120dp; }
 body.deck th.w-mine { width: 116dp; }
 body.deck th.w-act.wide { width: 224dp; }
 body.deck th.w-start { width: 220dp; }
-body.deck #header .speed .waiting { margin-top: 0; font-size: 14dp; line-height: 18dp; }
+/* The waiting line is 14dp on 20dp here, 2dp taller than the room under a
+   40dp button: the header grows by one 4dp step, and the two popovers that
+   hang from it move down with the buttons. */
+body.deck #header { min-height: 64dp; }
+body.deck #pausemenu { top: 60dp; }
+body.deck #pendinglist { top: 84dp; }
+body.deck #header .speed .waiting { font-size: 14dp; line-height: 20dp; }
 body.deck .sub, body.deck .subline, body.deck #header .label, body.deck th, body.deck .chip, body.deck .pill,
 body.deck .log .d, body.deck #status, body.deck #status .lbl, body.deck #strip, body.deck .needs .n,
 body.deck .needs .t .sub, body.deck .finrow .stat .sub, body.deck .finrow .stat .label, body.deck .notice,
