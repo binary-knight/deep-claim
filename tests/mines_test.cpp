@@ -16,8 +16,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <limits>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -1009,7 +1012,7 @@ void setIronPrice(sim::Simulation& simulation, const sim::Content& content, sim:
     REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
 }
 
-// Marks mine 0's loss as already announced, as the notice (a later task) will.
+// Marks mine 0's loss as already announced, as the losing-mine notice does.
 void markLossAnnounced(sim::Simulation& simulation, const sim::Content& content) {
     sim::WorldState edited = simulation.state();
     edited.mines[0].lossAnnounced = 1;
@@ -1029,10 +1032,10 @@ TEST_CASE("A mine running at a loss counts its consecutive losing days", "[mines
     CHECK(mine.lossDays == 1);
     simulation.tick(3);
     CHECK(simulation.state().mines[0].lossDays == 4);
-    // The count runs on past the notice threshold; nothing here announces it.
+    // The count runs on past the notice threshold, which marks it announced.
     simulation.tick(content.balance.mineLossNoticeDays);
     CHECK(simulation.state().mines[0].lossDays == 4 + content.balance.mineLossNoticeDays);
-    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 1);
 }
 
 TEST_CASE("A mine that has not opened or is making money has no losing days", "[mines][spec008]") {
@@ -1191,4 +1194,172 @@ TEST_CASE("A mine's losing days survive save and load and are part of the state 
     edited = original.state();
     edited.mines[0].lossAnnounced = 0;
     CHECK(sim::hashWorld(edited) != original.stateHash());
+}
+
+// Spec 008: the losing-mine notice, raised once per run of losing days.
+
+namespace {
+
+std::vector<sim::Notice> losingNotices(const sim::TickReport& report) {
+    std::vector<sim::Notice> found;
+    std::copy_if(report.notices.begin(), report.notices.end(), std::back_inserter(found),
+                 [](const sim::Notice& n) { return n.kind == sim::NoticeKind::MineLosingMoney; });
+    return found;
+}
+
+// Ticks `days` days and returns how many losing-mine notices they raised.
+std::size_t losingNoticesOver(sim::Simulation& simulation, sim::Day days) {
+    std::size_t count = 0;
+    for (sim::Day d = 0; d < days; ++d) {
+        count += losingNotices(simulation.tick()).size();
+    }
+    return count;
+}
+
+std::vector<sim::Money> marketPrices(const sim::WorldState& state) {
+    std::vector<sim::Money> prices;
+    prices.reserve(state.markets.size());
+    for (const sim::Market& market : state.markets) {
+        prices.push_back(market.price);
+    }
+    return prices;
+}
+
+// A losing iron mine one day short of its notice: opened on day one of its
+// loss and run until lossDays is the threshold less one, nothing said yet.
+void runToEveOfNotice(sim::Simulation& simulation, const sim::Content& content) {
+    openMine(simulation, content, {deposit(kIron, 1'000'000)});
+    REQUIRE(content.balance.mineLossNoticeDays >= 2);
+    REQUIRE(losingNoticesOver(simulation, content.balance.mineLossNoticeDays - 2) == 0);
+    REQUIRE(simulation.state().mines[0].lossDays == content.balance.mineLossNoticeDays - 1);
+    REQUIRE(simulation.state().mines[0].lossAnnounced == 0);
+}
+
+}  // namespace
+
+TEST_CASE("The losing-mine notice has a stable name and is private", "[mines][spec008]") {
+    CHECK(std::string_view(sim::noticeKindName(sim::NoticeKind::MineLosingMoney)) ==
+          "mine_losing_money");
+    CHECK_FALSE(sim::noticeIsPublic(sim::NoticeKind::MineLosingMoney));
+}
+
+TEST_CASE("A mine is announced on the day its losing days reach the threshold",
+          "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    // Never on fewer days: runToEveOfNotice requires that none was raised.
+    runToEveOfNotice(simulation, content);
+    const sim::PlotId plot = simulation.state().mines[0].plot;
+    const std::vector<sim::Money> seen = marketPrices(simulation.state());
+
+    const std::vector<sim::Notice> raised = losingNotices(simulation.tick());
+    const sim::WorldState& state = simulation.state();
+    REQUIRE(raised.size() == 1);
+    const sim::Notice& notice = raised[0];
+    CHECK(notice.company == kPlayer);
+    CHECK(notice.plot == plot);
+    CHECK(notice.mine == sim::MineId(0));
+    CHECK(notice.tonnes == content.balance.mineLossNoticeDays);
+    // The day's loss, as a positive figure, at the prices the mines step saw.
+    CHECK(notice.amount > sim::Money::zero());
+    CHECK(notice.amount == -margin(content, state, seen));
+    CHECK(state.mines[0].lossDays == content.balance.mineLossNoticeDays);
+    CHECK(state.mines[0].lossAnnounced == 1);
+
+    // Private to the owner.
+    CHECK(sim::noticeVisibleTo(notice, kPlayer));
+    CHECK_FALSE(sim::noticeVisibleTo(notice, kRival));
+    CHECK(losingNotices({state.day, simulation.reportFor(kPlayer)}).size() == 1);
+    CHECK(losingNotices({state.day, simulation.reportFor(kRival)}).empty());
+}
+
+TEST_CASE("A losing mine is announced once until it has recovered and lost again",
+          "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    runToEveOfNotice(simulation, content);
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+    REQUIRE(losingNoticesOver(simulation, 1) == 1);
+
+    // The loss goes on: nothing more is said, however long it lasts.
+    CHECK(losingNoticesOver(simulation, 3 * threshold) == 0);
+    CHECK(simulation.state().mines[0].lossDays == 4 * threshold);
+
+    // One day at a profit ends the run; the next run is announced afresh,
+    // and again only when it has lasted the full count.
+    setIronPrice(simulation, content, sim::Money::fromUnits(300));
+    CHECK(losingNoticesOver(simulation, 1) == 0);
+    REQUIRE(simulation.state().mines[0].lossAnnounced == 0);
+    setIronPrice(simulation, content, sim::Money::fromUnits(60));
+    CHECK(losingNoticesOver(simulation, threshold - 1) == 0);
+    REQUIRE(simulation.state().mines[0].lossDays == threshold - 1);
+    CHECK(losingNoticesOver(simulation, 1) == 1);
+    CHECK(losingNoticesOver(simulation, threshold) == 0);
+}
+
+TEST_CASE("A mothballed mine is never announced as losing money", "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    runToEveOfNotice(simulation, content);
+
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 0});
+    CHECK(losingNoticesOver(simulation, 3 * content.balance.mineLossNoticeDays) == 0);
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Mothballed);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+
+    // Reopened, it must lose for the full count again before it is said.
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 1});
+    CHECK(losingNoticesOver(simulation, content.balance.mineLossNoticeDays - 1) == 0);
+    CHECK(losingNoticesOver(simulation, 1) == 1);
+}
+
+TEST_CASE("A bankrupt owner's mine is never announced as losing money", "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    runToEveOfNotice(simulation, content);
+
+    // The owner as bankruptcy leaves it, the day before the notice was due.
+    // A save holds a bankrupt company only with its mines closed, so that
+    // is the one state of a bankrupt owner's mine the sim can be in.
+    sim::WorldState edited = simulation.state();
+    sim::Company& owner = edited.companies[kPlayer.index()];
+    owner.bankrupt = 1;
+    owner.monthsInsolvent = content.balance.bankruptcyGraceMonths + 1;
+    owner.cash = sim::Money::fromUnits(-1);
+    edited.mines[0].state = sim::MineState::Closed;
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+    REQUIRE(simulation.state().mines[0].lossDays == content.balance.mineLossNoticeDays - 1);
+
+    CHECK(losingNoticesOver(simulation, 3 * content.balance.mineLossNoticeDays) == 0);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+}
+
+TEST_CASE("Several mines can each be announced as losing money on the same day",
+          "[mines][spec008]") {
+    const sim::Content content = losingContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, 1'000'000)});
+    const sim::PlotId second = buyFirstListed(simulation, kPlayer);
+    setDeposit(simulation, content, second, kIron, 1'000'000);
+    simulation.submit(sim::BuildMine{kPlayer, second});
+    simulation.tick(content.balance.mineBuildDays + 1);
+    REQUIRE(simulation.state().mines.size() == 2);
+    REQUIRE(simulation.state().mines[1].state == sim::MineState::Operating);
+
+    // Both one day short of the notice, neither announced.
+    sim::WorldState edited = simulation.state();
+    for (sim::Mine& mine : edited.mines) {
+        mine.lossDays = content.balance.mineLossNoticeDays - 1;
+        mine.lossAnnounced = 0;
+    }
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+
+    const std::vector<sim::Notice> raised = losingNotices(simulation.tick());
+    REQUIRE(raised.size() == 2);
+    CHECK(raised[0].mine == sim::MineId(0));
+    CHECK(raised[1].mine == sim::MineId(1));
+    CHECK(raised[0].plot != raised[1].plot);
+    CHECK(raised[1].plot == second);
+    CHECK(losingNoticesOver(simulation, content.balance.mineLossNoticeDays) == 0);
 }

@@ -159,6 +159,8 @@ enum class NoticeKind : std::uint8_t {
                         // when 30 days or fewer remain)
     PlotWithdrawn,      // public: plot, amount = the ask it left with (unsold too many times)
     RivalUnlockedResource,  // public: company, tech, resource (research unlocked a resource)
+    MineLosingMoney,        // private: company, plot, mine, amount = the day's loss (positive),
+                            // tonnes = consecutive losing days (once per run of losing days)
 };
 
 struct Notice {

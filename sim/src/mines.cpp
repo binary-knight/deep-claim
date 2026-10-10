@@ -418,26 +418,40 @@ bool countsTowardLosses(const WorldState& state, const Mine& mine) {
 // Advances every mine's count of consecutive losing days (spec 008), at the
 // prices as the mines step sees them: yesterday's close, before today's
 // market update. A mine that does not count (see above) or that broke even
-// or better today starts afresh, and may be announced again. Raises nothing
-// yet: the notice is the caller's next step.
-void updateMineLosses(const Content& content, WorldState& state, TickReport& /*report*/) {
+// or better today starts afresh, and may be announced again. On the day the
+// count reaches the notice threshold the owner is told, once for that run
+// of losing days: the notice carries the day's loss and the count.
+void updateMineLosses(const Content& content, WorldState& state, TickReport& report) {
     std::vector<Money> prices;
     prices.reserve(state.markets.size());
     for (const Market& market : state.markets) {
         prices.push_back(market.price);
     }
-    for (Mine& mine : state.mines) {
+    for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
+        Mine& mine = state.mines[i];
         const Company& owner = state.companies[mine.owner.index()];
-        if (countsTowardLosses(state, mine) &&
-            mineDailyMargin(content, state, owner, mine, prices) < Money::zero()) {
-            // Saturates: a save can carry any count, and a wrap would read as a reset.
-            if (mine.lossDays < std::numeric_limits<std::uint32_t>::max()) {
-                ++mine.lossDays;
-            }
+        const Money margin = countsTowardLosses(state, mine)
+                                 ? mineDailyMargin(content, state, owner, mine, prices)
+                                 : Money::zero();
+        if (margin >= Money::zero()) {
+            mine.lossDays = 0;
+            mine.lossAnnounced = 0;
             continue;
         }
-        mine.lossDays = 0;
-        mine.lossAnnounced = 0;
+        // Saturates: a save can carry any count, and a wrap would read as a reset.
+        if (mine.lossDays < std::numeric_limits<std::uint32_t>::max()) {
+            ++mine.lossDays;
+        }
+        // At or past the threshold, so a save that carries a longer run not
+        // yet announced is told on its next losing day instead of never.
+        if (mine.lossAnnounced != 0 || mine.lossDays < content.balance.mineLossNoticeDays) {
+            continue;
+        }
+        mine.lossAnnounced = 1;
+        // The margin is clamped to +/- kMaxCashCents, so negating it cannot overflow.
+        Notice notice = mineNotice(NoticeKind::MineLosingMoney, mine, MineId(i), -margin);
+        notice.tonnes = static_cast<std::int64_t>(mine.lossDays);
+        report.notices.push_back(notice);
     }
 }
 
