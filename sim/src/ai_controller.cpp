@@ -20,10 +20,6 @@ namespace sim {
 
 namespace {
 
-// Lowest supply ratio the valuation feeds to the power law (the market
-// clamps its own ratio the same way).
-const Fixed kSupplyRatioMin = Fixed::fromRatio(1, 5);
-
 // One projected cash position shared by every rule, so the commands issued
 // on a day are jointly affordable and no rule can starve another.
 struct Budget {
@@ -142,9 +138,10 @@ Money valuedPrice(const Content& content, const CompanyView& view, ResourceId re
     if (before <= 0 || today <= Money::zero()) {
         return std::max(today, Money::zero());
     }
-    // Clamped like the market's own ratio, so the power stays tame.
-    const Fixed ratio =
-        clampFixed(Fixed::fromRatio(before, before + added), kSupplyRatioMin, Fixed::one());
+    // Clamped at the market's own floor (balance.marketRatioMin), so the
+    // power stays tame and a tuned clamp cannot diverge from the valuation.
+    const Fixed ratio = clampFixed(Fixed::fromRatio(before, before + added),
+                                   content.balance.marketRatioMin, Fixed::one());
     const Money after = today.scaled(fixedPow(ratio, def.elasticity));
     std::int64_t own = 0;
     for (const MineView& mine : view.mines) {
@@ -164,15 +161,19 @@ Money valuedPrice(const Content& content, const CompanyView& view, ResourceId re
 // of the estimated tonnage (survey error haircut), at most the payback
 // horizon of output, at the valued price, minus the opex of running the mine
 // for as long as the slowest deposit takes to extract (output declines, so
-// 1.3x the nominal time). A buy must cover land plus capex out of this.
+// 1.3x the nominal time). The opex is the view's quote for the dearest of
+// those ores, as a mine pays for the dearest ore it produces (spec 008). A
+// buy must cover land plus capex out of this.
 Money surveyedNetValue(const Content& content, const CompanyView& view, const SurveyView& survey) {
     Money revenue = Money::zero();
+    Money opexPerDay = Money::zero();
     std::int64_t extractionDays = 0;
     for (const SurveyEstimateView& estimate : survey.estimates) {
         if (!resourceUnlocked(content, view.completedTechs, estimate.resource)) {
             continue;
         }
         const ResourceDef& def = content.resources[estimate.resource.index()];
+        opexPerDay = std::max(opexPerDay, view.mineOpexQuotes[estimate.resource.index()]);
         const std::int64_t output = std::max<std::int64_t>(def.baseOutputTonnesPerDay, 1);
         const std::int64_t horizonTonnes =
             checkedMulDiv(output, content.ai.paybackHorizonDays, 1).value_or(kMaxDepositTonnes);
@@ -188,12 +189,25 @@ Money surveyedNetValue(const Content& content, const CompanyView& view, const Su
         extractionDays = std::max(extractionDays, days * 13 / 10);
     }
     const std::int64_t opexCents =
-        checkedMulDiv(view.mineOpexQuote.cents(), extractionDays, 1).value_or(kMaxCashCents);
+        checkedMulDiv(opexPerDay.cents(), extractionDays, 1).value_or(kMaxCashCents);
     return revenue - Money::fromCents(std::min(opexCents, kMaxCashCents));
 }
 
+// What a new mine costs to run before it has produced anything: the sim
+// charges it for the dearest ore its owner can dig (ADR-001), so that is the
+// quote the company plans on when it does not yet know what a plot holds.
+Money newMineOpexQuote(const Content& content, const CompanyView& view) {
+    Money dearest = Money::zero();
+    for (std::uint32_t r = 0; r < view.mineOpexQuotes.size(); ++r) {
+        if (resourceUnlocked(content, view.completedTechs, ResourceId(r))) {
+            dearest = std::max(dearest, view.mineOpexQuotes[r]);
+        }
+    }
+    return dearest;
+}
+
 Money constructionReserve(const Content& content, const CompanyView& view) {
-    return view.mineOpexQuote * content.ai.opexReserveDays;
+    return newMineOpexQuote(content, view) * content.ai.opexReserveDays;
 }
 
 // Cash the company could raise with one more loan right now.
@@ -242,22 +256,12 @@ void decideSales(const Content& content, const CompanyView& view, Budget& budget
     }
 }
 
-// Value of what a mine produced on its most recent operating day, at today's
-// prices: the AI's estimate of tomorrow's revenue.
-Money dailyOutputValue(const CompanyView& view, const MineView& mine) {
-    Money total = Money::zero();
-    for (std::uint32_t r = 0; r < mine.lastOutputTonnes.size(); ++r) {
-        const std::int64_t cents =
-            checkedMulDiv(view.markets[r].price.cents(), mine.lastOutputTonnes[r], 1)
-                .value_or(kMaxCashCents);
-        total += Money::fromCents(std::min(cents, kMaxCashCents - total.cents()));
-    }
-    return total;
-}
-
 // Mothball mines that lose money on a day's output (after a grace period so a
-// new mine gets to produce); reopen when the output would clear opex with a
-// margin, so prices must recover before the mine restarts.
+// new mine gets to produce); reopen when the output would clear the cost of
+// running with a margin, so prices must recover before the mine restarts.
+// What a mine earns is the sim's figure on the view (R-001): the AI weighs
+// it and never works it out. A running mine with no earnings to show has
+// produced nothing and only costs money, so it is idled too.
 void decideMothballing(const Content& content, const CompanyView& view, std::vector<Command>& out) {
     for (const MineView& mine : view.mines) {
         if (mine.state != MineState::Operating && mine.state != MineState::Mothballed) {
@@ -266,12 +270,17 @@ void decideMothballing(const Content& content, const CompanyView& view, std::vec
         if (view.day <= mine.operationalDay + content.ai.idleMineGraceDays) {
             continue;
         }
-        const Money revenue = dailyOutputValue(view, mine);
-        const Money opex = view.mineOpexQuote;
-        if (mine.state == MineState::Operating && revenue < opex) {
-            out.emplace_back(SetMineState{view.me, mine.id, 0});
-        } else if (mine.state == MineState::Mothballed &&
-                   revenue >= opex.scaled(content.ai.reopenMargin)) {
+        if (mine.state == MineState::Operating) {
+            if (!mine.hasEarnings || mine.dailyMargin < Money::zero()) {
+                out.emplace_back(SetMineState{view.me, mine.id, 0});
+            }
+            continue;
+        }
+        // Revenue of reopenMargin times the running cost is a margin of that
+        // less the cost itself.
+        const Money needed =
+            mine.operatingOpex.scaled(content.ai.reopenMargin) - mine.operatingOpex;
+        if (mine.hasEarnings && mine.dailyMargin >= needed) {
             out.emplace_back(SetMineState{view.me, mine.id, 1});
         }
     }

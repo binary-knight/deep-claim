@@ -130,7 +130,26 @@ struct MineView {
     // What that survey implies is left today (sim::estimatedRemainingTonnes),
     // -1 for a resource the survey did not report or with no survey at all.
     std::vector<std::int64_t> estimatedRemainingTonnes;
+    // What the mine costs today in its present state (sim::mineRunningCost):
+    // the mothballed share when mothballed, zero when it is building,
+    // depleted or closed.
     Money dailyOpex;
+    // What it costs, or would cost, as an operating mine; equal to dailyOpex
+    // for an operating mine. The reopening decision weighs dailyMargin
+    // against this.
+    Money operatingOpex;
+    // Spec 008. True when the mine has earnings to show: it is operating or
+    // mothballed and has output on record. A mine that is building, has not
+    // produced yet, or is depleted or closed has none, and the two figures
+    // below are then zero and mean nothing.
+    bool hasEarnings = false;
+    // What the mine earns in a day at today's prices (sim::mineDailyMargin):
+    // its most recent operating day's output less operatingOpex, negative
+    // for a loss. For a mothballed mine, what it would earn if reopened.
+    Money dailyMargin;
+    // The price per tonne of its principal ore at which dailyMargin is zero
+    // (sim::mineBreakEvenPrice); zero when its other ores cover the cost.
+    Money breakEvenPrice;
 };
 
 struct CompanyPublicView {
@@ -149,8 +168,11 @@ struct CompanyView {
     Money outstandingPrincipal;
     Money loanCapacity;        // how much more may be borrowed
     Money monthlyStorageCost;  // at current inventory
-    Money mineOpexQuote;       // daily opex of an operating mine for the viewer today
-    Fixed surveyNoiseQuote;    // relative error of the viewer's surveys today
+    // Per ore (spec 008): what an operating mine producing that ore costs
+    // the viewer a day, today. Indexed by ResourceId; quoted for every ore,
+    // unlocked or not.
+    std::vector<Money> mineOpexQuotes;
+    Fixed surveyNoiseQuote;  // relative error of the viewer's surveys today
     std::uint32_t monthsInsolvent = 0;
     bool bankrupt = false;
     std::vector<std::int64_t> inventoryTonnes;
