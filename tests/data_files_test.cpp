@@ -37,12 +37,13 @@ TEST_CASE("Shipped data files load cleanly", "[content][data]") {
           c.findTech("lithium_processing"));
 }
 
-TEST_CASE("Shipped ores report their break-even share at base", "[content][data][spec008]") {
-    // Spec 008: the share of an ore's base price a mine at base output must
-    // earn to cover its running cost (cost per day / base output per day /
-    // base price). Computed from the shipped files and printed, so a tuning
-    // change shows its effect here; the tuned range is asserted once the
-    // economy is tuned.
+TEST_CASE("Shipped ores break even at the chosen share of base price", "[content][data][spec008]") {
+    // Spec 008 (BR-003, AC-001): the share of an ore's base price a mine at
+    // base output must earn to cover its running cost (cost per day / base
+    // output per day / base price) is chosen, not accidental: 0.5 to 0.7 for
+    // iron, copper and nickel, and 0.4 to 0.6 for lithium, the late ore that
+    // pays a premium. A range on the shipped files only: the loader accepts
+    // any positive cost, so experiments with --data stay possible.
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
     REQUIRE(result.ok());
     const sim::Content& c = *result.content;
@@ -51,7 +52,10 @@ TEST_CASE("Shipped ores report their break-even share at base", "[content][data]
         INFO(resource.id);
         REQUIRE(revenue > sim::Money::zero());
         const sim::Fixed share = resource.mineOpexPerDay.ratioTo(revenue);
-        WARN(resource.id << ": break-even share of base price " << sim::toString(share));
+        INFO("break-even share of base price " << sim::toString(share));
+        const std::int64_t lowestTenths = resource.id == "lithium" ? 4 : 5;
+        CHECK(share >= sim::Fixed::fromRatio(lowestTenths, 10));
+        CHECK(share <= sim::Fixed::fromRatio(lowestTenths + 2, 10));
     }
 }
 

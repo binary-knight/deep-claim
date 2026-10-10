@@ -1,5 +1,5 @@
 {
-  "starting_capital": 5000000,
+  "starting_capital": 12000000,
   "loan_annual_rate": 0.08,
   "loan_term_months": 60,
   "loan_max_principal": 10000000,
