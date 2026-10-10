@@ -306,6 +306,16 @@ void App::bindModel() {
         h.RegisterMember("day", &SoldRow::day);
         h.RegisterMember("mine", &SoldRow::mine);
     }
+    if (auto h = ctor.RegisterStruct<MineFigures>()) {
+        h.RegisterMember("shown", &MineFigures::shown);
+        h.RegisterMember("earns", &MineFigures::earns);
+        h.RegisterMember("loss", &MineFigures::loss);
+        h.RegisterMember("mothballed", &MineFigures::mothballed);
+        h.RegisterMember("reopen", &MineFigures::reopen);
+        h.RegisterMember("reopen_loss", &MineFigures::reopen_loss);
+        h.RegisterMember("break_even", &MineFigures::break_even);
+        h.RegisterMember("note", &MineFigures::note);
+    }
     if (auto h = ctor.RegisterStruct<OwnedRow>()) {
         h.RegisterMember("index", &OwnedRow::index);
         h.RegisterMember("name", &OwnedRow::name);
@@ -315,6 +325,7 @@ void App::bindModel() {
         h.RegisterMember("mine_class", &OwnedRow::mine_class);
         h.RegisterMember("output", &OwnedRow::output);
         h.RegisterMember("remaining", &OwnedRow::remaining);
+        h.RegisterMember("figures", &OwnedRow::figures);
         h.RegisterMember("can_toggle", &OwnedRow::can_toggle);
         h.RegisterMember("mine_operating", &OwnedRow::mine_operating);
         h.RegisterMember("can_build", &OwnedRow::can_build);
@@ -362,6 +373,7 @@ void App::bindModel() {
         h.RegisterMember("can_toggle_mine", &PlotPanel::can_toggle_mine);
         h.RegisterMember("mine_operating", &PlotPanel::mine_operating);
         h.RegisterMember("mine_index", &PlotPanel::mine_index);
+        h.RegisterMember("figures", &PlotPanel::figures);
         h.RegisterMember("survey_order", &PlotPanel::survey_order);
         h.RegisterMember("bid_order", &PlotPanel::bid_order);
         h.RegisterMember("build_order", &PlotPanel::build_order);

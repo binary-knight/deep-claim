@@ -85,6 +85,22 @@ struct SoldRow {
     bool mine = false;  // the player bought it
 };
 
+// What one of the player's mines earns (spec 008), on its row and on the
+// selected-plot panel. Every figure is the sim's (sim::MineView), formatted;
+// nothing here is worked out by the client.
+struct MineFigures {
+    bool shown = false;  // false for a worked-out or closed mine, and for no mine
+    // "+$12.3k/day" or "-$2.1k/day" at today's price; for a mothballed mine
+    // what it costs to keep, as a loss; "not producing yet" with no figure.
+    std::string earns;
+    bool loss = false;        // `earns` is negative: the sign says so, the colour repeats it
+    bool mothballed = false;  // `earns` is the mothballed cost; `reopen` has the margin
+    std::string reopen;       // mothballed only: "+$12.3k/day" if reopened today, else ""
+    bool reopen_loss = false;
+    std::string break_even;  // "Break-even $41.20/t" or ""
+    std::string note;        // "at today's price" beside a margin, else ""
+};
+
 // A plot the player owns, on the dashboard board and the Plots tab.
 struct OwnedRow {
     int index = 0;  // plot index
@@ -95,6 +111,7 @@ struct OwnedRow {
     std::string mine_class;  // chip class: good, warn, muted, danger
     std::string output;      // "60 t/day copper + 400 t/day iron" or "—"
     std::string remaining;   // "~41,000 t · ~690 days", "exhausted", "173 days to open"
+    MineFigures figures;     // what the mine earns a day, and its break-even price
     bool can_toggle = false;
     bool mine_operating = false;
     bool can_build = false;
@@ -150,6 +167,7 @@ struct PlotPanel {
     bool can_toggle_mine = false;
     bool mine_operating = false;
     int mine_index = -1;
+    MineFigures figures;  // the player's own mine here: what it earns a day
     // Orders waiting on this plot. While one is pending its chip stands in
     // for the button, whatever the button's own state would be.
     OrderMark survey_order;

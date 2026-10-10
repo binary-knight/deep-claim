@@ -446,6 +446,11 @@ body.deck th.w-res { width: 200dp; }
 body.deck th.w-chart { width: 120dp; }
 body.deck price-chart.table { width: 120dp; }
 body.deck th.w-mine { width: 116dp; }
+/* The mine figures (spec 008) sit under the output and want the room: in
+   this frame the dashboard's area drops under the region, as it stands on
+   the Plots tab, and the region column narrows to that tab's width. */
+body.deck th.w-region2 { width: 130dp; }
+body.deck td .area { display: block; }
 body.deck th.w-act.wide { width: 224dp; }
 body.deck th.w-start { width: 220dp; }
 /* The waiting line is 14dp on 20dp here, 2dp taller than the room under a
