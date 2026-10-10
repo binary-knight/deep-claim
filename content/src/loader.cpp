@@ -819,7 +819,6 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "survey_base_noise",
                     "mine_capex_per_hectare",
                     "mine_build_days",
-                    "mine_opex_per_day",
                     "mine_mothball_opex_mult",
                     "auction_window_days",
                     "plots_listed_at_start",
@@ -874,7 +873,6 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     }
     balance.mineBuildDays =
         static_cast<sim::Day>(valueOr(node.integer("mine_build_days", true, 1, kMaxDays), 1LL));
-    balance.mineOpexPerDay = valueOr(node.money("mine_opex_per_day", true, zero), zero);
     balance.mineMothballOpexMult =
         valueOr(node.fixed("mine_mothball_opex_mult", true, sim::Fixed::zero(), sim::Fixed::one()),
                 sim::Fixed::zero());

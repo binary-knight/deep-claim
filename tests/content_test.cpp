@@ -47,7 +47,7 @@ content::Sources goodSources() {
       "starting_capital": 5000000, "loan_annual_rate": 0.08, "loan_term_months": 60,
       "loan_max_principal": 10000000, "loan_min_principal": 250000, "max_active_loans": 4, "survey_cost": 150000, "survey_duration_days": 45,
       "survey_base_noise": 0.5, "mine_capex_per_hectare": 4000, "mine_build_days": 180,
-      "mine_opex_per_day": 12000, "mine_mothball_opex_mult": 0.2,
+      "mine_mothball_opex_mult": 0.2,
       "auction_window_days": 30, "plots_listed_at_start": 3, "plots_listed_per_month": 1,
       "opening_min_mineable": 2, "opening_max_locked_region": 1,
       "opening_mineable_presence": 0.5,
@@ -447,6 +447,15 @@ TEST_CASE("Each ore's mine running cost loads and must be above zero", "[content
     const auto wrongType = content::loadFromStrings(text);
     CHECK_FALSE(wrongType.ok());
     CHECK(hasError(wrongType, "resources.json", "[0].mine_opex_per_day", "expected a number"));
+}
+
+TEST_CASE("A balance file still carrying the single mine running cost is refused", "[content]") {
+    content::Sources s = goodSources();
+    s.balance = replaceOnce(s.balance, R"("mine_mothball_opex_mult": 0.2,)",
+                            R"("mine_opex_per_day": 12000, "mine_mothball_opex_mult": 0.2,)");
+    const auto result = content::loadFromStrings(s);
+    CHECK_FALSE(result.ok());
+    CHECK(hasError(result, "balance.json", "mine_opex_per_day", "unknown key"));
 }
 
 TEST_CASE("Market clamps load with the values the market code used", "[content]") {

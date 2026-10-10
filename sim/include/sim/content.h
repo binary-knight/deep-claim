@@ -116,7 +116,6 @@ struct BalanceParams {
     Fixed surveyBaseNoise;  // relative standard deviation of tonnage estimates
     Money mineCapexPerHectare;
     Day mineBuildDays = 0;
-    Money mineOpexPerDay;
     Fixed mineMothballOpexMult;  // share of opex a mothballed mine still pays
     Day auctionWindowDays = 0;
     std::uint32_t plotsListedAtStart = 0;

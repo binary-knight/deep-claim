@@ -10,7 +10,6 @@
   "survey_base_noise": 0.5,
   "mine_capex_per_hectare": 4000,
   "mine_build_days": 180,
-  "mine_opex_per_day": 8000,
   "mine_mothball_opex_mult": 0.15,
   "auction_window_days": 45,
   "plots_listed_at_start": 4,
