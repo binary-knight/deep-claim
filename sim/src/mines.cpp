@@ -417,10 +417,12 @@ bool countsTowardLosses(const WorldState& state, const Mine& mine) {
 
 // Advances every mine's count of consecutive losing days (spec 008), at the
 // prices as the mines step sees them: yesterday's close, before today's
-// market update. A mine that does not count (see above) or that broke even
-// or better today starts afresh, and may be announced again. On the day the
-// count reaches the notice threshold the owner is told, once for that run
-// of losing days: the notice carries the day's loss and the count.
+// market update. A day that is not a losing day ends the count. The
+// announcement outlasts a day at exactly nothing: it is cleared only by a
+// day of positive margin, or when the mine stops counting (see above), so a
+// mine is told again only after it has recovered or been stopped (BR-006).
+// On the day the count reaches the notice threshold the owner is told, once
+// per such episode: the notice carries the day's loss and the count.
 void updateMineLosses(const Content& content, WorldState& state, TickReport& report) {
     std::vector<Money> prices;
     prices.reserve(state.markets.size());
@@ -430,12 +432,14 @@ void updateMineLosses(const Content& content, WorldState& state, TickReport& rep
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         Mine& mine = state.mines[i];
         const Company& owner = state.companies[mine.owner.index()];
-        const Money margin = countsTowardLosses(state, mine)
-                                 ? mineDailyMargin(content, state, owner, mine, prices)
-                                 : Money::zero();
+        const bool counts = countsTowardLosses(state, mine);
+        const Money margin =
+            counts ? mineDailyMargin(content, state, owner, mine, prices) : Money::zero();
         if (margin >= Money::zero()) {
             mine.lossDays = 0;
-            mine.lossAnnounced = 0;
+            if (!counts || margin > Money::zero()) {
+                mine.lossAnnounced = 0;
+            }
             continue;
         }
         // Saturates: a save can carry any count, and a wrap would read as a reset.
