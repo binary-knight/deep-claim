@@ -102,6 +102,41 @@ std::string daysUntil(const sim::Content& content, sim::Day target, sim::Day tod
     return text(content, "ui.days_in", {{"days", std::to_string(daysLeft(target, today))}});
 }
 
+// Sums of what the waiting orders cost and borrow stop at the largest amount
+// either way: an order can carry any amount until the sim turns it away, and
+// Money's own arithmetic ends the program on overflow. (The session keeps
+// the same pair for its sums.)
+constexpr std::int64_t kMaxSumCents = std::numeric_limits<std::int64_t>::max();
+
+sim::Money saturatingAdd(sim::Money a, sim::Money b) {
+    const std::int64_t x = a.cents();
+    const std::int64_t y = b.cents();
+    if (y > 0 && x > kMaxSumCents - y) {
+        return sim::Money::fromCents(kMaxSumCents);
+    }
+    if (y < 0 && x < -kMaxSumCents - y) {
+        return sim::Money::fromCents(-kMaxSumCents);
+    }
+    return sim::Money::fromCents(x + y);
+}
+
+sim::Money saturatingSub(sim::Money a, sim::Money b) {
+    const std::int64_t x = a.cents();
+    const std::int64_t y = b.cents();
+    if (y > 0 && x < -kMaxSumCents + y) {
+        return sim::Money::fromCents(-kMaxSumCents);
+    }
+    if (y < 0 && x > kMaxSumCents + y) {
+        return sim::Money::fromCents(kMaxSumCents);
+    }
+    return sim::Money::fromCents(x - y);
+}
+
+// Cash the player can still spend today: what is not held against bids.
+sim::Money spendableCash(const sim::CompanyView& view) {
+    return saturatingSub(view.cash, view.reservedCash);
+}
+
 std::string moneyTimesTonnes(sim::Money price, std::int64_t tonnes) {
     const std::int64_t cents =
         sim::checkedMulDiv(price.cents(), tonnes, 1).value_or(kMaxDisplayCents);
@@ -398,8 +433,9 @@ Orders readOrders(const Session& session) {
     const sim::CompanyView& view = session.view();
     Orders orders;
     orders.waiting = &session.pendingOrders();
-    const sim::Money spendable = view.cash - view.reservedCash;
-    orders.available = spendable - session.committed() + session.pendingBorrowed();
+    const sim::Money spendable = spendableCash(view);
+    orders.available =
+        saturatingAdd(saturatingSub(spendable, session.committed()), session.pendingBorrowed());
     sim::Money running = spendable;
     for (const PendingOrder& order : *orders.waiting) {
         OrderMark mark;
@@ -407,12 +443,12 @@ Orders readOrders(const Session& session) {
         mark.id = orderId(order.id);
         mark.text = pendingText(session.content(), order.command);
         if (const auto* loan = std::get_if<sim::TakeLoan>(&order.command)) {
-            running += std::max(loan->principal, sim::Money::zero());
+            running = saturatingAdd(running, std::max(loan->principal, sim::Money::zero()));
         } else {
             const sim::Money cost = session.orderCost(order.command);
             mark.not_covered = cost > sim::Money::zero() && cost > running;
             if (!mark.not_covered) {
-                running -= cost;
+                running = saturatingSub(running, cost);
             }
         }
         orders.marks.push_back(std::move(mark));
@@ -459,7 +495,7 @@ void fillPending(const Session& session, const Orders& orders, UiModel& model) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
     const sim::Money committed = session.committed();
-    model.spendable = formatMoney(view.cash - view.reservedCash);
+    model.spendable = formatMoney(spendableCash(view));
     model.available = formatMoney(orders.available);
     model.has_committed = committed > sim::Money::zero();
     model.committed = model.has_committed

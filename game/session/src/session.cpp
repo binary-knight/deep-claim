@@ -168,6 +168,36 @@ sim::Money atLeastZero(sim::Money amount) {
     return std::max(amount, sim::Money::zero());
 }
 
+// The pending sums are for display and button state only, and an order can
+// carry any amount until the sim turns it away, so they stop at the largest
+// amount either way rather than use Money's checked arithmetic, which ends
+// the program on overflow.
+constexpr std::int64_t kMaxSumCents = std::numeric_limits<std::int64_t>::max();
+
+sim::Money saturatingAdd(sim::Money a, sim::Money b) {
+    const std::int64_t x = a.cents();
+    const std::int64_t y = b.cents();
+    if (y > 0 && x > kMaxSumCents - y) {
+        return sim::Money::fromCents(kMaxSumCents);
+    }
+    if (y < 0 && x < -kMaxSumCents - y) {
+        return sim::Money::fromCents(-kMaxSumCents);
+    }
+    return sim::Money::fromCents(x + y);
+}
+
+sim::Money saturatingSub(sim::Money a, sim::Money b) {
+    const std::int64_t x = a.cents();
+    const std::int64_t y = b.cents();
+    if (y > 0 && x < -kMaxSumCents + y) {
+        return sim::Money::fromCents(-kMaxSumCents);
+    }
+    if (y < 0 && x > kMaxSumCents + y) {
+        return sim::Money::fromCents(kMaxSumCents);
+    }
+    return sim::Money::fromCents(x - y);
+}
+
 }  // namespace
 
 sim::Money Session::orderCost(const sim::Command& command) const {
@@ -185,7 +215,7 @@ sim::Money Session::orderCost(const sim::Command& command) const {
                 const sim::Money standing = plot != nullptr && plot->auction.has_value()
                                                 ? plot->auction->myBid
                                                 : sim::Money::zero();
-                return atLeastZero(bid.amount - standing);
+                return atLeastZero(saturatingSub(bid.amount, standing));
             },
             [&](const sim::BuildMine& build) {
                 const sim::PlotView* plot = plotView(build.plot);
@@ -209,7 +239,7 @@ sim::Money Session::orderCost(const sim::Command& command) const {
 sim::Money Session::committed() const {
     sim::Money total = sim::Money::zero();
     for (const PendingOrder& order : pending_) {
-        total += orderCost(order.command);
+        total = saturatingAdd(total, orderCost(order.command));
     }
     return total;
 }
@@ -218,7 +248,7 @@ sim::Money Session::pendingBorrowed() const {
     sim::Money total = sim::Money::zero();
     for (const PendingOrder& order : pending_) {
         if (const auto* loan = std::get_if<sim::TakeLoan>(&order.command)) {
-            total += atLeastZero(loan->principal);
+            total = saturatingAdd(total, atLeastZero(loan->principal));
         }
     }
     return total;

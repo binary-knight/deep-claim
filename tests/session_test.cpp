@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -916,6 +917,96 @@ TEST_CASE("Committed sums what the pending orders will cost at today's quotes",
         session.stepOneDay();
         CHECK(session.view().reservedCash == ask + sim::Money::fromUnits(40'000));
         CHECK(countKind(session, sim::NoticeKind::CommandRejected) == 0);
+    }
+}
+
+TEST_CASE("Pending sums saturate at the largest amount instead of stopping the game",
+          "[session][pending]") {
+    // These figures are for display (R-001): an absurd order is the sim's to
+    // turn away on the next tick, and must not stop the client before then.
+    const sim::Content content = test::makeContent();
+    game::Session session(content, 1, soloSetup());
+    session.setAutoPause(neverPause());
+    const sim::PlotId plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    const sim::Money largest = sim::Money::fromCents(std::numeric_limits<std::int64_t>::max());
+    const sim::Money lowest = sim::Money::fromCents(std::numeric_limits<std::int64_t>::min());
+    // The most game::parseMoney accepts, so the most a player can type.
+    sim::Money typed;
+    REQUIRE(game::parseMoney("1,000,000,000,000,000", typed));
+    REQUIRE(typed == sim::Money::fromCents(sim::kMaxCashCents));
+    REQUIRE_FALSE(game::parseMoney("1,000,000,000,000,000.01", typed));
+
+    SECTION("two maximal bids") {
+        session.submit(sim::BidOnPlot{{}, plot, largest});
+        session.submit(sim::BidOnPlot{{}, plot, largest});
+        CHECK(session.committed() == largest);
+    }
+    SECTION("a maximal bid on top of an ordinary order") {
+        session.submit(sim::CommissionSurvey{{}, plot});
+        session.submit(sim::BidOnPlot{{}, plot, largest});
+        CHECK(session.committed() == largest);
+    }
+    SECTION("two maximal loans") {
+        session.submit(sim::TakeLoan{{}, largest});
+        session.submit(sim::TakeLoan{{}, largest});
+        CHECK(session.pendingBorrowed() == largest);
+        CHECK(session.committed() == sim::Money::zero());
+    }
+    SECTION("a maximal repayment") {
+        const sim::RepayLoan repay{{}, sim::LoanId(0), largest};
+        CHECK(session.orderCost(repay) == largest);
+        session.submit(repay);
+        CHECK(session.committed() == largest);
+        session.submit(sim::CommissionSurvey{{}, plot});
+        CHECK(session.committed() == largest);
+        session.submit(repay);
+        CHECK(session.committed() == largest);
+    }
+    SECTION("as many of the largest typed amounts as it takes") {
+        // No single typed amount overflows, and two do not either; a long
+        // enough queue of them does.
+        for (int i = 0; i < 100; ++i) {
+            session.submit(sim::TakeLoan{{}, typed});
+            session.submit(sim::BidOnPlot{{}, plot, typed});
+            session.submit(sim::RepayLoan{{}, sim::LoanId(0), typed});
+        }
+        CHECK(session.pendingBorrowed() == largest);
+        CHECK(session.committed() == largest);
+    }
+    SECTION("cancelling brings a saturated sum back down") {
+        session.submit(sim::TakeLoan{{}, largest});
+        session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(250'000)});
+        REQUIRE(session.pendingBorrowed() == largest);
+        CHECK(session.cancel(session.pendingOrders()[0].id));
+        CHECK(session.pendingBorrowed() == sim::Money::fromUnits(250'000));
+    }
+    SECTION("zero and negative amounts cost nothing") {
+        for (const sim::Money amount :
+             {sim::Money::zero(), sim::Money::fromCents(-1), -typed, -largest, lowest}) {
+            CHECK(session.orderCost(sim::BidOnPlot{{}, plot, amount}) == sim::Money::zero());
+            CHECK(session.orderCost(sim::RepayLoan{{}, sim::LoanId(0), amount}) ==
+                  sim::Money::zero());
+            session.submit(sim::BidOnPlot{{}, plot, amount});
+            session.submit(sim::RepayLoan{{}, sim::LoanId(0), amount});
+            session.submit(sim::TakeLoan{{}, amount});
+        }
+        CHECK(session.committed() == sim::Money::zero());
+        CHECK(session.pendingBorrowed() == sim::Money::zero());
+    }
+    SECTION("a negative raise of a standing bid costs nothing") {
+        const sim::Money ask = session.view().plots[plot.index()].askPrice;
+        session.submit(sim::BidOnPlot{{}, plot, ask});
+        session.stepOneDay();
+        REQUIRE(session.view().reservedCash == ask);
+        // Less than the standing bid by more than a Money can hold.
+        for (const sim::Money amount : {sim::Money::zero(), -largest, lowest}) {
+            CHECK(session.orderCost(sim::BidOnPlot{{}, plot, amount}) == sim::Money::zero());
+            session.submit(sim::BidOnPlot{{}, plot, amount});
+        }
+        CHECK(session.committed() == sim::Money::zero());
+        // A maximal raise is the difference, as any raise is.
+        CHECK(session.orderCost(sim::BidOnPlot{{}, plot, largest}) == largest - ask);
     }
 }
 
