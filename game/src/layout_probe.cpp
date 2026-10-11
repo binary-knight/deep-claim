@@ -26,7 +26,15 @@
 // to a mine with stock the first stage needs, delivered by orders, and it
 // exits non-zero when the deadline, the verdict, either company's stage
 // count, percentage, research state or bar differ from the sim's view, on
-// the status strip of every tab and on the Dashboard's race strip.
+// the status strip of every tab and on the Dashboard's race strip. The same
+// game goes on to the Program tab (spec 010): a new game, a delivery given by
+// its button and waiting, then made, the stage's research ordered and under
+// way; then two apps on copies of the content, one whose first stage asks for
+// a good the company cannot dig, and one whose stages are small enough for
+// the fixed game to complete all three. It exits non-zero when a stage, a
+// requirement's tonnes, the cost, the research state, a button's state, the
+// reasons a stage cannot be completed, a pending chip or the Committed figure
+// differ from the sim's view.
 // Not part of the shipped game.
 #include "sim/commands.h"
 #include "sim/view.h"
@@ -74,7 +82,7 @@ public:
     void ReleaseGeometry(Rml::CompiledGeometryHandle /*geometry*/) override {}
     Rml::TextureHandle LoadTexture(Rml::Vector2i& dimensions,
                                    const Rml::String& /*source*/) override {
-        dimensions = {144, 24};  // the icon sheet's size, so sprites resolve
+        dimensions = {168, 24};  // the icon sheet's size, so sprites resolve
         return 1;
     }
     Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte> /*source*/,
@@ -100,8 +108,10 @@ public:
     std::vector<std::string> problems;
 };
 
-constexpr std::array<const char*, 6> kTabs = {"dashboard", "plots",   "market",
-                                              "research",  "finance", "log"};
+// By tab number. The Program tab (spec 010) is the seventh by number and the
+// second on the rail, after the Dashboard.
+constexpr std::array<const char*, 7> kTabs = {"dashboard", "plots", "market", "research",
+                                              "finance",   "log",   "program"};
 constexpr float kDeckWidth = 1300.0F;
 constexpr float kMinDeckText = 14.0F;
 constexpr float kScrollbarWidth = 12.0F;
@@ -474,8 +484,23 @@ bool playLateScenario(game::App& app, const sim::Content& content) {
     return true;
 }
 
-// The second half of the late scenario, probed separately so the survey row
-// above is still on the dashboard when it is laid out.
+// Why a game stopped short of a scenario's state: the day, the land still
+// unlisted, and whether the player fell or the race ended.
+std::string whereItStopped(const sim::CompanyView& view) {
+    std::string race = "the race still running";
+    if (view.outcome.ended) {
+        race =
+            view.outcome.founder.valid()
+                ? std::format("{} founded the program on day {}",
+                              view.companies[view.outcome.founder.index()].name, view.outcome.day)
+                : std::format("the race ended on day {} with no founder", view.outcome.day);
+    }
+    return std::format("SCENARIO: stopped on day {}, {} plots unlisted, player {}, {}\n", view.day,
+                       view.unlistedPlotsRemaining, view.bankrupt ? "bankrupt" : "solvent", race);
+}
+
+// The populated game played on until the land has run out, on the copy of
+// the content in which the race cannot end first (landRunsOutContent).
 bool playEndgameScenario(game::App& app, const sim::Content& content) {
     game::Session& session = app.session();
     const auto fail = [&](const char* what) {
@@ -487,6 +512,7 @@ bool playEndgameScenario(game::App& app, const sim::Content& content) {
         session.stepOneDay();
     }
     if (session.view().unlistedPlotsRemaining > 0 || session.gameOver()) {
+        std::cout << whereItStopped(session.view());
         return fail("the land queue did not run dry with the player solvent");
     }
     // 3. Draw the remaining credit, in as many loans as the bank allows.
@@ -593,7 +619,8 @@ constexpr int kLayoutFailure = 3;
 constexpr int kScenarioFailure = 5;
 
 // The played game, stage by stage, each laid out before the next is played.
-// Returns 0, or the exit code of the first stage that failed.
+// Returns 0, or the exit code of the first stage that failed. The game's
+// last stage, the land run out, is probeEndgame's.
 int probeScenarios(Rml::Context& context, game::App& app, LoggingSystem& system,
                    const sim::Content& content) {
     if (!playScenario(app, content)) {
@@ -608,7 +635,30 @@ int probeScenarios(Rml::Context& context, game::App& app, LoggingSystem& system,
     if (!probeFrames(context, app, system, "survey in", Popover::None)) {
         return kLayoutFailure;
     }
-    if (!playEndgameScenario(app, content)) {
+    return 0;
+}
+
+// The shipped content with a last stage no company can pay for, so that no
+// program is founded while the land runs out: in the shipped game the rival
+// founds it first (about day 3,400 on the fixed seed, with land still
+// unlisted) and the game ends there. Only the last stage's cost differs, so
+// the companies play as they do in the shipped game until one of them has
+// everything else that stage needs.
+constexpr std::int64_t kNeverPaidDollars = 1'000'000'000'000;
+
+sim::Content landRunsOutContent(const sim::Content& shipped) {
+    sim::Content content = shipped;
+    if (!content.program.stages.empty()) {
+        content.program.stages.back().cost = sim::Money::fromUnits(kNeverPaidDollars);
+    }
+    return content;
+}
+
+// The interface when no land is left, on that copy and so on an app of its
+// own: the populated game again, then on until the queue is dry.
+int probeEndgame(Rml::Context& context, game::App& app, LoggingSystem& system,
+                 const sim::Content& content) {
+    if (!playScenario(app, content) || !playEndgameScenario(app, content)) {
         return kScenarioFailure;
     }
     const bool laidOut = probeFrames(context, app, system, "endgame", Popover::None);
@@ -1829,6 +1879,587 @@ bool probeRaceFrames(Rml::Context& context, game::App& app, LoggingSystem& syste
     return ok;
 }
 
+// ---- the Program tab (spec 010) ----
+
+constexpr int kProgramFailure = 10;
+constexpr int kProgramTab = 6;
+
+// One requirement's row, as the catalogue words the sim's figures for it.
+struct NeedLine {
+    sim::ResourceId resource;
+    std::string good;
+    std::string needs;
+    std::string delivered;
+    std::string stock;
+    std::string still;
+    std::int64_t deliverable = 0;  // the lesser of the stock and what is still needed
+    std::string button;            // "Deliver 12,000 t", or "Deliver" with nothing to deliver
+    std::string note;              // under a Deliver button that is off
+    std::string locked;            // what unlocks a good the company cannot dig, or ""
+    bool waiting = false;          // a delivery of this good is waiting for the clock
+};
+
+// What the Program tab must read, worked out here from the sim's view, the
+// session's queue and the catalogue, independently of the client's model.
+struct ProgramExpected {
+    std::string title;
+    std::string intro;
+    std::vector<std::pair<std::string, std::string>> stages;  // heading, then state
+    std::string cover;                                        // the cover-costs warning, or ""
+    bool complete = false;                                    // every stage is done
+    std::string done;
+    // The current stage; empty when the program is complete.
+    std::string heading;
+    std::vector<NeedLine> needs;
+    std::string cost;
+    std::string research;
+    bool researchOpen = false;     // not started: Start research stands, live or off
+    bool researchLive = false;     // the Research tab would start it too
+    bool researchWaiting = false;  // its order is waiting for the clock
+    std::string researchButton;
+    bool ready = false;  // the sim would accept the stage's completion today
+    bool completeWaiting = false;
+    std::string completeButton;
+    std::string blocked;  // the lines saying what is missing, " | " between them
+    std::string readyLine;
+    // The chips of the three orders, and Cancel.
+    std::string deliverChip;
+    std::string researchChip;
+    std::string completeChip;
+    std::string cancel;
+};
+
+template <typename T, typename Matches>
+bool orderWaiting(const game::Session& session, Matches matches) {
+    return std::ranges::any_of(session.pendingOrders(), [&](const game::PendingOrder& order) {
+        const auto* command = std::get_if<T>(&order.command);
+        return command != nullptr && matches(*command);
+    });
+}
+
+std::string stageHeading(const sim::Content& content, std::size_t stage) {
+    const std::string number = std::to_string(stage + 1);
+    return game::text(content, "ui.program_stage_heading",
+                      {{"number", number},
+                       {"name", game::text(content, "ui.program_stage_" + number + "_name")}});
+}
+
+NeedLine simNeed(const game::Session& session, const sim::ProgramRequirementView& need) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const sim::ResourceDef& good = content.resources[need.resource.index()];
+    NeedLine line;
+    line.resource = need.resource;
+    line.good = good.name;
+    line.needs = game::formatTonnes(need.neededTonnes);
+    line.delivered = game::formatTonnes(need.deliveredTonnes);
+    line.stock = game::formatTonnes(need.stockTonnes);
+    const std::int64_t still = std::max<std::int64_t>(need.neededTonnes - need.deliveredTonnes, 0);
+    line.still = game::formatTonnes(still);
+    line.deliverable = std::max<std::int64_t>(std::min(need.stockTonnes, still), 0);
+    line.button = line.deliverable > 0
+                      ? game::text(content, "ui.program_deliver_amount",
+                                   {{"tonnes", game::formatTonnes(line.deliverable)}})
+                      : game::text(content, "ui.program_deliver");
+    line.note =
+        line.deliverable > 0 ? std::string() : game::text(content, "ui.program_nothing_to_deliver");
+    if (good.unlockedBy.valid() &&
+        std::ranges::find(view.completedTechs, good.unlockedBy) == view.completedTechs.end()) {
+        line.locked = game::text(
+            content, "ui.program_blocked_locked",
+            {{"resource", good.name}, {"tech", content.techs[good.unlockedBy.index()].name}});
+    }
+    const sim::ResourceId resource = need.resource;
+    line.waiting = orderWaiting<sim::DeliverToProgram>(
+        session, [&](const sim::DeliverToProgram& order) { return order.resource == resource; });
+    return line;
+}
+
+std::string simResearchState(const sim::Content& content, const sim::ProgramStageView& stage) {
+    switch (stage.researchState) {
+        case sim::ProgramResearchState::NotStarted:
+            return game::text(content, "ui.program_research_not_started");
+        case sim::ProgramResearchState::InProgress:
+            return game::text(
+                content, "ui.program_research_in_progress",
+                {{"day", std::to_string(stage.activeResearch ? stage.activeResearch->completesDay
+                                                             : sim::Day{0})}});
+        case sim::ProgramResearchState::Done:
+            return game::text(content, "ui.program_research_done");
+    }
+    return {};
+}
+
+// What is missing for the stage to be completed, in the order the sim tests
+// it (sim/src/program.cpp completionBlocker): research, deliveries, cash.
+std::string simBlocked(const sim::Content& content, const sim::CompanyView& view,
+                       const sim::ProgramStageView& stage) {
+    std::string blocked;
+    const auto add = [&](const std::string& line) {
+        blocked += (blocked.empty() ? "" : " | ") + line;
+    };
+    if (stage.researchState != sim::ProgramResearchState::Done) {
+        add(game::text(content, "ui.program_blocked_research"));
+    }
+    if (std::ranges::any_of(stage.requirements, [](const sim::ProgramRequirementView& need) {
+            return need.deliveredTonnes < need.neededTonnes;
+        })) {
+        add(game::text(content, "ui.program_blocked_deliveries"));
+    }
+    if (stage.cost > view.cash - view.reservedCash) {
+        add(game::text(content, "ui.program_blocked_cash",
+                       {{"amount", game::formatMoney(stage.cost)}}));
+    }
+    return blocked;
+}
+
+ProgramExpected simProgram(game::App& app) {
+    const game::Session& session = app.session();
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const sim::ProgramView& program = view.program;
+    ProgramExpected expected;
+    expected.title = game::text(content, "ui.program_title");
+    expected.intro = game::text(content, "ui.program_intro");
+    expected.deliverChip = game::text(content, "ui.pending_deliver");
+    expected.researchChip = game::text(content, "ui.pending_research");
+    expected.completeChip = game::text(content, "ui.pending_complete_stage");
+    expected.cancel = game::text(content, "ui.cancel");
+    for (std::size_t i = 0; i < content.program.stages.size(); ++i) {
+        const char* state = "to come";
+        if (i < program.stagesCompleted) {
+            state = "complete";
+        } else if (i == program.stagesCompleted) {
+            state = "current";
+        }
+        expected.stages.emplace_back(stageHeading(content, i), state);
+    }
+    if (!program.stage) {
+        expected.complete = true;
+        expected.done = game::text(content, "ui.program_complete");
+        return expected;
+    }
+    // Cover costs as it will stand once a waiting order for it is given.
+    bool cover = view.coverCosts;
+    for (const game::PendingOrder& order : session.pendingOrders()) {
+        if (const auto* set = std::get_if<sim::SetCoverCosts>(&order.command)) {
+            cover = set->enabled != 0;
+        }
+    }
+    expected.cover = cover ? game::text(content, "ui.program_cover_costs_warning") : "";
+    const sim::ProgramStageView& stage = *program.stage;
+    expected.heading = stageHeading(content, stage.index);
+    for (const sim::ProgramRequirementView& need : stage.requirements) {
+        expected.needs.push_back(simNeed(session, need));
+    }
+    const std::string cost = game::formatMoney(stage.cost);
+    expected.cost = game::text(content, "ui.program_cost", {{"amount", cost}});
+    expected.research = simResearchState(content, stage);
+    expected.researchOpen = stage.researchState == sim::ProgramResearchState::NotStarted;
+    // "As the Research tab does it": the project's own row there.
+    expected.researchLive = app.model().techs.at(stage.research.index()).can_start;
+    const sim::TechId project = stage.research;
+    expected.researchWaiting = orderWaiting<sim::StartResearch>(
+        session, [&](const sim::StartResearch& order) { return order.tech == project; });
+    expected.researchButton =
+        game::text(content, "ui.program_start_research",
+                   {{"amount", game::formatMoney(content.techs[project.index()].cost)}});
+    expected.ready = stage.ready;
+    expected.completeWaiting = orderWaiting<sim::CompleteProgramStage>(
+        session, [](const sim::CompleteProgramStage&) { return true; });
+    expected.completeButton = game::text(content, "ui.program_complete_stage", {{"amount", cost}});
+    if (stage.ready) {
+        expected.readyLine = game::text(content, "ui.program_stage_ready");
+    } else {
+        expected.blocked = simBlocked(content, view, stage);
+    }
+    return expected;
+}
+
+// How many buttons under `root` read `text` and are live (or off).
+std::size_t buttonsReading(Rml::Element* root, const std::string& text, bool live) {
+    std::size_t found = 0;
+    for (Rml::Element* button : visibleElements(root, "button", "", text)) {
+        found += button->IsClassSet("disabled") != live ? 1U : 0U;
+    }
+    return found;
+}
+
+// One control of the tab: its order's chip with Cancel beside it while the
+// order waits, else its button, live or off, or neither.
+struct ControlExpected {
+    std::string button;
+    bool waiting = false;
+    bool live = false;
+    bool off = false;
+};
+
+std::string checkProgramControl(Rml::Element* root, const std::string& where,
+                                const ControlExpected& control, const std::string& chip,
+                                const std::string& cancel, Checks& checks) {
+    std::size_t chips = 0;
+    std::size_t cancels = 0;
+    for (Rml::Element* e : visibleElements(root, "span", "chip", chip)) {
+        chips += e->IsClassSet("accent") ? 1U : 0U;
+        cancels += cancelBeside(e, cancel) != nullptr ? 1U : 0U;
+    }
+    const auto count = [](bool on) { return std::size_t{on ? 1U : 0U}; };
+    checks.same(where + ": \"" + chip + "\" chips", chips, count(control.waiting));
+    checks.same(where + ": Cancel beside the chip", cancels, count(control.waiting));
+    checks.same(where + ": live \"" + control.button + "\" buttons",
+                buttonsReading(root, control.button, true),
+                count(!control.waiting && control.live));
+    checks.same(where + ": \"" + control.button + "\" buttons that are off",
+                buttonsReading(root, control.button, false),
+                count(!control.waiting && control.off));
+    if (control.waiting) {
+        return "waiting, with Cancel";
+    }
+    if (!control.live && !control.off) {
+        return "not offered";
+    }
+    return std::format("\"{}\" {}", control.button, control.live ? "live" : "off");
+}
+
+std::string joinedText(const std::vector<Rml::Element*>& elements) {
+    std::string out;
+    for (Rml::Element* e : elements) {
+        out += (out.empty() ? "" : " | ") + visibleText(e);
+    }
+    return out;
+}
+
+// Everything visible under `box` lies inside it. `inspect` holds elements to
+// the pane that scrolls them, not to the table cell or the row they sit in,
+// so a chip beside its Cancel could run out of its column unnoticed.
+void checkInside(Rml::Element* box, const std::string& where, Checks& checks) {
+    const float left = box->GetAbsoluteOffset(Rml::BoxArea::Border).x;
+    const float right = rightEdge(box);
+    for (int i = 0; i < box->GetNumChildren(); ++i) {
+        Rml::Element* child = box->GetChild(i);
+        if (!child->IsVisible(true) || rmlui_dynamic_cast<Rml::ElementText*>(child) != nullptr) {
+            continue;
+        }
+        const float childLeft = child->GetAbsoluteOffset(Rml::BoxArea::Border).x;
+        checks.expect(
+            childLeft >= left - kSpillTolerance && rightEdge(child) <= right + kSpillTolerance,
+            std::format("{}: {} \"{}\" spans {:.0f} to {:.0f}dp, outside {} at {:.0f} "
+                        "to {:.0f}dp",
+                        where, describe(child), visibleText(child).substr(0, 30), childLeft,
+                        rightEdge(child), describe(box), left, right));
+        checkInside(child, where, checks);
+    }
+}
+
+// One requirement's row on screen against the sim's figures for it.
+std::string checkNeedRow(Rml::Element* row, const std::string& where, const NeedLine& need,
+                         const ProgramExpected& expected, Checks& checks) {
+    const std::string at = where + ": " + need.good;
+    checks.same(at + ": good", onlyText(row, "span", "gname"), need.good);
+    const std::vector<Rml::Element*> figures = visibleElements(row, "td", "n");
+    checks.same(at + ": figures in the row", figures.size(), std::size_t{4});
+    if (figures.size() == 4) {
+        checks.same(at + ": needs", visibleText(figures[0]), need.needs);
+        checks.same(at + ": delivered", visibleText(figures[1]), need.delivered);
+        checks.same(at + ": in stock", visibleText(figures[2]), need.stock);
+        checks.same(at + ": still needed", visibleText(figures[3]), need.still);
+    }
+    checks.same(at + ": what unlocks it", joinedText(visibleElements(row, "span", "locked")),
+                need.locked);
+    const std::string control = checkProgramControl(
+        row, at, {need.button, need.waiting, need.deliverable > 0, need.deliverable == 0},
+        expected.deliverChip, expected.cancel, checks);
+    checks.same(at + ": note under Deliver", joinedText(visibleElements(row, "span", "note")),
+                need.waiting ? std::string() : need.note);
+    for (Rml::Element* cell : visibleElements(row, "td", "")) {
+        checkInside(cell, at, checks);
+    }
+    return std::format("\n      {}: needs {}, delivered {}, in stock {}, still needed {}; {}{}",
+                       need.good, need.needs, need.delivered, need.stock, need.still, control,
+                       need.locked.empty() ? "" : "; " + need.locked);
+}
+
+// The Program tab as the player reads it, against the sim: the three stages
+// and their states, then the current stage's requirements, cost, research
+// and controls, or the line that says the program is complete.
+void checkProgramTab(Rml::Context& context, const std::string& where,
+                     const ProgramExpected& expected, Checks& checks) {
+    settle(context);
+    Rml::Element* tab = context.GetDocument(0)->GetElementById("program");
+    if (tab == nullptr || !tab->IsVisible(true)) {
+        checks.expect(false, where + ": no Program tab on screen");
+        return;
+    }
+    checks.same(where + ": title", onlyText(tab, "h1", ""), expected.title);
+    checks.same(where + ": intro", onlyText(tab, "p", "intro"), expected.intro);
+    const std::vector<Rml::Element*> cells = visibleElements(tab, "div", "pstage");
+    checks.same(where + ": stages listed", cells.size(), expected.stages.size());
+    std::string shown;
+    for (std::size_t i = 0; i < cells.size() && i < expected.stages.size(); ++i) {
+        const std::string at = std::format("{}: stage {}", where, i + 1);
+        checks.same(at + ": heading", onlyText(cells[i], "span", "title"),
+                    expected.stages[i].first);
+        checks.same(at + ": state", onlyText(cells[i], "span", "chip"), expected.stages[i].second);
+        shown += std::format("{}[{}: {}]", i == 0 ? "" : " ", expected.stages[i].first,
+                             expected.stages[i].second);
+    }
+    checks.same(where + ": cover-costs warning", joinedText(visibleElements(tab, "span", "cover")),
+                expected.cover);
+    const std::vector<Rml::Element*> rows = visibleElements(tab, "tr", "need");
+    checks.same(where + ": the program-complete line",
+                joinedText(visibleElements(tab, "p", "done")), expected.done);
+    checks.same(where + ": requirement rows", rows.size(), expected.needs.size());
+    if (expected.complete) {
+        checks.same(where + ": buttons with the program complete",
+                    visibleElements(tab, "button", "").size(), std::size_t{0});
+        std::cout << std::format("    {}: {}\n      \"{}\"\n", where, shown, expected.done);
+        return;
+    }
+    checks.same(where + ": current stage", onlyText(tab, "span", "heading"), expected.heading);
+    for (std::size_t i = 0; i < rows.size() && i < expected.needs.size(); ++i) {
+        shown += checkNeedRow(rows[i], where, expected.needs[i], expected, checks);
+    }
+    checks.same(where + ": cost", onlyText(tab, "span", "cost"), expected.cost);
+    checks.same(where + ": research", onlyText(tab, "span", "rstate"), expected.research);
+    const std::vector<Rml::Element*> actions = visibleElements(tab, "div", "pactions");
+    checks.same(where + ": action rows", actions.size(), std::size_t{1});
+    if (actions.size() != 1) {
+        return;
+    }
+    const std::string research =
+        checkProgramControl(actions.front(), where + ": research",
+                            {expected.researchButton, expected.researchWaiting,
+                             expected.researchOpen && expected.researchLive,
+                             expected.researchOpen && !expected.researchLive},
+                            expected.researchChip, expected.cancel, checks);
+    const std::string complete = checkProgramControl(
+        actions.front(), where + ": completion",
+        {expected.completeButton, expected.completeWaiting, expected.ready, !expected.ready},
+        expected.completeChip, expected.cancel, checks);
+    checks.same(where + ": what is missing", joinedText(visibleElements(tab, "span", "blocked")),
+                expected.blocked);
+    checks.same(where + ": the ready line", joinedText(visibleElements(tab, "span", "ready")),
+                expected.readyLine);
+    checkInside(actions.front(), where + ": actions", checks);
+    for (Rml::Element* cell : cells) {
+        checkInside(cell, where + ": stages", checks);
+    }
+    std::cout << std::format(
+        "    {}: {}{}\n      {}; {}; research: {}; completion: {}\n      {}{}\n", where, shown,
+        expected.cover.empty() ? "" : "\n      warning: " + expected.cover, expected.cost,
+        expected.research, research, complete,
+        expected.ready ? expected.readyLine : "missing: " + expected.blocked,
+        joinedText(visibleElements(tab, "span", "rblocked")).empty()
+            ? std::string()
+            : "\n      research is off because: " +
+                  joinedText(visibleElements(tab, "span", "rblocked")));
+}
+
+// The rail holds seven tabs, Program second, all of them inside it.
+void checkRail(Rml::Context& context, const std::string& where, Checks& checks) {
+    Rml::Element* rail = context.GetDocument(0)->GetElementById("rail");
+    const std::vector<Rml::Element*> tabs = visibleElements(rail, "div", "tab");
+    checks.same(where + ": tabs on the rail", tabs.size(), kTabs.size());
+    if (tabs.size() != kTabs.size()) {
+        return;
+    }
+    checks.expect(visibleElements(tabs[1], "span", "program").size() == 1,
+                  where + ": the Program tab is not second on the rail");
+    checks.expect(tabs[1]->IsClassSet("active"), where + ": the Program tab is not marked active");
+    const float railBottom = rail->GetAbsoluteOffset(Rml::BoxArea::Content).y +
+                             rail->GetBox().GetSize(Rml::BoxArea::Content).y;
+    const float lastBottom = tabs.back()->GetAbsoluteOffset(Rml::BoxArea::Border).y +
+                             tabs.back()->GetBox().GetSize(Rml::BoxArea::Border).y;
+    checks.expect(lastBottom <= railBottom + 0.5F,
+                  std::format("{}: the last tab ends at {:.0f}dp and the rail at {:.0f}dp", where,
+                              lastBottom, railBottom));
+    std::cout << std::format("    rail {}: {} tabs, the last ends at {:.0f}dp of {:.0f}dp\n", where,
+                             tabs.size(), lastBottom, railBottom);
+}
+
+// The Program tab in both frames, laid out and checked against the sim.
+bool probeProgramFrames(Rml::Context& context, game::App& app, LoggingSystem& system,
+                        const char* label, Checks& checks) {
+    bool ok = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== {}, frame {}x{}{} ==\n", label, frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        ok = probeTab(context, app, system, frame, kProgramTab, Popover::None) && ok;
+        const std::string where =
+            "program " + std::to_string(frame.width) + 'x' + std::to_string(frame.height);
+        checkProgramTab(context, where, simProgram(app), checks);
+        checkRail(context, where, checks);
+    }
+    return ok;
+}
+
+int programResult(const Checks& checks, bool laidOut) {
+    if (!checks.ok()) {
+        return kProgramFailure;
+    }
+    return laidOut ? 0 : kLayoutFailure;
+}
+
+// A new game: nothing delivered, the research not started, and the stage's
+// completion off with what is missing said.
+int probeProgramFresh(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    Checks checks("PROGRAM");
+    const sim::Content& content = app.session().content();
+    const std::optional<sim::ProgramStageView> stage = app.session().view().program.stage;
+    if (!stage || stage->index != 0) {
+        std::cout << "SCENARIO (program): a new game is not on the first stage\n";
+        return kScenarioFailure;
+    }
+    const ProgramExpected expected = simProgram(app);
+    checks.expect(stage->researchState == sim::ProgramResearchState::NotStarted &&
+                      std::ranges::all_of(stage->requirements,
+                                          [](const sim::ProgramRequirementView& need) {
+                                              return need.deliveredTonnes == 0;
+                                          }),
+                  "a new game has research or deliveries behind it");
+    checks.expect(!expected.ready && expected.researchOpen, "a new game's stage is ready");
+    // The one place Start research is held to the sim's own figures rather
+    // than to the Research tab's row: an idle lab, a project with nothing
+    // before it, and the cash for it.
+    const sim::CompanyView& view = app.session().view();
+    const sim::TechDef& project = content.techs[stage->research.index()];
+    if (view.activeResearch || !project.prerequisites.empty() ||
+        project.requiresProgramStage > view.program.stagesCompleted ||
+        project.cost > view.cash - view.reservedCash) {
+        std::cout << "SCENARIO (program): a new company cannot start the first stage's project\n";
+        return kScenarioFailure;
+    }
+    checks.expect(expected.researchLive,
+                  "a new company with an idle lab and the cash cannot start the stage's project");
+    checks.expect(expected.blocked.find(game::text(content, "ui.program_blocked_research")) !=
+                          std::string::npos &&
+                      expected.blocked.find(game::text(content, "ui.program_blocked_deliveries")) !=
+                          std::string::npos,
+                  "a new game is not missing both its research and its deliveries");
+    const bool laidOut = probeProgramFrames(context, app, system, "program, new game", checks);
+    return programResult(checks, laidOut);
+}
+
+// One delivery given through the tab, to compare with the sim a day later.
+struct Delivery {
+    sim::ResourceId resource;
+    std::int64_t tonnes = 0;
+    std::int64_t deliveredBefore = 0;
+};
+
+// Gives every delivery the current stage can take through its own Deliver
+// button, takes the first back with its Cancel and gives it again. Nothing
+// has reached the sim: the figures stand and nothing is committed.
+std::vector<Delivery> deliverByButtons(Rml::Context& context, game::App& app, Checks& checks) {
+    game::Session& session = app.session();
+    const sim::Content& content = session.content();
+    app.setTab(kProgramTab);
+    app.refreshNow();
+    const ProgramExpected before = simProgram(app);
+    std::vector<Delivery> given;
+    const std::optional<sim::ProgramStageView> stage = session.view().program.stage;
+    for (std::size_t i = 0; stage && i < before.needs.size(); ++i) {
+        const NeedLine& need = before.needs[i];
+        if (need.deliverable > 0) {
+            clickFirst(context, "button", "", need.button, checks);
+            given.push_back(
+                {need.resource, need.deliverable, stage->requirements[i].deliveredTonnes});
+        }
+    }
+    const auto queued = [&] {
+        return std::ranges::all_of(given, [&](const Delivery& delivery) {
+            return orderWaiting<sim::DeliverToProgram>(
+                session, [&](const sim::DeliverToProgram& order) {
+                    return order.company == game::Session::kPlayer &&
+                           order.resource == delivery.resource && order.tonnes == delivery.tonnes;
+                });
+        });
+    };
+    checks.expect(!given.empty() && session.pendingOrders().size() == given.size() && queued(),
+                  std::format("the Deliver buttons did not queue the most each good can take "
+                              "({} given, {} waiting)",
+                              given.size(), session.pendingOrders().size()));
+    checks.expect(!app.model().has_committed && session.committed() == sim::Money::zero(),
+                  "a delivery waiting is counted as money committed");
+    // Cancel beside the first chip, and the button is back.
+    settle(context);
+    const std::vector<Rml::Element*> chips =
+        visibleElements(context.GetDocument(0), "span", "chip", before.deliverChip);
+    click(context, chips.empty() ? nullptr : cancelBeside(chips.front(), before.cancel),
+          "Cancel beside a delivery's chip", checks);
+    checks.same("deliveries waiting after Cancel", session.pendingOrders().size(),
+                given.empty() ? std::size_t{0} : given.size() - 1);
+    checks.same("status after Cancel", app.model().status_line,
+                game::text(content, "status.order_cancelled"));
+    const auto first = std::ranges::find_if(
+        before.needs, [](const NeedLine& need) { return need.deliverable > 0; });
+    if (first != before.needs.end()) {
+        clickFirst(context, "button", "", first->button, checks);
+    }
+    checks.expect(session.pendingOrders().size() == given.size() && queued(),
+                  "the delivery taken back was not given again by its button");
+    return given;
+}
+
+// The deliveries have been made: each requirement's delivered figure in the
+// sim's view is up by what its button said.
+void checkDelivered(const game::Session& session, const std::vector<Delivery>& given,
+                    Checks& checks) {
+    const std::optional<sim::ProgramStageView> stage = session.view().program.stage;
+    for (const Delivery& delivery : given) {
+        std::int64_t now = -1;
+        for (const sim::ProgramRequirementView& need :
+             stage ? stage->requirements : std::vector<sim::ProgramRequirementView>()) {
+            now = need.resource == delivery.resource ? need.deliveredTonnes : now;
+        }
+        checks.same(std::format("{} delivered a day later",
+                                session.content().resources[delivery.resource.index()].name),
+                    now, delivery.deliveredBefore + delivery.tonnes);
+    }
+}
+
+// The stage's research ordered by the tab's button, waiting with its cost
+// committed, then under way a day later. Returns a failure code or 0.
+int probeProgramResearch(Rml::Context& context, game::App& app, LoggingSystem& system,
+                         Checks& checks, bool& laidOut) {
+    game::Session& session = app.session();
+    const sim::Content& content = session.content();
+    app.setTab(kProgramTab);
+    app.refreshNow();
+    const ProgramExpected open = simProgram(app);
+    const std::optional<sim::ProgramStageView> stage = session.view().program.stage;
+    if (!stage || !open.researchOpen || !open.researchLive || !session.pendingOrders().empty()) {
+        std::cout << std::format(
+            "SCENARIO (program): the stage's research cannot be started ({})\n", app.model().day);
+        return kScenarioFailure;
+    }
+    clickFirst(context, "button", "", open.researchButton, checks);
+    const sim::TechId project = stage->research;
+    checks.expect(orderWaiting<sim::StartResearch>(
+                      session,
+                      [&](const sim::StartResearch& order) {
+                          return order.company == game::Session::kPlayer && order.tech == project;
+                      }),
+                  "Start research did not queue the stage's project");
+    checks.same("Committed with the research waiting", app.model().committed,
+                game::text(content, "ui.committed",
+                           {{"amount", game::formatMoney(content.techs[project.index()].cost)}}));
+    laidOut =
+        probeProgramFrames(context, app, system, "program, research waiting", checks) && laidOut;
+    session.stepOneDay();
+    app.refreshNow();
+    const std::optional<sim::ProgramStageView> after = session.view().program.stage;
+    checks.expect(after && after->researchState == sim::ProgramResearchState::InProgress &&
+                      after->activeResearch.has_value(),
+                  "the stage's research is not under way a day after it was ordered");
+    laidOut =
+        probeProgramFrames(context, app, system, "program, research under way", checks) && laidOut;
+    return 0;
+}
+
 // Starts the fixed game again and plays it, with the first stage's goods
 // taken off their standing sell orders, to a mine with a fifth of what the stage needs of one of
 // them in stock. Returns false with a reason when the fixed seed no longer gets there.
@@ -1879,13 +2510,18 @@ bool playToStock(game::App& app, const sim::Content& content) {
 }
 
 // The race pass. The fixed game is played to a mine with ore in stock; the
-// strip is checked there, with nothing delivered and the two companies level. Then everything in
-// stock that the stage still needs is delivered by DeliverToProgram orders given to the session as
-// the Program tab will give them, one day is played, and the strip is checked and laid out again:
-// the player's figures have moved that day and the rival's are its own.
+// strip is checked there, with nothing delivered and the two companies level.
+// Then everything in stock that the stage still needs is delivered through
+// the Program tab's Deliver buttons, and the tab is laid out with the orders
+// waiting; one day is played, and the strip and the tab are checked and laid
+// out again: the player's figures have moved that day and the rival's are
+// its own. Last, the stage's research is ordered by the tab's button and is
+// under way a day later. `dug` takes what the player's mine digs a day, ore
+// by ore, for the easy program's copy of the content.
 int probeRace(Rml::Context& context, game::App& app, LoggingSystem& system,
-              const sim::Content& content) {
+              const sim::Content& content, std::vector<std::int64_t>& dug) {
     Checks checks("RACE");
+    Checks tabChecks("PROGRAM");
     if (!playToStock(app, content)) {
         return kScenarioFailure;
     }
@@ -1908,18 +2544,14 @@ int probeRace(Rml::Context& context, game::App& app, LoggingSystem& system,
     checkRaceItem(context, "nothing delivered", simRace(session), checks);
     checkRaceStrip(context, "nothing delivered", simRace(session), checks);
     // playToStock left the player on a stage with goods to deliver.
-    const std::optional<sim::ProgramStageView> stage = session.view().program.stage;
-    for (const sim::ProgramRequirementView& need :
-         stage ? stage->requirements : std::vector<sim::ProgramRequirementView>()) {
-        const std::int64_t tonnes =
-            std::min(need.stockTonnes, need.neededTonnes - need.deliveredTonnes);
-        if (tonnes > 0) {
-            session.submit(sim::DeliverToProgram{{}, need.resource, tonnes});
-        }
-    }
+    const std::vector<Delivery> given = deliverByButtons(context, app, tabChecks);
+    bool laidOut =
+        probeProgramFrames(context, app, system, "program, deliveries waiting", tabChecks);
     session.stepOneDay();
     app.refreshNow();
     place("delivered");
+    checkDelivered(session, given, tabChecks);
+    laidOut = probeProgramFrames(context, app, system, "program, delivered", tabChecks) && laidOut;
     const sim::CompanyView& view = session.view();
     const sim::ProgramPublicView& mine = view.programs[game::Session::kPlayer.index()];
     // Different places on screen: a different stage count or whole percentage.
@@ -1933,11 +2565,820 @@ int probeRace(Rml::Context& context, game::App& app, LoggingSystem& system,
         return kScenarioFailure;
     }
     const RaceExpected expected = simRace(session);
-    const bool laidOut = probeRaceFrames(context, app, system, expected, "race", checks);
+    laidOut = probeRaceFrames(context, app, system, expected, "race", checks) && laidOut;
+    for (const sim::MineView& working : view.mines) {
+        if (working.state == sim::MineState::Operating) {
+            dug = working.lastOutputTonnes;
+        }
+    }
+    if (const int code = probeProgramResearch(context, app, system, tabChecks, laidOut);
+        code != 0) {
+        return code;
+    }
     if (!checks.ok()) {
         return kRaceFailure;
     }
+    return programResult(tabChecks, laidOut);
+}
+
+// ---- the Stops menu (spec 010, BR-010) ----
+
+constexpr int kStopsFailure = 12;
+
+// The rule's row in the open menu, or nothing.
+Rml::Element* stopsRow(Rml::Context& context, const std::string& label) {
+    Rml::Element* menu = context.GetDocument(0)->GetElementById("pausemenu");
+    const std::vector<Rml::Element*> rows = visibleElements(menu, "div", "check", label);
+    return rows.size() == 1 ? rows.front() : nullptr;
+}
+
+// The menu lists "Rival program progress" with the other rules, inside the
+// menu and the window in both frames, and a click on it switches the rule
+// off in the session and on again, as it does for the others.
+int probeStopsMenu(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    Checks checks("STOPS");
+    const sim::Content& content = app.session().content();
+    const std::string label = game::text(content, "ui.pause_on.rival_program");
+    const auto ruleOn = [&] {
+        return app.session().autoPause().isEnabled(game::PauseOn::RivalProgram);
+    };
+    bool laidOut = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== Stops menu, frame {}x{}{} ==\n", frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        laidOut = probeTab(context, app, system, frame, 0, Popover::PauseMenu) && laidOut;
+        const std::string where = std::format("stops {}x{}", frame.width, frame.height);
+        Rml::Element* menu = context.GetDocument(0)->GetElementById("pausemenu");
+        if (menu == nullptr || !menu->IsVisible(true)) {
+            checks.expect(false, where + ": the Stops menu is not open");
+            continue;
+        }
+        checks.same(where + ": rules listed", visibleElements(menu, "div", "check").size(),
+                    game::kPauseOnCount);
+        const float bottom = menu->GetAbsoluteOffset(Rml::BoxArea::Border).y +
+                             menu->GetBox().GetSize(Rml::BoxArea::Border).y;
+        checks.expect(rightEdge(menu) <= static_cast<float>(frame.width) &&
+                          bottom <= static_cast<float>(frame.height),
+                      std::format("{}: the menu ends at {:.0f}dp across and {:.0f}dp down", where,
+                                  rightEdge(menu), bottom));
+        checkInside(menu, where, checks);
+        const bool before = ruleOn();
+        std::string states;
+        for (int turn = 0; turn < 2; ++turn) {
+            Rml::Element* row = stopsRow(context, label);
+            if (row == nullptr) {
+                checks.expect(false, std::format("{}: no row reads \"{}\"", where, label));
+                break;
+            }
+            checks.expect(row->IsClassSet("on") == ruleOn(),
+                          where + ": the row's tick does not match the session's rule");
+            states += std::format("{}{}", states.empty() ? "" : " -> ", ruleOn() ? "on" : "off");
+            const bool was = ruleOn();
+            click(context, row, label, checks);
+            checks.expect(ruleOn() != was, where + ": a click did not switch the rule");
+        }
+        Rml::Element* row = stopsRow(context, label);
+        checks.expect(row != nullptr && ruleOn() == before && row->IsClassSet("on") == before,
+                      where + ": the rule is not back as it was after two clicks");
+        std::cout << std::format(
+            "    {}: \"{}\" is one of {} rules; {} -> {}; menu ends {:.0f}dp "
+            "down\n",
+            where, label, game::kPauseOnCount, states, ruleOn() ? "on" : "off", bottom);
+    }
+    app.showPauseMenu(false);
+    if (!checks.ok()) {
+        return kStopsFailure;
+    }
     return laidOut ? 0 : kLayoutFailure;
+}
+
+// ---- the end screen (spec 010) ----
+
+constexpr int kEndFailure = 11;
+
+// One company's column on the end screen.
+struct EndColumn {
+    std::string name;
+    std::string count;               // "2 of 3 stages complete"
+    std::vector<std::string> lines;  // one a stage
+};
+
+// What the end screen should read, from the session.
+struct EndExpected {
+    std::string title;
+    std::string body;
+    std::string day;
+    std::vector<EndColumn> columns;  // the player first
+    std::string cash;
+    std::string mines;
+    std::string stages;
+    std::string button;
+};
+
+// The day the session's log has for a notice of this kind about this
+// company; `number` picks a stage's completion (0 for any notice).
+std::optional<sim::Day> loggedDay(const game::Session& session, sim::NoticeKind kind,
+                                  sim::CompanyId company, std::int64_t number) {
+    std::optional<sim::Day> day;
+    for (const game::LogEntry& entry : session.log()) {
+        if (entry.notice.kind == kind && entry.notice.company == company &&
+            (number == 0 || entry.notice.tonnes == number)) {
+            day = entry.day;
+        }
+    }
+    return day;
+}
+
+EndColumn simEndColumn(const game::Session& session, const sim::ProgramPublicView& program,
+                       Checks& checks) {
+    const sim::Content& content = session.content();
+    const std::size_t total = content.program.stages.size();
+    EndColumn column;
+    column.name = program.company == game::Session::kPlayer
+                      ? game::text(content, "ui.race_you")
+                      : session.view().companies[program.company.index()].name;
+    column.count = game::text(
+        content, "ui.race_stage",
+        {{"done", std::to_string(program.stagesCompleted)}, {"total", std::to_string(total)}});
+    for (std::size_t stage = 1; stage <= total; ++stage) {
+        if (stage > program.stagesCompleted) {
+            column.lines.push_back(
+                game::text(content, "ui.end_stage_never", {{"number", std::to_string(stage)}}));
+            continue;
+        }
+        const std::optional<sim::Day> day =
+            loggedDay(session, sim::NoticeKind::ProgramStageComplete, program.company,
+                      static_cast<std::int64_t>(stage));
+        checks.expect(day.has_value(), std::format("the log has no completion of stage {} by {}",
+                                                   stage, column.name));
+        column.lines.push_back(game::text(
+            content, "ui.end_stage_days",
+            {{"number", std::to_string(stage)}, {"day", std::to_string(day.value_or(0))}}));
+    }
+    return column;
+}
+
+// `result` is the ending the stage played for: "founded", "partner", "lost",
+// "deadline" or "bankrupt". The words are the catalogue's for it; the days
+// and figures are the session's.
+EndExpected simEnd(const game::Session& session, const std::string& result, Checks& checks) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const sim::OutcomeView& outcome = session.outcome();
+    const std::size_t player = game::Session::kPlayer.index();
+    EndExpected expected;
+    const bool bankrupt = result == "bankrupt";
+    const std::string named = !bankrupt && outcome.founder.valid()
+                                  ? view.companies[outcome.founder.index()].name
+                                  : view.companies[player].name;
+    expected.title = game::text(content, "ui.end_" + result + "_title");
+    expected.body = game::text(content, "ui.end_" + result + "_body", {{"company", named}});
+    const std::optional<sim::Day> fell =
+        loggedDay(session, sim::NoticeKind::Bankrupt, game::Session::kPlayer, 0);
+    checks.expect(!bankrupt || fell.has_value(), "the log has no bankruptcy of the player");
+    expected.day = game::text(content, "ui.end_day",
+                              {{"day", std::to_string(bankrupt ? fell.value_or(0) : outcome.day)}});
+    expected.columns.push_back(simEndColumn(session, view.programs[player], checks));
+    for (const sim::ProgramPublicView& program : view.programs) {
+        if (program.company != game::Session::kPlayer) {
+            expected.columns.push_back(simEndColumn(session, program, checks));
+        }
+    }
+    expected.cash = game::formatMoney(view.cash);
+    expected.mines = std::to_string(view.mines.size());
+    expected.stages = std::to_string(view.program.stagesCompleted);
+    expected.button = game::text(content, "ui.end_new_game");
+    return expected;
+}
+
+// The session's own answer to how the game ended, in the stages' words.
+std::string sessionResult(const game::Session& session) {
+    const sim::CompanyView& view = session.view();
+    const sim::OutcomeView& outcome = session.outcome();
+    if (view.bankrupt) {
+        return "bankrupt";
+    }
+    if (!outcome.ended) {
+        return "still playing";
+    }
+    switch (outcome.results[game::Session::kPlayer.index()]) {
+        case sim::ProgramResult::Founded:
+            return "founded";
+        case sim::ProgramResult::LesserPartner:
+            return "partner";
+        case sim::ProgramResult::Lost:
+            return outcome.founder.valid() ? "lost" : "deadline";
+        case sim::ProgramResult::None:
+            break;
+    }
+    return "no result";
+}
+
+// The end screen against the session: it covers the window, lies inside it,
+// and reads what the session reports.
+void checkEndScreen(Rml::Context& context, const Frame& frame, const EndExpected& expected,
+                    Checks& checks) {
+    const std::string where = std::format("end {}x{}", frame.width, frame.height);
+    Rml::Element* overlay = context.GetDocument(0)->GetElementById("overlay");
+    if (overlay == nullptr || !overlay->IsVisible(true)) {
+        checks.expect(false, where + ": the end screen is not shown");
+        return;
+    }
+    const Rml::Vector2f cover = overlay->GetBox().GetSize(Rml::BoxArea::Border);
+    checks.expect(std::abs(cover.x - static_cast<float>(frame.width)) <= kSpillTolerance &&
+                      std::abs(cover.y - static_cast<float>(frame.height)) <= kSpillTolerance,
+                  std::format("{}: the end screen is {:.0f}x{:.0f}dp and does not cover the window",
+                              where, cover.x, cover.y));
+    const std::vector<Rml::Element*> panels = visibleElements(overlay, "div", "panel");
+    checks.same(where + ": panels", panels.size(), std::size_t{1});
+    if (panels.size() != 1) {
+        return;
+    }
+    Rml::Element* panel = panels.front();
+    const float top = panel->GetAbsoluteOffset(Rml::BoxArea::Border).y;
+    const float bottom = top + panel->GetBox().GetSize(Rml::BoxArea::Border).y;
+    checks.expect(top >= 0.0F && bottom <= static_cast<float>(frame.height) &&
+                      panel->GetAbsoluteOffset(Rml::BoxArea::Border).x >= 0.0F &&
+                      rightEdge(panel) <= static_cast<float>(frame.width),
+                  std::format("{}: the panel runs from {:.0f} to {:.0f}dp down a {}dp window",
+                              where, top, bottom, frame.height));
+    checkInside(panel, where, checks);
+    checks.same(where + ": title", onlyText(panel, "h1", ""), expected.title);
+    checks.same(where + ": body", onlyText(panel, "p", "body"), expected.body);
+    checks.same(where + ": day", onlyText(panel, "p", "day"), expected.day);
+    std::vector<Rml::Element*> columns = visibleElements(panel, "div", "col");
+    std::erase_if(columns, [](Rml::Element* e) { return e->IsClassSet("figures"); });
+    checks.same(where + ": companies", columns.size(), expected.columns.size());
+    std::string shown;
+    for (std::size_t i = 0; i < columns.size() && i < expected.columns.size(); ++i) {
+        const EndColumn& column = expected.columns[i];
+        const std::string who = where + ": " + column.name;
+        checks.same(who + ": name", onlyText(columns[i], "span", "who"), column.name);
+        checks.same(who + ": stages complete", onlyText(columns[i], "span", "count"), column.count);
+        std::string lines;
+        for (const std::string& line : column.lines) {
+            lines += (lines.empty() ? "" : " | ") + line;
+        }
+        checks.same(who + ": stage days", joinedText(visibleElements(columns[i], "span", "sline")),
+                    lines);
+        shown += std::format("\n      {}: {}; {}", column.name, column.count, lines);
+    }
+    const std::vector<Rml::Element*> figures = visibleElements(panel, "div", "figures");
+    checks.same(where + ": figure columns", figures.size(), std::size_t{1});
+    const std::string values =
+        figures.empty() ? "" : joinedText(visibleElements(figures.front(), "span", "v"));
+    checks.same(where + ": the player's figures", values,
+                expected.cash + " | " + expected.mines + " | " + expected.stages);
+    // New game is the only way on.
+    const std::vector<Rml::Element*> buttons = visibleElements(overlay, "button", "");
+    checks.same(where + ": buttons on the end screen", joinedText(buttons), expected.button);
+    std::cout << std::format(
+        "    {}: \"{}\"\n      \"{}\"\n      {}; panel {:.0f} to {:.0f}dp of {}dp{}\n      cash "
+        "{}, "
+        "mines {}, stages {}; button \"{}\"\n",
+        where, expected.title, expected.body, expected.day, top, bottom, frame.height, shown,
+        expected.cash, expected.mines, expected.stages, joinedText(buttons));
+}
+
+// The clock controls read as off, and neither they nor any control on the
+// tab behind the end screen moves the game or queues an order. The controls
+// are clicked directly, as if the end screen were not in the way.
+void checkNothingMoves(Rml::Context& context, game::App& app, const std::string& where,
+                       Checks& checks) {
+    const game::Session& session = app.session();
+    const sim::Day day = session.day();
+    const std::size_t waiting = session.pendingOrders().size();
+    Rml::ElementDocument* doc = context.GetDocument(0);
+    const std::vector<Rml::Element*> headers = visibleElements(doc, "div", "speed");
+    const std::size_t clock =
+        headers.empty() ? 0 : visibleElements(headers.front(), "button", "").size();
+    checks.expect(clock == 5, where + ": the header does not hold the five clock controls");
+    for (std::size_t i = 0; i < clock; ++i) {
+        // Found again each time: a click may rebuild what the model repeats.
+        Rml::Element* button = visibleElements(headers.front(), "button", "").at(i);
+        checks.expect(
+            button->IsClassSet("disabled"),
+            std::format("{}: clock control \"{}\" is not disabled", where, visibleText(button)));
+        button->Click();
+        settle(context);
+    }
+    Rml::Element* content = doc->GetElementById("content");
+    std::size_t clicked = 0;
+    for (const char* tag : {"button", "div"}) {
+        const std::string_view cls = std::string_view(tag) == "div" ? "check" : "";
+        const std::size_t controls = visibleElements(content, tag, cls).size();
+        for (std::size_t i = 0; i < controls; ++i) {
+            const std::vector<Rml::Element*> found = visibleElements(content, tag, cls);
+            if (i < found.size()) {
+                found[i]->Click();
+                settle(context);
+                ++clicked;
+            }
+        }
+    }
+    checks.expect(session.day() == day && session.speed() == game::Speed::Paused,
+                  where + ": the clock moved after the game was over");
+    checks.expect(session.pendingOrders().size() <= waiting,
+                  where + ": an order was queued after the game was over");
+    std::cout << std::format(
+        "    {}: 5 clock controls off; {} controls behind the end screen "
+        "clicked, day {} and {} waiting orders unchanged\n",
+        where, clicked, session.day(), session.pendingOrders().size());
+}
+
+// A finished game in both frames: every tab laid out under the end screen,
+// the screen checked against the session, every control tried. `result` is
+// the ending the stage played for; the session must report the same.
+int probeEndScreen(Rml::Context& context, game::App& app, LoggingSystem& system,
+                   const std::string& result) {
+    Checks checks("END");
+    const game::Session& session = app.session();
+    app.refreshNow();
+    checks.same("the session's ending", sessionResult(session), result);
+    checks.expect(session.gameOver(), "the session does not report the game over");
+    if (!checks.ok()) {
+        return kEndFailure;
+    }
+    const EndExpected expected = simEnd(session, result, checks);
+    bool laidOut = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== end screen, {}, frame {}x{}{} ==\n", result, frame.width,
+                                 frame.height, deck ? " (deck)" : "");
+        for (std::size_t tab = 0; tab < kTabs.size(); ++tab) {
+            laidOut = probeTab(context, app, system, frame, tab, Popover::None) && laidOut;
+            if (tab == 0) {
+                checkEndScreen(context, frame, expected, checks);
+            }
+            checkNothingMoves(context, app,
+                              std::format("end {}x{} {}", frame.width, frame.height, kTabs.at(tab)),
+                              checks);
+        }
+    }
+    // The one button starts a new game, and play is back.
+    Rml::Element* overlay = context.GetDocument(0)->GetElementById("overlay");
+    const std::vector<Rml::Element*> buttons = visibleElements(overlay, "button", "");
+    click(context, buttons.size() == 1 ? buttons.front() : nullptr, "New game on the end screen",
+          checks);
+    app.refreshNow();
+    settle(context);
+    overlay = context.GetDocument(0)->GetElementById("overlay");
+    checks.expect(!app.session().gameOver() && app.session().day() == 0 &&
+                      (overlay == nullptr || !overlay->IsVisible(true)),
+                  "New game did not start a new game and take the end screen away");
+    checks.expect(
+        visibleElements(context.GetDocument(0), "button", "disabled").size() ==
+            visibleElements(context.GetDocument(0)->GetElementById("content"), "button", "disabled")
+                .size(),
+        "a header control is still disabled in the new game");
+    std::cout << std::format("    New game: {}, the end screen gone, the clock controls live\n",
+                             app.model().day);
+    if (!checks.ok()) {
+        return kEndFailure;
+    }
+    return laidOut ? 0 : kLayoutFailure;
+}
+
+// ---- the Program tab on the probe's own copies of the content ----
+
+// The shipped content with one more requirement on its first stage, the
+// first good any stage asks for that a new company cannot dig, and with the
+// last stage's cost on the first. In the shipped program that good and that
+// cost are two stages away, further than the probe plays, and a new company
+// has the money for the first stage.
+std::optional<sim::Content> lockedContent(const sim::Content& shipped) {
+    sim::Content content = shipped;
+    if (!content.program.stages.empty()) {
+        content.program.stages.front().cost = content.program.stages.back().cost;
+    }
+    for (const sim::ProgramStage& stage : shipped.program.stages) {
+        for (const sim::ProgramRequirement& need : stage.requirements) {
+            if (shipped.resources[need.resource.index()].unlockedBy.valid() &&
+                !content.program.stages.empty()) {
+                content.program.stages.front().requirements.push_back(need);
+                return content;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// A new game on that copy: the requirement's row says what unlocks the good,
+// the cash is among what the stage lacks,
+// and the tab warns that cover costs is on, as it is for a new company. Then
+// cover costs is switched off by an order, and the warning goes with it.
+int probeProgramLocked(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    Checks checks("PROGRAM");
+    app.setTab(kProgramTab);
+    app.refreshNow();
+    const ProgramExpected fresh = simProgram(app);
+    checks.expect(
+        std::ranges::any_of(fresh.needs, [](const NeedLine& need) { return !need.locked.empty(); }),
+        "no requirement of the first stage is a good the company cannot dig");
+    const sim::CompanyView& view = app.session().view();
+    checks.expect(
+        view.program.stage && view.program.stage->cost > view.cash - view.reservedCash &&
+            fresh.blocked.find(game::text(
+                app.session().content(), "ui.program_blocked_cash",
+                {{"amount", game::formatMoney(view.program.stage->cost)}})) != std::string::npos,
+        "the stage costs more than the company has, and the cash is not said to be missing");
+    checks.expect(app.session().view().coverCosts && !fresh.cover.empty(),
+                  "a new company does not have cover costs on, with its warning");
+    bool laidOut =
+        probeProgramFrames(context, app, system, "program, a good we cannot dig yet", checks);
+    app.session().submit(sim::SetCoverCosts{game::Session::kPlayer, 0});
+    app.refreshNow();
+    checks.expect(simProgram(app).cover.empty(), "cover costs ordered off, and a warning expected");
+    laidOut =
+        probeProgramFrames(context, app, system, "program, cover costs ordered off", checks) &&
+        laidOut;
+    return programResult(checks, laidOut);
+}
+
+// The easy program: what each of its stages costs and needs. A stage asks
+// for a few days of what the fixed game's mine digs, of each ore it digs,
+// its project takes days, and the money is what a new company has. The
+// shipped stages take years of play; the rules and the client are untouched.
+constexpr std::int64_t kEasyOutputDays = 2;          // times the stage's number
+constexpr std::int64_t kEasyStageDollars = 250'000;  // times the stage's number
+constexpr std::int64_t kEasyResearchDollars = 100'000;
+constexpr sim::Day kEasyResearchDays = 3;
+constexpr int kEasyMaxDays = 120;  // from the mine's first stock to the last stage
+
+sim::Content easyContent(const sim::Content& shipped, const std::vector<std::int64_t>& dug) {
+    sim::Content content = shipped;
+    std::int64_t number = 0;
+    for (sim::ProgramStage& stage : content.program.stages) {
+        ++number;
+        stage.cost = sim::Money::fromUnits(kEasyStageDollars * number);
+        stage.requirements.clear();
+        for (std::uint32_t ore = 0; ore < dug.size(); ++ore) {
+            if (dug[ore] > 0) {
+                stage.requirements.push_back(
+                    {sim::ResourceId(ore), dug[ore] * kEasyOutputDays * number});
+            }
+        }
+        sim::TechDef& project = content.techs[stage.research.index()];
+        project.cost = sim::Money::fromUnits(kEasyResearchDollars);
+        project.durationDays = kEasyResearchDays;
+    }
+    return content;
+}
+
+// Everything in stock that the current stage still needs, by orders.
+void deliverAll(game::Session& session) {
+    const std::optional<sim::ProgramStageView> stage = session.view().program.stage;
+    for (const sim::ProgramRequirementView& need :
+         stage ? stage->requirements : std::vector<sim::ProgramRequirementView>()) {
+        const std::int64_t tonnes =
+            std::min(need.stockTonnes, need.neededTonnes - need.deliveredTonnes);
+        if (tonnes > 0) {
+            session.submit(sim::DeliverToProgram{game::Session::kPlayer, need.resource, tonnes});
+        }
+    }
+}
+
+bool stageReady(const sim::ProgramView& program) {
+    return program.stage.has_value() && program.stage->ready;
+}
+
+// One day of the race by orders: the stage's project started if it has not
+// been, everything deliverable delivered, the stage completed once the sim
+// calls it ready.
+void raceOneDay(game::Session& session) {
+    if (const std::optional<sim::ProgramStageView> stage = session.view().program.stage) {
+        if (stage->researchState == sim::ProgramResearchState::NotStarted) {
+            session.submit(sim::StartResearch{game::Session::kPlayer, stage->research});
+        }
+        deliverAll(session);
+        if (stage->ready) {
+            session.submit(sim::CompleteProgramStage{game::Session::kPlayer});
+        }
+    }
+    session.stepOneDay();
+}
+
+// The race on the easy copy, to its end. The first stage is researched by
+// the tab's button and delivered to by orders until the sim calls it ready;
+// it is completed by the tab's button, with the cost committed while the
+// order waits, and the second stage is current a day later. The other two
+// stages are played by orders, and the tab says the program is complete.
+int probeProgramToTheEnd(Rml::Context& context, game::App& app, LoggingSystem& system,
+                         const sim::Content& content) {
+    Checks checks("PROGRAM");
+    const auto fail = [&](std::string_view what) {
+        std::cout << std::format("SCENARIO (program): {} ({})\n", what, app.model().day);
+        return kScenarioFailure;
+    };
+    if (!playToStock(app, content)) {
+        return kScenarioFailure;
+    }
+    game::Session& session = app.session();
+    // The session's view is one object, refreshed in place each day.
+    const sim::ProgramView& program = session.view().program;
+    bool laidOut = true;
+    if (const int code = probeProgramResearch(context, app, system, checks, laidOut); code != 0) {
+        return code;
+    }
+    for (int day = 0; day < kEasyMaxDays && !stageReady(program) && !session.gameOver(); ++day) {
+        deliverAll(session);
+        session.stepOneDay();
+    }
+    if (!program.stage || !program.stage->ready || program.stage->index != 0 ||
+        session.gameOver()) {
+        return fail("the first stage did not become ready to complete");
+    }
+    const sim::Money cost = program.stage->cost;
+    app.setTab(kProgramTab);
+    app.refreshNow();
+    const ProgramExpected atReady = simProgram(app);
+    checks.expect(atReady.ready && atReady.blocked.empty() && !atReady.readyLine.empty(),
+                  "the sim calls the stage ready and something is still said to be missing");
+    laidOut = probeProgramFrames(context, app, system, "program, stage ready", checks) && laidOut;
+    // Completed by its button: the chip, Cancel, and the cost in Committed.
+    clickFirst(context, "button", "", atReady.completeButton, checks);
+    checks.expect(session.pendingOrders().size() == 1 &&
+                      orderWaiting<sim::CompleteProgramStage>(
+                          session,
+                          [](const sim::CompleteProgramStage& order) {
+                              return order.company == game::Session::kPlayer;
+                          }),
+                  "Complete stage did not queue the stage's completion alone");
+    checks.same("Committed with the completion waiting", app.model().committed,
+                game::text(content, "ui.committed", {{"amount", game::formatMoney(cost)}}));
+    checks.expect(session.committed() == cost, "the session does not commit the stage's cost");
+    laidOut =
+        probeProgramFrames(context, app, system, "program, completion waiting", checks) && laidOut;
+    const sim::Money cashBefore = session.view().cash;
+    session.stepOneDay();
+    app.refreshNow();
+    if (program.stagesCompleted != 1 || !program.stage || program.stage->index != 1) {
+        return fail("the first stage was not completed by its order");
+    }
+    checks.expect(session.view().cash <= cashBefore - cost,
+                  "completing the stage did not take its cost");
+    checks.expect(!app.model().has_committed, "money is still committed after the completion");
+    laidOut = probeProgramFrames(context, app, system, "program, second stage current", checks) &&
+              laidOut;
+    // The rest of the race by orders, as the buttons give them.
+    for (int day = 0; day < kEasyMaxDays && !program.complete && !session.gameOver(); ++day) {
+        raceOneDay(session);
+    }
+    const sim::CompanyView& view = session.view();
+    if (!view.program.complete || view.outcome.founder != game::Session::kPlayer) {
+        return fail(std::format("the player did not found the program ({} stages complete)",
+                                view.program.stagesCompleted));
+    }
+    app.refreshNow();
+    std::cout << std::format("\nprogram: founded on day {} with {} of {} stages complete\n",
+                             view.outcome.day, view.program.stagesCompleted,
+                             content.program.stages.size());
+    laidOut = probeProgramFrames(context, app, system, "program complete", checks) && laidOut;
+    // The game is over and the player founded the program: the end screen.
+    // Last, because its New game button starts the game again.
+    const int end = probeEndScreen(context, app, system, "founded");
+    const int tab = programResult(checks, laidOut);
+    return tab != 0 ? tab : end;
+}
+
+// Where an app finds its assets and writes its playtest trace.
+struct AppPaths {
+    std::filesystem::path assets;
+    std::filesystem::path playtest;
+};
+
+// What a pass on a copy of the content needs to make its own app.
+struct ProbeHost {
+    platform::Services* services = nullptr;
+    LoggingSystem* system = nullptr;
+    AppPaths paths;
+};
+
+// Runs `pass` on an app made with `content`, in a context of its own: an app
+// keeps the content it was made with, and a context keeps the data types an
+// app declared in it and warns when they are declared again. Returns the
+// pass's exit code, or 2 when the document did not load.
+template <typename Pass>
+int onItsOwnApp(const ProbeHost& host, const char* name, const sim::Content& content,
+                const Pass& pass) {
+    int exitCode = 0;
+    Rml::Context* context =
+        Rml::CreateContext(name, Rml::Vector2i(kFrames[0].width, kFrames[0].height));
+    {
+        game::App app(*context, *host.services, content, host.paths.assets, host.paths.playtest,
+                      "probe");
+        if (!app.loadDocument()) {
+            exitCode = 2;
+        }
+        app.update(0.0);
+        if (const int code = pass(*context, app); code != 0) {
+            exitCode = code;
+        }
+    }
+    Rml::RemoveContext(name);
+    return exitCode;
+}
+
+// ---- the endings the player does not win (spec 010) ----
+
+// The rival's race, on a copy the heuristic rival finishes within the
+// probe's reach: stages that ask for no goods (the easy program with nothing
+// dug), and no cash held back before a stage's research. The rival is not
+// given orders: it plays its own game, and founds the program a few days
+// after its first mine opens. The rules and the client are untouched.
+constexpr int kRivalMaxDays = 2000;
+constexpr std::uint32_t kPartnerStages = 2;  // BR-006: two stages make a lesser partner
+
+sim::Content rivalWinsContent(const sim::Content& shipped) {
+    sim::Content content = easyContent(shipped, {});
+    content.ai.programCashBuffer = sim::Money::zero();
+    return content;
+}
+
+// The stages each company completed, by the day the view first showed them:
+// the probe's own record, to hold the log's days against.
+struct StageWatch {
+    std::vector<std::vector<sim::Day>> days;  // by company, a day a stage
+};
+
+void stepWatched(game::Session& session, StageWatch& watch) {
+    const sim::Day today = session.day();
+    std::vector<std::uint32_t> before;
+    for (const sim::ProgramPublicView& program : session.view().programs) {
+        before.push_back(program.stagesCompleted);
+    }
+    session.stepOneDay();
+    watch.days.resize(before.size());
+    for (std::size_t c = 0; c < before.size(); ++c) {
+        for (std::uint32_t s = before[c]; s < session.view().programs[c].stagesCompleted; ++s) {
+            watch.days[c].push_back(today);
+        }
+    }
+}
+
+// The log's day for every stage the probe saw completed is the day it saw.
+void checkWatchedDays(const game::Session& session, const StageWatch& watch, Checks& checks) {
+    for (std::size_t c = 0; c < watch.days.size(); ++c) {
+        for (std::size_t s = 0; s < watch.days[c].size(); ++s) {
+            const std::optional<sim::Day> logged = loggedDay(
+                session, sim::NoticeKind::ProgramStageComplete,
+                sim::CompanyId(static_cast<std::uint32_t>(c)), static_cast<std::int64_t>(s + 1));
+            checks.expect(logged == watch.days[c][s],
+                          std::format("company {} completed stage {} on day {}, and the log says "
+                                      "day {}",
+                                      c, s + 1, watch.days[c][s], logged.value_or(0)));
+        }
+    }
+}
+
+// A new game on the rival's copy, played until the rival founds the program.
+// The player first completes `playerStages` stages by orders, then waits.
+int probeRivalFounds(Rml::Context& context, game::App& app, LoggingSystem& system,
+                     std::uint32_t playerStages, const std::string& result) {
+    app.startGame(kScenarioSeed);
+    game::Session& session = app.session();
+    StageWatch watch;
+    for (int day = 0; day < kRivalMaxDays && !session.gameOver(); ++day) {
+        const std::optional<sim::ProgramStageView> stage = session.view().program.stage;
+        if (stage && session.view().program.stagesCompleted < playerStages) {
+            if (stage->researchState == sim::ProgramResearchState::NotStarted) {
+                session.submit(sim::StartResearch{game::Session::kPlayer, stage->research});
+            }
+            if (stage->ready) {
+                session.submit(sim::CompleteProgramStage{game::Session::kPlayer});
+            }
+        }
+        stepWatched(session, watch);
+    }
+    const sim::CompanyView& view = session.view();
+    if (!view.outcome.ended || !view.outcome.founder.valid() ||
+        view.outcome.founder == game::Session::kPlayer ||
+        view.program.stagesCompleted != playerStages) {
+        std::cout << whereItStopped(view);
+        std::cout << std::format(
+            "SCENARIO (end, {}): the rival did not found the program with "
+            "the player at {} stages (the player has {})\n",
+            result, playerStages, view.program.stagesCompleted);
+        return kScenarioFailure;
+    }
+    Checks checks("END");
+    checkWatchedDays(session, watch, checks);
+    std::cout << std::format(
+        "\nend, {}: {} founded the program on day {}; the player completed {} "
+        "of {} stages\n",
+        result, view.companies[view.outcome.founder.index()].name, view.outcome.day,
+        view.program.stagesCompleted, session.content().program.stages.size());
+    const int code = probeEndScreen(context, app, system, result);
+    return code == 0 && !checks.ok() ? kEndFailure : code;
+}
+
+// The deadline passing: the shipped content with the deadline a few weeks
+// into the game, before either company can have completed a stage.
+constexpr sim::Day kNearDeadline = 45;
+
+sim::Content nearDeadlineContent(const sim::Content& shipped) {
+    sim::Content content = shipped;
+    content.program.deadlineDay = kNearDeadline;
+    return content;
+}
+
+int probeDeadline(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    app.startGame(kScenarioSeed);
+    game::Session& session = app.session();
+    for (sim::Day day = 0; day <= kNearDeadline + 1 && !session.gameOver(); ++day) {
+        session.stepOneDay();
+    }
+    const sim::CompanyView& view = session.view();
+    if (!view.outcome.ended || view.outcome.founder.valid() || view.bankrupt) {
+        std::cout << whereItStopped(view);
+        std::cout << "SCENARIO (end, deadline): the deadline did not end the game\n";
+        return kScenarioFailure;
+    }
+    std::cout << std::format(
+        "\nend, deadline: the game ended on day {} of a deadline on day {} "
+        "with no founder\n",
+        view.outcome.day, view.deadlineDay);
+    return probeEndScreen(context, app, system, "deadline");
+}
+
+// The player bankrupt: the losing mine's game (its opex is the probe's, far
+// above anything its ore earns) played on until the courts step in. The
+// outcome of the race is still open; the end screen says bankrupt.
+constexpr int kBankruptMaxDays = 720;
+
+int probeBankrupt(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    game::Session& session = app.session();
+    for (int day = 0; day < kBankruptMaxDays && !session.gameOver(); ++day) {
+        session.stepOneDay();
+    }
+    const sim::CompanyView& view = session.view();
+    if (!view.bankrupt) {
+        std::cout << whereItStopped(view);
+        std::cout << "SCENARIO (end, bankrupt): the losing mine did not bankrupt the player\n";
+        return kScenarioFailure;
+    }
+    std::cout << std::format("\nend, bankrupt: the player fell with cash {}, the race {}\n",
+                             game::formatMoney(view.cash),
+                             view.outcome.ended ? "ended" : "still open");
+    return probeEndScreen(context, app, system, "bankrupt");
+}
+
+// The endings the rival or the calendar decides, each on a copy of the
+// content and so on an app of its own. Returns 0, or the exit code of the
+// last pass that failed.
+int probeEndings(const ProbeHost& host, const sim::Content& shipped) {
+    int exitCode = 0;
+    const sim::Content rivalWins = rivalWinsContent(shipped);
+    const int rival =
+        onItsOwnApp(host, "rival", rivalWins, [&](Rml::Context& context, game::App& app) {
+            const int lost = probeRivalFounds(context, app, *host.system, 0, "lost");
+            const int partner =
+                probeRivalFounds(context, app, *host.system, kPartnerStages, "partner");
+            return partner != 0 ? partner : lost;
+        });
+    exitCode = rival != 0 ? rival : exitCode;
+    const sim::Content nearDeadline = nearDeadlineContent(shipped);
+    const int deadline =
+        onItsOwnApp(host, "deadline", nearDeadline, [&](Rml::Context& context, game::App& app) {
+            return probeDeadline(context, app, *host.system);
+        });
+    return deadline != 0 ? deadline : exitCode;
+}
+
+// The Program tab's later states (spec 010), each on a copy of the content
+// and so on an app and a context of its own: a first stage that asks for a
+// good the company cannot dig, then a program small enough to complete.
+// Returns 0, or the exit code of the last pass that failed.
+int probeProgramCopies(const ProbeHost& host, const sim::Content& shipped,
+                       const std::vector<std::int64_t>& dug) {
+    int exitCode = 0;
+    if (const std::optional<sim::Content> locked = lockedContent(shipped)) {
+        const int code =
+            onItsOwnApp(host, "locked", *locked, [&](Rml::Context& context, game::App& app) {
+                return probeProgramLocked(context, app, *host.system);
+            });
+        exitCode = code != 0 ? code : exitCode;
+    } else {
+        std::cout << "SCENARIO (program): no stage asks for a good that needs research\n";
+        exitCode = kScenarioFailure;
+    }
+    if (std::ranges::any_of(dug, [](std::int64_t tonnes) { return tonnes > 0; })) {
+        const sim::Content easy = easyContent(shipped, dug);
+        const int code =
+            onItsOwnApp(host, "easy", easy, [&](Rml::Context& context, game::App& app) {
+                return probeProgramToTheEnd(context, app, *host.system, easy);
+            });
+        exitCode = code != 0 ? code : exitCode;
+    } else {
+        std::cout << "SCENARIO (program): the fixed game's mine dug nothing to race with\n";
+        exitCode = kScenarioFailure;
+    }
+    return exitCode;
 }
 
 constexpr int kUncaught = 9;
@@ -1969,6 +3410,7 @@ int run(std::span<char*> args) {
         std::filesystem::temp_directory_path() / "deep_claim_probe_playtest";
     std::filesystem::remove_all(playtest);
     int exitCode = 0;
+    std::vector<std::int64_t> dug;  // what the fixed game's mine digs a day, ore by ore
     {
         game::App app(*context, *services, *loaded.content, assets, playtest, "probe");
         if (!app.loadDocument()) {
@@ -1981,10 +3423,18 @@ int run(std::span<char*> args) {
         if (!checkFreshNeeds(app, *loaded.content)) {
             exitCode = 5;
         }
+        // The Program tab on a new game (spec 010).
+        if (const int code = probeProgramFresh(*context, app, system); code != 0) {
+            exitCode = code;
+        }
         // A fresh log has nothing from rivals yet: the filters' empty line.
         if (!probeFrames(*context, app, system, "fresh", Popover::None) ||
             !probeLogFilters(*context, app, system)) {
             exitCode = 3;
+        }
+        // The Stops menu's row for the rival's progress (spec 010).
+        if (const int code = probeStopsMenu(*context, app, system); code != 0) {
+            exitCode = code;
         }
         if (const int code = probeScenarios(*context, app, system, *loaded.content); code != 0) {
             exitCode = code;
@@ -1995,7 +3445,7 @@ int run(std::span<char*> args) {
             exitCode = code;
         }
         // The race (spec 010), on a game of its own.
-        if (const int code = probeRace(*context, app, system, *loaded.content); code != 0) {
+        if (const int code = probeRace(*context, app, system, *loaded.content, dug); code != 0) {
             exitCode = code;
         }
     }
@@ -2015,6 +3465,28 @@ int run(std::span<char*> args) {
         if (const int code = probeLosingMine(*context, app, system, losing); code != 0) {
             exitCode = code;
         }
+        // The same game on to the player's bankruptcy: the end screen.
+        if (const int code = probeBankrupt(*context, app, system); code != 0) {
+            exitCode = code;
+        }
+    }
+    Rml::RemoveContext("losing");
+    const ProbeHost host{services.get(), &system, {assets, playtest}};
+    if (const int code = probeProgramCopies(host, *loaded.content, dug); code != 0) {
+        exitCode = code;
+    }
+    // The endings the player does not win (spec 010).
+    if (const int code = probeEndings(host, *loaded.content); code != 0) {
+        exitCode = code;
+    }
+    // The land run out, on the copy where the race does not end first.
+    const sim::Content landRunsOut = landRunsOutContent(*loaded.content);
+    if (const int code = onItsOwnApp(host, "endgame", landRunsOut,
+                                     [&](Rml::Context& own, game::App& app) {
+                                         return probeEndgame(own, app, system, landRunsOut);
+                                     });
+        code != 0) {
+        exitCode = code;
     }
     std::cout << (exitCode == 0 ? "\nLAYOUT OK\n" : "\nLAYOUT FAILURE\n");
     // The app, its document and data model are gone before RmlUi shuts down.

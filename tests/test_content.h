@@ -207,6 +207,13 @@ inline sim::Content makeContent() {
     c.ai.firstMineRecoverableShare = c.ai.recoverableShare;
     c.ai.firstMineRequiredReturn = c.ai.requiredReturn;
     c.ai.supplyDiscount = sim::Fixed::zero();
+    // Spec 010: the race. Everything a stage needs is kept for it, a project
+    // for the program leaves 500,000 in hand, and a stage's project comes
+    // first once half its deliveries are in.
+    c.ai.programReserveShare = sim::Fixed::one();
+    c.ai.programCashBuffer = sim::Money::fromUnits(500'000);
+    c.ai.programOreLandWeight = sim::Fixed::fromRatio(3, 2);
+    c.ai.programResearchProgress = sim::Fixed::fromRatio(1, 2);
     return c;
 }
 

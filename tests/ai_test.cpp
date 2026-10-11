@@ -5,6 +5,7 @@
 #include "sim/ids.h"
 #include "sim/money.h"
 #include "sim/save.h"
+#include "sim/sell_policy.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
 #include "sim/view.h"
@@ -92,6 +93,19 @@ TEST_CASE("A changed AI knob changes the content fingerprint", "[ai][content]") 
     sim::Content firstReturn = content;
     firstReturn.ai.firstMineRequiredReturn = sim::Fixed::fromRatio(11, 10);
     CHECK(sim::hashContent(firstReturn) != sim::hashContent(content));
+    // Spec 010: the knobs the AI races with.
+    sim::Content share = content;
+    share.ai.programReserveShare = sim::Fixed::fromRatio(1, 3);
+    CHECK(sim::hashContent(share) != sim::hashContent(content));
+    sim::Content buffer = content;
+    buffer.ai.programCashBuffer = sim::Money::fromUnits(123'456);
+    CHECK(sim::hashContent(buffer) != sim::hashContent(content));
+    sim::Content weight = content;
+    weight.ai.programOreLandWeight = sim::Fixed::fromInt(7);
+    CHECK(sim::hashContent(weight) != sim::hashContent(content));
+    sim::Content progress = content;
+    progress.ai.programResearchProgress = sim::Fixed::fromRatio(1, 3);
+    CHECK(sim::hashContent(progress) != sim::hashContent(content));
     sim::Content capped = content;
     capped.regions[0].deposits[0].tonnesMaxMult = sim::Fixed::fromInt(4);
     CHECK(sim::hashContent(capped) != sim::hashContent(content));
@@ -669,4 +683,540 @@ TEST_CASE("The AI values a prospect at the running cost of the ores its survey r
     both.mineOpexQuotes[kCopper.index()] = dear;
     both.surveys[0].estimates.push_back({kCopper, 60, sim::Fixed::fromRatio(1, 2), false});
     CHECK_FALSE(bids(content, both));
+}
+
+// ---------------------------------------------------------------------------
+// The race for the program (spec 010, BR-011)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+const sim::TechId kSeismic(0);         // the fixture's one ordinary project
+const sim::TechId kLithiumProject(1);  // unlocks lithium; needs kSeismic
+
+// Puts the view to work on stage `index` of the fixture's program with
+// nothing delivered and the stage's project in the state given. The stages
+// before it, and their projects, are complete.
+void workOnStage(const sim::Content& content, sim::CompanyView& view, std::uint32_t index,
+                 sim::ProgramResearchState research) {
+    const sim::ProgramStage& def = content.program.stages[index];
+    view.deadlineDay = content.program.deadlineDay;
+    view.program.stagesCompleted = index;
+    view.program.complete = false;
+    sim::ProgramStageView stage;
+    stage.index = index;
+    stage.cost = def.cost;
+    stage.research = def.research;
+    stage.researchState = research;
+    for (const sim::ProgramRequirement& requirement : def.requirements) {
+        stage.requirements.push_back({requirement.resource, requirement.tonnes, 0,
+                                      view.inventoryTonnes[requirement.resource.index()]});
+    }
+    view.program.stage = stage;
+    for (std::uint32_t done = 0; done < index; ++done) {
+        view.completedTechs.push_back(content.program.stages[done].research);
+    }
+    if (research == sim::ProgramResearchState::Done) {
+        view.completedTechs.push_back(def.research);
+    }
+}
+
+// Tonnes in stock, on the view and on the stage's requirement alike.
+void setStock(sim::CompanyView& view, sim::ResourceId resource, std::int64_t tonnes) {
+    view.inventoryTonnes[resource.index()] = tonnes;
+    for (sim::ProgramRequirementView& requirement : view.program.stage->requirements) {
+        if (requirement.resource == resource) {
+            requirement.stockTonnes = tonnes;
+        }
+    }
+}
+
+// Tonnes of the stage's `position`th good already delivered, with the
+// stage's progress to match (the mean share over its goods, as the sim has it).
+void setDelivered(sim::CompanyView& view, std::size_t position, std::int64_t tonnes) {
+    sim::ProgramStageView& stage = *view.program.stage;
+    stage.requirements[position].deliveredTonnes = tonnes;
+    std::int64_t shares = 0;
+    for (const sim::ProgramRequirementView& requirement : stage.requirements) {
+        shares += requirement.deliveredTonnes * 1000 / requirement.neededTonnes;
+    }
+    stage.progressPermille = shares / static_cast<std::int64_t>(stage.requirements.size());
+}
+
+// A company with one profitable iron mine and cash to spare, at work on
+// stage `index`.
+sim::CompanyView racerView(const sim::Content& content, std::uint32_t index,
+                           sim::ProgramResearchState research) {
+    sim::CompanyView view =
+        mineOwnerView(content, sim::MineState::Operating, sim::Money::fromUnits(10'000), true, 400);
+    view.cash = sim::Money::fromUnits(20'000'000);  // for anything; tests of cash set their own
+    workOnStage(content, view, index, research);
+    return view;
+}
+
+std::vector<sim::Command> ordersFor(const sim::Content& content, const sim::CompanyView& view) {
+    sim::HeuristicController ai(content);
+    std::vector<sim::Command> out;
+    ai.decide(view, out);
+    return out;
+}
+
+// Tonnes of `resource` in the orders of type Order (SellOre or
+// DeliverToProgram); zero when there is none.
+template <typename Order>
+std::int64_t tonnesOrdered(const std::vector<sim::Command>& orders, sim::ResourceId resource) {
+    std::int64_t tonnes = 0;
+    for (const sim::Command& command : orders) {
+        if (const auto* order = std::get_if<Order>(&command)) {
+            if (order->resource == resource) {
+                tonnes += order->tonnes;
+            }
+        }
+    }
+    return tonnes;
+}
+
+template <typename Order>
+std::ptrdiff_t positionOf(const std::vector<sim::Command>& orders) {
+    const auto found = std::find_if(orders.begin(), orders.end(), [](const sim::Command& command) {
+        return std::holds_alternative<Order>(command);
+    });
+    return found == orders.end() ? -1 : found - orders.begin();
+}
+
+// The project the AI starts today; nothing when it starts none.
+std::optional<sim::TechId> researchStarted(const sim::Content& content,
+                                           const sim::CompanyView& view) {
+    std::optional<sim::TechId> started;
+    for (const sim::Command& command : ordersFor(content, view)) {
+        if (const auto* start = std::get_if<sim::StartResearch>(&command)) {
+            REQUIRE_FALSE(started.has_value());
+            started = start->tech;
+        }
+    }
+    return started;
+}
+
+}  // namespace
+
+TEST_CASE("The AI delivers what its stage needs and sells only the rest", "[ai][spec010]") {
+    // Stage 1 of the fixture needs 1,000 t of iron. Iron is at base price,
+    // which the AI's own rule would sell at.
+    const sim::Content content = test::makeContent();
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    setStock(view, kIron, 1'500);
+    view.inventoryTonnes[kCopper.index()] = 40;  // not needed by stage 1
+
+    std::vector<sim::Command> orders = ordersFor(content, view);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kIron) == 1'000);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 500);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kCopper) == 0);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kCopper) == 40);
+    // Orders are applied as placed: the delivery must come before the sale.
+    CHECK(positionOf<sim::DeliverToProgram>(orders) < positionOf<sim::SellOre>(orders));
+
+    // Less in stock than the stage needs: all of it is kept, none sold.
+    setStock(view, kIron, 300);
+    orders = ordersFor(content, view);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kIron) == 300);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 0);
+
+    // Only what is still needed is delivered.
+    setStock(view, kIron, 1'500);
+    setDelivered(view, 0, 900);
+    orders = ordersFor(content, view);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kIron) == 100);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 1'400);
+
+    // Nothing more is needed: no order at all for the program.
+    setDelivered(view, 0, 1'000);
+    orders = ordersFor(content, view);
+    CHECK(positionOf<sim::DeliverToProgram>(orders) == -1);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 1'500);
+}
+
+TEST_CASE("The reserve share sets how much of a needed good is kept from sale", "[ai][spec010]") {
+    sim::Content content = test::makeContent();
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    setStock(view, kIron, 600);
+
+    content.ai.programReserveShare = sim::Fixed::fromRatio(1, 2);
+    std::vector<sim::Command> orders = ordersFor(content, view);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kIron) == 300);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 300);
+
+    // Nothing kept: it sells as if there were no program.
+    content.ai.programReserveShare = sim::Fixed::zero();
+    orders = ordersFor(content, view);
+    CHECK(positionOf<sim::DeliverToProgram>(orders) == -1);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 600);
+
+    // The share is of the stock, not of the need: the last tonne a stage
+    // needs is delivered like any other.
+    content.ai.programReserveShare = sim::Fixed::fromRatio(1, 2);
+    setDelivered(view, 0, 999);
+    orders = ordersFor(content, view);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kIron) == 1);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 599);
+
+    // A share of the stock that rounds to less than a tonne gives no order.
+    setStock(view, kIron, 1);
+    CHECK(positionOf<sim::DeliverToProgram>(ordersFor(content, view)) == -1);
+}
+
+namespace {
+
+// The standing sell order the AI sets for a resource today; nothing when it
+// leaves the policy alone.
+std::optional<sim::SetSellPolicy> policySet(const std::vector<sim::Command>& orders,
+                                            sim::ResourceId resource) {
+    std::optional<sim::SetSellPolicy> found;
+    for (const sim::Command& command : orders) {
+        if (const auto* set = std::get_if<sim::SetSellPolicy>(&command)) {
+            if (set->resource == resource) {
+                REQUIRE_FALSE(found.has_value());
+                found = *set;
+            }
+        }
+    }
+    return found;
+}
+
+}  // namespace
+
+TEST_CASE("The AI makes a standing sell order keep what its stage needs", "[ai][spec010]") {
+    // A company with standing sell orders (the player's defaults, when the
+    // AI plays that company) sells its stock the day it is dug, before the
+    // AI can deliver it. The order's reserve is what stops that.
+    sim::Content content = test::makeContent();
+    const sim::Money floor = sim::Money::fromUnits(7);
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    view.sellPolicies.assign(content.resources.size(), sim::SellPolicy{1, 0, floor});
+
+    const std::vector<sim::Command> orders = ordersFor(content, view);
+    const std::optional<sim::SetSellPolicy> iron = policySet(orders, kIron);
+    REQUIRE(iron.has_value());
+    CHECK(iron->enabled == 1);
+    CHECK(iron->reserveTonnes == 1'000);
+    CHECK(iron->floorPrice == floor);
+    // Copper is not needed by stage 1: its order is left as it is.
+    CHECK_FALSE(policySet(orders, kCopper).has_value());
+
+    // A reserve that already covers the need is left alone: no daily orders.
+    view.sellPolicies[kIron.index()].reserveTonnes = 1'000;
+    setDelivered(view, 0, 400);
+    CHECK_FALSE(policySet(ordersFor(content, view), kIron).has_value());
+
+    // The need met: the reserve is released.
+    setDelivered(view, 0, 1'000);
+    const std::optional<sim::SetSellPolicy> released = policySet(ordersFor(content, view), kIron);
+    REQUIRE(released.has_value());
+    CHECK(released->enabled == 1);
+    CHECK(released->reserveTonnes == 0);
+    CHECK(released->floorPrice == floor);
+
+    // A standing order that is switched off sells nothing: nothing to set.
+    setDelivered(view, 0, 0);
+    view.sellPolicies[kIron.index()] = sim::SellPolicy{0, 0, floor};
+    CHECK_FALSE(policySet(ordersFor(content, view), kIron).has_value());
+
+    // With nothing kept for the program there is nothing to reserve.
+    view.sellPolicies[kIron.index()] = sim::SellPolicy{1, 0, floor};
+    content.ai.programReserveShare = sim::Fixed::zero();
+    CHECK_FALSE(policySet(ordersFor(content, view), kIron).has_value());
+}
+
+TEST_CASE("The AI races as well from a company with standing sell orders", "[ai][spec010]") {
+    // Company 0 is the player's and starts with the default standing orders;
+    // here they sell everything, every day. The runner's sweeps play it
+    // with the AI.
+    sim::Content content = test::makeContent();
+    content.balance.defaultSellPolicy = sim::SellPolicy{1, 0, sim::Money::zero()};
+    const sim::CompanyId player(0);
+    std::uint32_t stages = 0;
+    for (sim::Seed seed = 1; seed <= 3; ++seed) {
+        sim::Simulation simulation(content, seed, test::setup());
+        REQUIRE(simulation.view(player).sellPolicies[kIron.index()].enabled == 1);
+        sim::HeuristicController ai(content);
+        for (sim::Day d = 0; d < sim::kDaysPerYear * 20; ++d) {
+            simulation.collectCommands(player, ai);
+            for (const sim::Notice& n : simulation.tick().notices) {
+                CHECK(n.kind != sim::NoticeKind::CommandRejected);
+            }
+        }
+        stages += simulation.state().companies[0].programStage;
+    }
+    CHECK(stages >= 3);
+}
+
+TEST_CASE("A company short of cash sells what its stage needs", "[ai][spec010]") {
+    // Every ore unlocked and nothing delivered, so the program wants no
+    // project yet. 1,000,000 in the bank less the 500,000 never committed
+    // leaves exactly the fixture's buffer: enough to deliver. A cent less
+    // and it sells.
+    sim::Content content = test::makeContent();
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    view.cash = sim::Money::fromUnits(1'000'000);
+    view.completedTechs = {kSeismic, kLithiumProject};
+    setStock(view, kIron, 600);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(ordersFor(content, view), kIron) == 600);
+
+    content.ai.programCashBuffer = sim::Money::fromUnits(500'000) + sim::Money::fromCents(1);
+    const std::vector<sim::Command> orders = ordersFor(content, view);
+    CHECK(positionOf<sim::DeliverToProgram>(orders) == -1);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 600);
+}
+
+TEST_CASE("A company saving for a program project sells until it can pay for it", "[ai][spec010]") {
+    // The program wants seismic next (600,000, on the way to lithium). A
+    // company that went on delivering whenever it had its buffer would sit
+    // at the buffer for good and never start the project.
+    const sim::Content content = test::makeContent();
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    setStock(view, kIron, 600);
+    // Spendable: 1,063,999, which the 36,000 the sale brings in leaves a
+    // unit short of the buffer plus the project.
+    view.cash = sim::Money::fromUnits(1'563'999);
+    std::vector<sim::Command> orders = ordersFor(content, view);
+    CHECK(positionOf<sim::DeliverToProgram>(orders) == -1);
+    CHECK(positionOf<sim::StartResearch>(orders) == -1);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 600);
+
+    // With the unit, the project starts and the stock is delivered.
+    view.cash = sim::Money::fromUnits(1'600'000);
+    orders = ordersFor(content, view);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kIron) == 600);
+    CHECK(positionOf<sim::StartResearch>(orders) != -1);
+
+    // While the lab is busy there is nothing to save for.
+    view.cash = sim::Money::fromUnits(1'000'000);
+    view.activeResearch = sim::ResearchView{kSeismic, 990, 1'080};
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(ordersFor(content, view), kIron) == 600);
+}
+
+TEST_CASE("The AI completes a stage the day it is ready", "[ai][spec010]") {
+    const sim::Content content = test::makeContent();
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::Done);
+    setDelivered(view, 0, 1'000);
+    CHECK(positionOf<sim::CompleteProgramStage>(ordersFor(content, view)) == -1);
+
+    // First in the day's orders, so nothing placed with it can take its cash.
+    view.program.stage->ready = true;
+    CHECK(positionOf<sim::CompleteProgramStage>(ordersFor(content, view)) == 0);
+}
+
+TEST_CASE("The AI gives no other order on the day it founds the program", "[ai][spec010]") {
+    // Completing the last stage ends the game, and the sim refuses every
+    // order queued behind the one that does.
+    const sim::Content content = test::makeContent();
+    sim::CompanyView view = racerView(content, 2, sim::ProgramResearchState::Done);
+    view.inventoryTonnes[kCopper.index()] = 40;  // would be sold on any other day
+    view.program.stage->ready = true;
+    const std::vector<sim::Command> orders = ordersFor(content, view);
+    REQUIRE(orders.size() == 1);
+    CHECK(std::holds_alternative<sim::CompleteProgramStage>(orders[0]));
+
+    // An earlier stage does not end the game: the day's other orders stand.
+    sim::CompanyView earlier = racerView(content, 0, sim::ProgramResearchState::Done);
+    earlier.inventoryTonnes[kCopper.index()] = 40;
+    earlier.program.stage->ready = true;
+    CHECK(tonnesOrdered<sim::SellOre>(ordersFor(content, earlier), kCopper) == 40);
+}
+
+TEST_CASE("The AI saves for a stage whose goods and project are in", "[ai][spec010]") {
+    // A plot worth bidding on and 20,000,000 in the bank, but the stage
+    // costs 19,000,000 and can not be completed yet (cash is reserved
+    // elsewhere, say): the money is kept for the stage.
+    sim::Content content = test::makeContent();
+    content.program.stages[0].cost = sim::Money::fromUnits(19'000'000);
+    sim::CompanyView view = prospectView(content, 400'000, false);
+    workOnStage(content, view, 0, sim::ProgramResearchState::Done);
+    REQUIRE(bids(content, view));
+
+    setDelivered(view, 0, 1'000);
+    CHECK_FALSE(bids(content, view));
+
+    // Until its project is done the money is still free: the project has
+    // to be paid for first, and the company goes on growing while it runs.
+    view.completedTechs.clear();
+    view.program.stage->researchState = sim::ProgramResearchState::InProgress;
+    CHECK(bids(content, view));
+    view.program.stage->researchState = sim::ProgramResearchState::NotStarted;
+    CHECK(bids(content, view));
+}
+
+TEST_CASE("The AI gives no orders once the game has ended", "[ai][spec010]") {
+    const sim::Content content = test::makeContent();
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    setStock(view, kIron, 600);
+    REQUIRE_FALSE(ordersFor(content, view).empty());
+    view.outcome.ended = true;
+    CHECK(ordersFor(content, view).empty());
+}
+
+TEST_CASE("The AI starts its stage's project once half the deliveries are in", "[ai][spec010]") {
+    // Stage 1's project costs 5,000,000; the ordinary rule would pick the
+    // cheapest project (seismic, 600,000) and needs cash clear of debt.
+    sim::Content content = test::makeContent();
+    const sim::TechId project = content.program.stages[0].research;
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    view.cash = sim::Money::fromUnits(6'000'000);
+    setDelivered(view, 0, 500);
+    CHECK(researchStarted(content, view) == project);
+
+    // A loan does not stop it, as it would an ordinary project.
+    view.outstandingPrincipal = sim::Money::fromUnits(5'000'000);
+    CHECK(researchStarted(content, view) == project);
+    view.outstandingPrincipal = sim::Money::zero();
+
+    // Short of half, the stage's project waits: the road to lithium, which
+    // stage 3 needs, comes first.
+    setDelivered(view, 0, 499);
+    CHECK(researchStarted(content, view) == kSeismic);
+
+    // The knob moves the point.
+    content.ai.programResearchProgress = sim::Fixed::fromRatio(499, 1000);
+    CHECK(researchStarted(content, view) == project);
+
+    // Nothing is started while research is under way.
+    view.activeResearch = sim::ResearchView{kSeismic, 990, 1'080};
+    CHECK_FALSE(researchStarted(content, view).has_value());
+}
+
+TEST_CASE("The AI starts a program project only with its cash buffer left over", "[ai][spec010]") {
+    // 5,999,999 less the 500,000 never committed is a unit short of the
+    // project (5,000,000) plus the buffer (500,000). It waits rather than
+    // spend the money on another project.
+    sim::Content content = test::makeContent();
+    const sim::TechId project = content.program.stages[0].research;
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    setDelivered(view, 0, 500);
+    view.cash = sim::Money::fromUnits(5'999'999);
+    CHECK_FALSE(researchStarted(content, view).has_value());
+
+    content.ai.programCashBuffer = sim::Money::fromUnits(499'999);
+    CHECK(researchStarted(content, view) == project);
+}
+
+TEST_CASE("The AI heads for the research that unlocks an ore a stage needs", "[ai][spec010]") {
+    // Stages 1 and 2 complete; stage 3 needs lithium, which is locked behind
+    // a project that itself needs seismic.
+    const sim::Content content = test::makeContent();
+    sim::CompanyView view = racerView(content, 2, sim::ProgramResearchState::NotStarted);
+    view.cash = sim::Money::fromUnits(20'000'000);
+    CHECK(researchStarted(content, view) == kSeismic);
+
+    view.completedTechs.push_back(kSeismic);
+    CHECK(researchStarted(content, view) == kLithiumProject);
+
+    // Even with the iron in (half the stage's deliveries): without lithium
+    // the stage cannot be finished, so its unlock still comes first.
+    setDelivered(view, 0, 3'000);
+    REQUIRE(view.program.stage->progressPermille == 500);
+    CHECK(researchStarted(content, view) == kLithiumProject);
+
+    // Lithium unlocked: now the stage's own project.
+    view.completedTechs.push_back(kLithiumProject);
+    CHECK(researchStarted(content, view) == content.program.stages[2].research);
+}
+
+TEST_CASE("The AI heads for a coming stage's ore ahead of ordinary projects", "[ai][spec010]") {
+    // On stage 1, with a cheap ordinary project on offer: the cheapest-first
+    // rule would take it, but lithium (stage 3) is two projects away.
+    sim::Content content = test::makeContent();
+    sim::TechDef cheap;
+    cheap.id = "cheap";
+    cheap.cost = sim::Money::fromUnits(100'000);
+    cheap.durationDays = 30;
+    content.techs.push_back(cheap);
+    const sim::TechId kCheap(static_cast<std::uint32_t>(content.techs.size() - 1));
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    view.cash = sim::Money::fromUnits(20'000'000);
+    CHECK(researchStarted(content, view) == kSeismic);
+    view.completedTechs.push_back(kSeismic);
+    CHECK(researchStarted(content, view) == kLithiumProject);
+
+    // With every needed ore unlocked and deliveries short of half, ordinary
+    // research goes on as before.
+    view.completedTechs.push_back(kLithiumProject);
+    CHECK(researchStarted(content, view) == kCheap);
+}
+
+TEST_CASE("Land with an ore the program needs is worth more to the AI", "[ai][spec010]") {
+    // 60,000 t of iron: 34 a tonne after running cost, 2,040,000 against a
+    // 3,000,000 outlay. At a weight of 1.5 the iron counts for 90 a tonne,
+    // 64 after cost: 3,840,000.
+    sim::Content content = test::makeContent();
+    content.ai.recoverableShare = sim::Fixed::one();
+    content.ai.firstMineRecoverableShare = sim::Fixed::one();
+    content.ai.requiredReturn = sim::Fixed::one();
+    content.ai.firstMineRequiredReturn = sim::Fixed::one();
+    constexpr std::int64_t kTonnes = 60'000;
+    // No program in the view: valued as before.
+    CHECK_FALSE(bids(content, prospectView(content, kTonnes, false)));
+
+    sim::CompanyView racing = prospectView(content, kTonnes, false);
+    workOnStage(content, racing, 0, sim::ProgramResearchState::NotStarted);
+    CHECK(bids(content, racing));
+
+    // The knob: at a weight of one the ore is worth what it sells for.
+    sim::Content plain = content;
+    plain.ai.programOreLandWeight = sim::Fixed::one();
+    CHECK_FALSE(bids(plain, racing));
+
+    // A stage still to come counts too: stage 3 needs iron.
+    sim::CompanyView later = prospectView(content, kTonnes, false);
+    workOnStage(content, later, 1, sim::ProgramResearchState::NotStarted);
+    setDelivered(later, 0, 2'000);
+    CHECK(bids(content, later));
+
+    // A mine already digging 400 t a day will supply the 6,000 t the stages
+    // need long before the deadline: no bonus.
+    sim::CompanyView supplied = prospectView(content, kTonnes, true);
+    workOnStage(content, supplied, 0, sim::ProgramResearchState::NotStarted);
+    supplied.mines[0].lastOutputTonnes[kIron.index()] = 400;
+    CHECK_FALSE(bids(content, supplied));
+    // The same mine with the deadline a week off cannot: the bonus is back.
+    supplied.deadlineDay = supplied.day + 7;
+    CHECK(bids(content, supplied));
+
+    // Iron the program no longer needs earns nothing extra: the last stage,
+    // with its iron delivered.
+    sim::CompanyView met = prospectView(content, kTonnes, false);
+    workOnStage(content, met, 2, sim::ProgramResearchState::NotStarted);
+    setDelivered(met, 0, 3'000);
+    CHECK_FALSE(bids(content, met));
+}
+
+TEST_CASE("The view offers an unlocking project only when its program stage is reached",
+          "[ai][view][spec010]") {
+    // The sim refuses a project whose program stage is not complete; the
+    // view's "could be started now" flag must agree.
+    sim::Content content = test::makeContent();
+    content.techs[kLithiumProject.index()].requiresProgramStage = 1;
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.submit(sim::StartResearch{sim::CompanyId(0), kSeismic});
+    simulation.tick(content.techs[kSeismic.index()].durationDays + 2);
+    CHECK(simulation.view(sim::CompanyId(0)).unlockReady[kLithium.index()] == 0);
+
+    sim::WorldState advanced = simulation.state();
+    advanced.companies[0].programStage = 1;
+    REQUIRE(simulation.load(sim::saveGame(advanced, {}, sim::hashContent(content))));
+    CHECK(simulation.view(sim::CompanyId(0)).unlockReady[kLithium.index()] == 1);
+}
+
+TEST_CASE("The AI races: it delivers, researches and completes stages in play", "[ai][spec010]") {
+    // The fixture's program is small enough to make headway on in twenty
+    // years. Every order the AI gives on the way must be accepted.
+    const sim::Content content = test::makeContent();
+    std::uint32_t stages = 0;
+    for (sim::Seed seed = 1; seed <= 3; ++seed) {
+        sim::Simulation simulation(content, seed, test::setup());
+        sim::HeuristicController ai(content);
+        std::uint32_t rejections = 0;
+        playYears(simulation, ai, sim::kDaysPerYear * 20, rejections);
+        CHECK(rejections == 0);
+        stages += simulation.state().companies[1].programStage;
+    }
+    CHECK(stages >= 3);
 }

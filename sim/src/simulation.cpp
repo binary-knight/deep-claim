@@ -190,6 +190,7 @@ void Simulation::handle(const DeliverToProgram& c) {
             makeNotice(NoticeKind::CommandRejected, c.company, PlotId(), Money::zero(), *reason);
         notice.resource = c.resource;
         notice.tonnes = c.tonnes;
+        notice.order = RejectedOrder::Delivery;  // or it reads as a refused sale
         report_.notices.push_back(notice);
     } else {
         applyDeliverToProgram(state_, c, report_);
@@ -198,7 +199,10 @@ void Simulation::handle(const DeliverToProgram& c) {
 
 void Simulation::handle(const CompleteProgramStage& c) {
     if (const auto reason = validateCompleteProgramStage(*content_, state_, c)) {
-        reject(c.company, PlotId(), Money::zero(), *reason);
+        Notice notice =
+            makeNotice(NoticeKind::CommandRejected, c.company, PlotId(), Money::zero(), *reason);
+        notice.order = RejectedOrder::StageCompletion;
+        report_.notices.push_back(notice);
     } else {
         applyCompleteProgramStage(*content_, state_, c, report_);
     }

@@ -3,8 +3,8 @@
 
     tools/design/icons.py game/assets/ui/icons.tga
 
-Six 24x24 line icons in a row (dashboard, plots, market, research, finance,
-log), white on transparent, drawn procedurally with a tiny rasterizer so no
+Seven 24x24 line icons in a row (dashboard, plots, market, research, finance,
+log, program), white on transparent, drawn procedurally with a tiny rasterizer so no
 image library is needed. RmlUi's built-in loader reads uncompressed TGA; the
 stylesheet maps each cell through a @spritesheet. Strokes are 2px, drawn at
 4x supersampling for smooth edges, in the same geometry as the bench's SVGs.
@@ -19,7 +19,7 @@ from pathlib import Path
 SIZE = 24
 SCALE = 4
 STROKE = 2.0
-ICONS = ["dashboard", "plots", "market", "research", "finance", "log"]
+ICONS = ["dashboard", "plots", "market", "research", "finance", "log", "program"]
 
 
 def segment_distance(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
@@ -97,6 +97,11 @@ def draw(name: str) -> Canvas:
         c.line(5, 7, 19, 7)
         c.line(5, 12, 19, 12)
         c.line(5, 17, 14, 17)
+    elif name == "program":  # rocket on its pad
+        c.polyline([(12, 3), (16, 9), (16, 16), (8, 16), (8, 9), (12, 3)])
+        c.line(8, 13, 5, 17)
+        c.line(16, 13, 19, 17)
+        c.line(4, 20, 20, 20)
     return c
 
 

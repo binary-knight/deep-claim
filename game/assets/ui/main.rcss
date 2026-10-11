@@ -13,6 +13,7 @@
     icon-research: 72px 0px 24px 24px;
     icon-finance: 96px 0px 24px 24px;
     icon-log: 120px 0px 24px 24px;
+    icon-program: 144px 0px 24px 24px;
 }
 
 body {
@@ -163,6 +164,25 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
 #race .pct { display: block; flex: 0 0 auto; width: 124dp; margin-right: 16dp; white-space: nowrap; }
 #race .research { display: block; flex: 0 0 auto; width: 152dp; color: #c9d4e6; white-space: nowrap; }
 
+/* ---- Program tab (spec 010) ----
+   The three stages side by side, each a name over its state chip. The
+   requirements table gives its four tonnage columns the widest header they
+   hold ("STILL NEEDED", 14dp in the deck frame) and its action column a
+   delivery's chip beside Cancel; the good's name takes the rest. */
+#program .intro { max-width: 760dp; margin-bottom: 12dp; }
+.pstages { display: flex; flex-direction: row; }
+.pstages .pstage { display: block; flex: 1 1 0; width: 50dp; padding-right: 16dp; }
+.pstages .title { display: block; font-weight: 600; color: #c9d4e6; }
+.pstages .title.now { color: #ffffff; }
+.pstages .state { display: block; height: 28dp; line-height: 28dp; margin-top: 4dp; }
+th.w-tonnes { width: 124dp; }
+th.w-deliver { width: 296dp; }
+.pfacts { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin: 12dp 0 8dp 0; }
+.pfacts span { display: block; margin-right: 20dp; white-space: nowrap; }
+.pfacts .cost { font-weight: 500; }
+.pfacts .rname { color: #c9d4e6; }
+#program .done { margin: 0; }
+
 /* ---- Body: rail + content ---- */
 #body { display: flex; flex-direction: row; flex: 1 1 0; min-height: 0; }
 #rail {
@@ -199,6 +219,7 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
 #rail .ic.research { decorator: image(icon-research); }
 #rail .ic.finance { decorator: image(icon-finance); }
 #rail .ic.log { decorator: image(icon-log); }
+#rail .ic.program { decorator: image(icon-program); }
 #rail .tl { display: none; font-size: 14dp; }
 #rail:hover .tl { display: inline; }
 
@@ -403,6 +424,8 @@ td.act .chip { margin-left: 4dp; }
 .finrow .stat .label { display: block; font-size: 12dp; line-height: 16dp; color: #8fa0ba; }
 .finrow .stat .value { display: block; font-family: "JetBrains Mono"; font-size: 17dp; line-height: 22dp; font-weight: 500; white-space: nowrap; }
 .finrow .stat .sub { white-space: nowrap; font-family: "JetBrains Mono"; }
+/* "2 months before bankruptcy" is wider than a sixth of the row: it wraps. */
+.finrow .stat .sub.wrapok { white-space: normal; }
 .finrow .stat .chipline { display: block; height: 22dp; line-height: 22dp; }
 .rivalline { display: block; font-size: 13dp; line-height: 18dp; color: #c9d4e6; margin-top: 8dp; }
 
@@ -436,18 +459,32 @@ price-chart.big { display: block; width: 100%; height: 170dp; margin-bottom: 8dp
 .research .tile.done { color: #5fd98a; border-color: #5fd98a; }
 .research .tile.now { color: #2f8cff; border-color: #2f8cff; }
 
-/* ---- Game over ---- */
+/* ---- The end screen (spec 010) ----
+   An opaque sheet over the whole window: play is replaced, not dimmed. The
+   panel is a plain sheet with a title block; the result is in its words. */
 #overlay {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
-    background-color: #000000bb;
+    background-color: #0a0f17;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 20;
 }
-#overlay .panel { padding: 30dp 40dp; background-color: #111826; border: 1dp #ff6e6e; border-radius: 2dp; text-align: center; width: 520dp; }
-#overlay h1 { font-size: 26dp; line-height: 30dp; }
+#overlay .panel { display: block; box-sizing: border-box; width: 760dp; padding: 24dp; background-color: #111826; border: 1dp #2f4160; border-radius: 2dp; }
+#overlay h1 { padding-bottom: 8dp; border-bottom: 2dp #2f4160; }
+#overlay .body { margin-bottom: 4dp; }
+#overlay .day { font-family: "JetBrains Mono"; font-size: 13dp; line-height: 18dp; color: #c9d4e6; margin-bottom: 16dp; }
+#overlay .cols { display: flex; flex-direction: row; align-items: flex-start; }
+#overlay .col { display: block; flex: 1 1 0; width: 50dp; margin-right: 16dp; padding: 12dp; background-color: #172031; border: 1dp #243249; border-radius: 2dp; }
+#overlay .col.figures { margin-right: 0; }
+#overlay .who { display: block; font-weight: 600; margin-bottom: 4dp; }
+#overlay .count { display: block; font-size: 13dp; line-height: 18dp; color: #c9d4e6; margin-bottom: 8dp; }
+#overlay .sline { display: block; font-family: "JetBrains Mono"; font-size: 13dp; line-height: 18dp; margin-bottom: 4dp; }
+#overlay .sline.never { color: #8fa0ba; }
+#overlay .kv .k { width: auto; }
+#overlay .foot { display: block; margin-top: 16dp; text-align: right; }
+#overlay .foot button { margin: 0; }
 
 /* Scrollbars must be styled: an unstyled scrollbar element is as wide as its
    parent, which leaves no room for the content it scrolls (every block in
@@ -498,7 +535,8 @@ body.deck .log .d, body.deck #status, body.deck #status .lbl, body.deck #strip, 
 body.deck .needs .t .sub, body.deck .finrow .stat .sub, body.deck .finrow .stat .label, body.deck .notice,
 body.deck .field label, body.deck .rivalline, body.deck .research .tile, body.deck h2 .idx,
 body.deck .kv .v .subline, body.deck .prices .pr .nm .sub, body.deck .prices .pr .num .sub,
-body.deck .needs .none, body.deck #pausemenu .check { font-size: 14dp; line-height: 20dp; }
+body.deck .needs .none, body.deck #pausemenu .check, body.deck #overlay .day, body.deck #overlay .count,
+body.deck #overlay .sline { font-size: 14dp; line-height: 20dp; }
 body.deck .chip, body.deck .pill { height: 24dp; line-height: 22dp; }
 body.deck #header .company .value { max-width: 190dp; }
 body.deck #header .stat { margin-right: 12dp; }

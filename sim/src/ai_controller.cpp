@@ -6,6 +6,7 @@
 #include "sim/ids.h"
 #include "sim/math.h"
 #include "sim/money.h"
+#include "sim/sell_policy.h"
 #include "sim/tech.h"
 #include "sim/types.h"
 #include "sim/view.h"
@@ -94,6 +95,58 @@ bool regionWorthProspecting(const Content& content, const CompanyView& view, Reg
         });
 }
 
+// The stage of the program the company is working on (spec 010); nothing
+// once its program is complete, or when the content has no program.
+const ProgramStageView* currentStage(const CompanyView& view) {
+    return view.program.stage.has_value() && !view.program.complete ? &*view.program.stage
+                                                                    : nullptr;
+}
+
+std::int64_t stillNeeded(const ProgramRequirementView& requirement) {
+    return std::max<std::int64_t>(requirement.neededTonnes - requirement.deliveredTonnes, 0);
+}
+
+// Tonnes of a good the program still asks for: what is left of the current
+// stage's need and the whole need of every stage after it.
+std::int64_t programNeedTonnes(const Content& content, const CompanyView& view,
+                               ResourceId resource) {
+    const ProgramStageView* stage = currentStage(view);
+    if (stage == nullptr) {
+        return 0;
+    }
+    std::int64_t need = 0;
+    for (const ProgramRequirementView& requirement : stage->requirements) {
+        if (requirement.resource == resource) {
+            need = checkedAdd(need, stillNeeded(requirement));
+        }
+    }
+    for (std::size_t s = stage->index + 1; s < content.program.stages.size(); ++s) {
+        for (const ProgramRequirement& requirement : content.program.stages[s].requirements) {
+            if (requirement.resource == resource) {
+                need = checkedAdd(need, requirement.tonnes);
+            }
+        }
+    }
+    return need;
+}
+
+// The program needs more of this ore than the company's running mines will
+// dig before the deadline at the rate they dug it yesterday.
+bool programShortOf(const Content& content, const CompanyView& view, ResourceId resource) {
+    const std::int64_t need = programNeedTonnes(content, view, resource);
+    if (need <= 0) {
+        return false;
+    }
+    std::int64_t perDay = 0;
+    for (const MineView& mine : view.mines) {
+        if (mine.state == MineState::Operating) {
+            perDay += mine.lastOutputTonnes[resource.index()];
+        }
+    }
+    const std::int64_t daysLeft = view.deadlineDay > view.day ? view.deadlineDay - view.day : 0;
+    return checkedMulDiv(perDay, daysLeft, 1).value_or(kMaxStockTonnes) < need;
+}
+
 // Forward declaration: net value of a surveyed plot (defined below).
 Money surveyedNetValue(const Content& content, const CompanyView& view, const SurveyView& survey);
 
@@ -163,7 +216,9 @@ Money valuedPrice(const Content& content, const CompanyView& view, ResourceId re
 // for as long as the slowest deposit takes to extract (output declines, so
 // 1.3x the nominal time). The opex is the view's quote for the dearest of
 // those ores, as a mine pays for the dearest ore it produces (spec 008). A
-// buy must cover land plus capex out of this.
+// buy must cover land plus capex out of this. An ore the program is short of
+// counts for more than it sells for (spec 010): the company cannot buy goods
+// for its program, so that ore is worth the race to it.
 Money surveyedNetValue(const Content& content, const CompanyView& view, const SurveyView& survey) {
     Money revenue = Money::zero();
     Money opexPerDay = Money::zero();
@@ -182,7 +237,10 @@ Money surveyedNetValue(const Content& content, const CompanyView& view, const Su
                                    Fixed::kScale)
                          .value_or(kMaxDepositTonnes),
                      horizonTonnes);
-        const Money price = valuedPrice(content, view, estimate.resource);
+        Money price = valuedPrice(content, view, estimate.resource);
+        if (programShortOf(content, view, estimate.resource)) {
+            price = price.scaled(content.ai.programOreLandWeight);
+        }
         const std::int64_t cents = checkedMulDiv(price.cents(), tonnes, 1).value_or(kMaxCashCents);
         revenue += Money::fromCents(std::min(cents, kMaxCashCents - revenue.cents()));
         const std::int64_t days = (tonnes + output - 1) / output;
@@ -219,13 +277,126 @@ Money borrowingRoom(const Content& content, const CompanyView& view) {
     return std::min(view.loanCapacity, content.ai.bootstrapLoan);
 }
 
-// Sell stock when the price is good or holding it costs too much.
-void decideSales(const Content& content, const CompanyView& view, Budget& budget,
+// Complete the stage the day the sim would accept it. Until then, once the
+// stage's project is done and its goods are in, the stage's cost is the only
+// thing missing: it is earmarked, so no other rule spends it. Returns true
+// when the order given founds the program: that ends the game, and the sim
+// refuses whatever is queued behind it.
+bool decideStage(const Content& content, const CompanyView& view, Budget& budget,
                  std::vector<Command>& out) {
+    const ProgramStageView* stage = currentStage(view);
+    if (stage == nullptr) {
+        return false;
+    }
+    if (stage->ready) {
+        out.emplace_back(CompleteProgramStage{view.me});
+        budget.spend(stage->cost);
+        return stage->index + 1 >= content.program.stages.size();
+    }
+    const bool delivered = std::ranges::all_of(
+        stage->requirements,
+        [](const ProgramRequirementView& requirement) { return stillNeeded(requirement) == 0; });
+    if (delivered && stage->researchState == ProgramResearchState::Done) {
+        budget.commit(stage->cost);
+    }
+    return false;
+}
+
+// Tonnes of a good the current stage still needs; zero without a stage.
+std::int64_t stageNeedTonnes(const CompanyView& view, ResourceId resource) {
+    const ProgramStageView* stage = currentStage(view);
+    std::int64_t need = 0;
+    if (stage != nullptr) {
+        for (const ProgramRequirementView& requirement : stage->requirements) {
+            if (requirement.resource == resource) {
+                need = checkedAdd(need, stillNeeded(requirement));
+            }
+        }
+    }
+    return need;
+}
+
+// Keep a standing sell order from selling what the stage needs. Sell
+// policies run the day the ore is dug, before the company's next orders
+// (tick steps 4 and 4b), so a company that has them (the player's company
+// starts with them, and the runner plays it with this controller) would
+// never hold stock to deliver. The order's reserve is set to what the stage
+// still needs, once: it is raised only when it falls short and released when
+// the need is met, so this costs two orders a good a stage.
+void decideReserves(const Content& content, const CompanyView& view, std::vector<Command>& out) {
+    const bool keeps = content.ai.programReserveShare > Fixed::zero();
+    for (std::uint32_t r = 0; r < view.sellPolicies.size(); ++r) {
+        const SellPolicy& policy = view.sellPolicies[r];
+        if (policy.enabled == 0) {
+            continue;
+        }
+        const std::int64_t need = keeps ? stageNeedTonnes(view, ResourceId(r)) : 0;
+        const bool raise = need > policy.reserveTonnes;
+        const bool release = need == 0 && policy.reserveTonnes > 0;
+        if (raise || release) {
+            out.emplace_back(SetSellPolicy{view.me, ResourceId(r), 1, need, policy.floorPrice});
+        }
+    }
+}
+
+// Forward declaration: the project the program wants next (defined below).
+std::optional<TechId> programResearchGoal(const Content& content, const CompanyView& view);
+
+// Cash the program's next project is waiting for: its cost while the lab is
+// free and the company could start it; nothing otherwise.
+Money pendingProjectCost(const Content& content, const CompanyView& view, bool producing) {
+    if (!producing || view.activeResearch.has_value()) {
+        return Money::zero();
+    }
+    const std::optional<TechId> goal = programResearchGoal(content, view);
+    return goal ? content.techs[goal->index()].cost : Money::zero();
+}
+
+// Deliver to the program the reserved share of the stock its current stage
+// still needs, and return the tonnes delivered per resource so the selling
+// rule offers only the rest. The delivery is placed before the day's SellOre
+// orders and is applied first; for an AI company, which has no sell policy
+// and no cover-costs rule (Simulation's makeCompany), those orders are the
+// only way stock leaves. Delivered as it arrives, at most one order a good a
+// day: stock held back would pay storage for nothing. A company with less
+// spendable cash than its buffer sells instead, since a delivery earns
+// nothing; so does one that cannot yet pay for the project the program wants
+// next, or it would sit at its buffer and never start it.
+std::vector<std::int64_t> decideDeliveries(const Content& content, const CompanyView& view,
+                                           bool producing, const Budget& budget,
+                                           std::vector<Command>& out) {
+    std::vector<std::int64_t> delivered(view.inventoryTonnes.size(), 0);
+    const ProgramStageView* stage = currentStage(view);
+    const Money floor = content.ai.programCashBuffer + pendingProjectCost(content, view, producing);
+    if (stage == nullptr || budget.cash < floor) {
+        return delivered;
+    }
+    for (const ProgramRequirementView& requirement : stage->requirements) {
+        const std::size_t r = requirement.resource.index();
+        const std::int64_t stock =
+            std::min(requirement.stockTonnes, view.inventoryTonnes[r]) - delivered[r];
+        // The share is taken of the stock and then cut to the need, so the
+        // last tonnes a stage needs are not rounded away.
+        const std::int64_t share =
+            checkedMulDiv(stock, content.ai.programReserveShare.raw(), Fixed::kScale).value_or(0);
+        const std::int64_t tonnes = std::min(share, stillNeeded(requirement));
+        if (tonnes <= 0) {
+            continue;
+        }
+        out.emplace_back(DeliverToProgram{view.me, requirement.resource, tonnes});
+        delivered[r] += tonnes;
+    }
+    return delivered;
+}
+
+// Sell stock when the price is good or holding it costs too much. `kept` is
+// what today's deliveries to the program take, per resource.
+void decideSales(const Content& content, const CompanyView& view,
+                 const std::vector<std::int64_t>& kept, Budget& budget, std::vector<Command>& out) {
     const Fixed storageMult =
         techMultiplier(content, view.completedTechs, TechEffectType::StorageCostMult);
     for (std::uint32_t r = 0; r < view.inventoryTonnes.size(); ++r) {
-        std::int64_t tonnes = view.inventoryTonnes[r];
+        std::int64_t tonnes = view.inventoryTonnes[r] - kept[r];
         if (tonnes <= 0) {
             continue;
         }
@@ -375,37 +546,132 @@ bool decidePlots(const Content& content, const CompanyView& view, Budget& budget
     return wantsLoan;
 }
 
-// Research the cheapest available tech, but only once the company is
-// producing, and only out of net worth (cash after debt), so a loan never
-// funds a lab.
-void decideResearch(const Content& content, const CompanyView& view, bool producing, Budget& budget,
-                    std::vector<Command>& out) {
-    const Money netCash = budget.cash - view.outstandingPrincipal;
-    if (!producing || view.activeResearch.has_value() || netCash < content.ai.researchFloor) {
-        return;
-    }
-    const auto known = [&](TechId id) {
-        return std::find(view.completedTechs.begin(), view.completedTechs.end(), id) !=
-               view.completedTechs.end();
-    };
+bool techKnown(const CompanyView& view, TechId id) {
+    return std::find(view.completedTechs.begin(), view.completedTechs.end(), id) !=
+           view.completedTechs.end();
+}
+
+// A project the sim would let the company start, money aside: not done, its
+// prerequisites done, and the program stages it waits for complete (spec
+// 010, BR-004).
+bool techStartable(const Content& content, const CompanyView& view, TechId id) {
+    const TechDef& def = content.techs[id.index()];
+    return !techKnown(view, id) &&
+           std::ranges::all_of(def.prerequisites, [&](TechId p) { return techKnown(view, p); }) &&
+           def.requiresProgramStage <= view.program.stagesCompleted;
+}
+
+// The cheapest project that can be started now on the way to `target`: the
+// target itself or a prerequisite still missing, however far back. Nothing
+// when the target is done or nothing on the way can start yet.
+std::optional<TechId> nextStepToward(const Content& content, const CompanyView& view,
+                                     TechId target) {
+    std::vector<std::uint8_t> seen(content.techs.size(), 0);
+    std::vector<TechId> open{target};
     std::optional<TechId> best;
+    while (!open.empty()) {
+        const TechId id = open.back();
+        open.pop_back();
+        if (seen[id.index()] != 0 || techKnown(view, id)) {
+            continue;
+        }
+        seen[id.index()] = 1;
+        const TechDef& def = content.techs[id.index()];
+        if (!techStartable(content, view, id)) {
+            open.insert(open.end(), def.prerequisites.begin(), def.prerequisites.end());
+            continue;
+        }
+        const Money bestCost = best ? content.techs[best->index()].cost : def.cost;
+        if (!best || def.cost < bestCost || (def.cost == bestCost && id < *best)) {
+            best = id;
+        }
+    }
+    return best;
+}
+
+// The next project toward the first ore, among those the stages in
+// [first, end) need, that the company cannot dig yet.
+std::optional<TechId> stepToLockedNeed(const Content& content, const CompanyView& view,
+                                       std::size_t first, std::size_t end) {
+    for (std::size_t s = first; s < std::min(end, content.program.stages.size()); ++s) {
+        for (const ProgramRequirement& requirement : content.program.stages[s].requirements) {
+            if (resourceUnlocked(content, view.completedTechs, requirement.resource)) {
+                continue;
+            }
+            const TechId unlock = content.resources[requirement.resource.index()].unlockedBy;
+            if (const std::optional<TechId> step = nextStepToward(content, view, unlock)) {
+                return step;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// The project the program wants next, ahead of any ordinary one (spec 010).
+// First whatever unlocks an ore the current stage needs, as the stage cannot
+// be finished without it. Then the stage's own project, once enough of its
+// goods are in that the project will not be finished long before them. Then
+// whatever unlocks an ore a coming stage needs: those roads are long (four
+// projects to lithium in the shipped tree), so they are walked from the start.
+std::optional<TechId> programResearchGoal(const Content& content, const CompanyView& view) {
+    const ProgramStageView* stage = currentStage(view);
+    if (stage == nullptr) {
+        return std::nullopt;
+    }
+    if (const auto step = stepToLockedNeed(content, view, stage->index, stage->index + 1)) {
+        return step;
+    }
+    const bool farEnough =
+        Fixed::fromRatio(stage->progressPermille, 1000) >= content.ai.programResearchProgress;
+    if (farEnough && techStartable(content, view, stage->research)) {
+        return stage->research;
+    }
+    return stepToLockedNeed(content, view, stage->index + 1, content.program.stages.size());
+}
+
+// The cheapest project the ordinary rule can afford: paid out of net worth
+// (cash after debt), so a loan never funds a lab.
+std::optional<TechId> ordinaryResearch(const Content& content, const CompanyView& view,
+                                       const Budget& budget) {
+    const Money netCash = budget.cash - view.outstandingPrincipal;
+    std::optional<TechId> best;
+    if (netCash < content.ai.researchFloor) {
+        return best;
+    }
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
         const TechId id(i);
-        // A stage's project is not ready until the stages before it are
-        // complete (spec 010, BR-004): the sim would refuse the order.
-        const bool ready = !known(id) &&
-                           std::ranges::all_of(content.techs[i].prerequisites, known) &&
-                           content.techs[i].requiresProgramStage <= view.program.stagesCompleted;
-        if (!ready || content.techs[i].cost + content.ai.researchFloor / 2 > netCash) {
+        if (!techStartable(content, view, id) ||
+            content.techs[i].cost + content.ai.researchFloor / 2 > netCash) {
             continue;
         }
         if (!best || content.techs[i].cost < content.techs[best->index()].cost) {
             best = id;
         }
     }
-    if (best) {
-        out.emplace_back(StartResearch{view.me, *best});
-        budget.spend(content.techs[best->index()].cost);
+    return best;
+}
+
+// Research only once the company is producing. A project the program wants
+// comes first and is paid for out of spendable cash, debt or no debt, as
+// long as the cash buffer is left; while it cannot be afforded nothing else
+// is started, so the money is not spent from under it. Otherwise the
+// cheapest available project, by the ordinary rule.
+void decideResearch(const Content& content, const CompanyView& view, bool producing, Budget& budget,
+                    std::vector<Command>& out) {
+    if (!producing || view.activeResearch.has_value()) {
+        return;
+    }
+    std::optional<TechId> chosen;
+    if (const std::optional<TechId> goal = programResearchGoal(content, view)) {
+        if (budget.canSpend(content.techs[goal->index()].cost + content.ai.programCashBuffer)) {
+            chosen = goal;
+        }
+    } else {
+        chosen = ordinaryResearch(content, view, budget);
+    }
+    if (chosen) {
+        out.emplace_back(StartResearch{view.me, *chosen});
+        budget.spend(content.techs[chosen->index()].cost);
     }
 }
 
@@ -469,7 +735,9 @@ std::int64_t aiBidJitterPercent(PlotId plot, CompanyId company) {
 }
 
 void HeuristicController::decide(const CompanyView& view, std::vector<Command>& out) {
-    if (view.bankrupt) {
+    // A bankrupt company gives no orders, and a finished game takes none
+    // (spec 010): the sim would refuse every one.
+    if (view.bankrupt || view.outcome.ended) {
         return;
     }
     const bool producing = std::ranges::any_of(
@@ -483,7 +751,16 @@ void HeuristicController::decide(const CompanyView& view, std::vector<Command>& 
         }
     }
     Budget budget{view.cash - view.reservedCash - earmarked - content_->ai.cashReserve, view.cash};
-    decideSales(*content_, view, budget, out);
+    // The program's orders are placed first: the stage is completed before
+    // any other rule can spend its cost, and stock is delivered before the
+    // selling rule can offer it.
+    if (decideStage(*content_, view, budget, out)) {
+        return;
+    }
+    decideReserves(*content_, view, out);
+    const std::vector<std::int64_t> delivered =
+        decideDeliveries(*content_, view, producing, budget, out);
+    decideSales(*content_, view, delivered, budget, out);
     decideMothballing(*content_, view, out);
     decideBuilding(*content_, view, budget, out);
     const bool wantsLoan = decidePlots(*content_, view, budget, out);

@@ -199,6 +199,9 @@ TEST_CASE("The shipped competitor's knobs are the tuned ones", "[content][data][
     CHECK(ai.supplyDiscount == sim::Fixed::one());
     CHECK(ai.firstMineRequiredReturn <= ai.requiredReturn);
     CHECK(ai.firstMineRecoverableShare >= ai.recoverableShare);
+    // Spec 010: the knobs the AI races with are in the shipped file.
+    CHECK(ai.programReserveShare > sim::Fixed::zero());
+    CHECK(ai.programOreLandWeight >= sim::Fixed::one());
     CHECK(result.content->balance.openingMineablePresence == sim::Fixed::fromRatio(1, 2));
 }
 

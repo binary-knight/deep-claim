@@ -52,8 +52,9 @@ constexpr int kMaxScreenshots = 200;   // about 3.4 MB each, uncompressed
 constexpr float kDeckWidth = 1300.0F;  // narrower windows get the Steam Deck sizes
 const char* const kSaveFile = "autosave.dcsave";
 const char* const kPauseFile = "autopause.txt";
-constexpr std::array<const char*, 6> kTabNames = {"dashboard", "plots",   "market",
-                                                  "research",  "finance", "log"};
+// By tab number; Program (spec 010) is the seventh, and second on the rail.
+constexpr std::array<const char*, 7> kTabNames = {"dashboard", "plots", "market", "research",
+                                                  "finance",   "log",   "program"};
 
 std::uint64_t clockSeed() {
     return static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
@@ -141,7 +142,8 @@ App::App(Rml::Context& context, platform::Services& services, const sim::Content
 
 App::~App() {
     if (trace_) {
-        trace_->end(session_->day());
+        // With the outcome, when the game was played to its end (spec 010).
+        trace_->end(session_->day(), session_->view());
     }
     PriceChartElement::setProvider(nullptr);
     PriceChartElement::setCashProvider(nullptr);
@@ -440,6 +442,83 @@ void App::bindModel() {
         h.RegisterMember("research", &RaceRow::research);
         h.RegisterMember("you", &RaceRow::you);
     }
+    if (auto h = ctor.RegisterStruct<ProgramStageRow>()) {
+        h.RegisterMember("heading", &ProgramStageRow::heading);
+        h.RegisterMember("state", &ProgramStageRow::state);
+        h.RegisterMember("state_class", &ProgramStageRow::state_class);
+        h.RegisterMember("current", &ProgramStageRow::current);
+    }
+    if (auto h = ctor.RegisterStruct<ProgramNeedRow>()) {
+        h.RegisterMember("index", &ProgramNeedRow::index);
+        h.RegisterMember("good", &ProgramNeedRow::good);
+        h.RegisterMember("needs", &ProgramNeedRow::needs);
+        h.RegisterMember("delivered", &ProgramNeedRow::delivered);
+        h.RegisterMember("stock", &ProgramNeedRow::stock);
+        h.RegisterMember("still", &ProgramNeedRow::still);
+        h.RegisterMember("can_deliver", &ProgramNeedRow::can_deliver);
+        h.RegisterMember("deliver_label", &ProgramNeedRow::deliver_label);
+        h.RegisterMember("note", &ProgramNeedRow::note);
+        h.RegisterMember("locked_note", &ProgramNeedRow::locked_note);
+        h.RegisterMember("order", &ProgramNeedRow::order);
+    }
+    ctor.RegisterArray<std::vector<ProgramNeedRow>>();
+    if (auto h = ctor.RegisterStruct<ProgramPanel>()) {
+        h.RegisterMember("title", &ProgramPanel::title);
+        h.RegisterMember("intro", &ProgramPanel::intro);
+        h.RegisterMember("cover_warning", &ProgramPanel::cover_warning);
+        h.RegisterMember("complete", &ProgramPanel::complete);
+        h.RegisterMember("done_line", &ProgramPanel::done_line);
+        h.RegisterMember("has_stage", &ProgramPanel::has_stage);
+        h.RegisterMember("heading", &ProgramPanel::heading);
+        h.RegisterMember("col_good", &ProgramPanel::col_good);
+        h.RegisterMember("col_needs", &ProgramPanel::col_needs);
+        h.RegisterMember("col_delivered", &ProgramPanel::col_delivered);
+        h.RegisterMember("col_stock", &ProgramPanel::col_stock);
+        h.RegisterMember("col_still", &ProgramPanel::col_still);
+        h.RegisterMember("needs", &ProgramPanel::needs);
+        h.RegisterMember("cost", &ProgramPanel::cost);
+        h.RegisterMember("research_name", &ProgramPanel::research_name);
+        h.RegisterMember("research", &ProgramPanel::research);
+        h.RegisterMember("research_open", &ProgramPanel::research_open);
+        h.RegisterMember("can_research", &ProgramPanel::can_research);
+        h.RegisterMember("research_label", &ProgramPanel::research_label);
+        h.RegisterMember("research_blocked", &ProgramPanel::research_blocked);
+        h.RegisterMember("research_order", &ProgramPanel::research_order);
+        h.RegisterMember("ready", &ProgramPanel::ready);
+        h.RegisterMember("complete_label", &ProgramPanel::complete_label);
+        h.RegisterMember("complete_order", &ProgramPanel::complete_order);
+        h.RegisterMember("ready_line", &ProgramPanel::ready_line);
+        h.RegisterMember("blocked_research", &ProgramPanel::blocked_research);
+        h.RegisterMember("blocked_deliveries", &ProgramPanel::blocked_deliveries);
+        h.RegisterMember("blocked_cash", &ProgramPanel::blocked_cash);
+    }
+    if (auto h = ctor.RegisterStruct<EndStageLine>()) {
+        h.RegisterMember("text", &EndStageLine::text);
+        h.RegisterMember("reached", &EndStageLine::reached);
+    }
+    ctor.RegisterArray<std::vector<EndStageLine>>();
+    if (auto h = ctor.RegisterStruct<EndCompany>()) {
+        h.RegisterMember("name", &EndCompany::name);
+        h.RegisterMember("stages", &EndCompany::stages);
+        h.RegisterMember("lines", &EndCompany::lines);
+        h.RegisterMember("you", &EndCompany::you);
+    }
+    ctor.RegisterArray<std::vector<EndCompany>>();
+    if (auto h = ctor.RegisterStruct<EndPanel>()) {
+        h.RegisterMember("shown", &EndPanel::shown);
+        h.RegisterMember("title", &EndPanel::title);
+        h.RegisterMember("body", &EndPanel::body);
+        h.RegisterMember("day", &EndPanel::day);
+        h.RegisterMember("companies", &EndPanel::companies);
+        h.RegisterMember("figures_title", &EndPanel::figures_title);
+        h.RegisterMember("cash_label", &EndPanel::cash_label);
+        h.RegisterMember("cash", &EndPanel::cash);
+        h.RegisterMember("mines_label", &EndPanel::mines_label);
+        h.RegisterMember("mines", &EndPanel::mines);
+        h.RegisterMember("stages_label", &EndPanel::stages_label);
+        h.RegisterMember("stages", &EndPanel::stages);
+        h.RegisterMember("new_game", &EndPanel::new_game);
+    }
     if (auto h = ctor.RegisterStruct<PauseRow>()) {
         h.RegisterMember("index", &PauseRow::index);
         h.RegisterMember("label", &PauseRow::label);
@@ -455,6 +534,7 @@ void App::bindModel() {
     ctor.RegisterArray<std::vector<LogRow>>();
     ctor.RegisterArray<std::vector<PauseRow>>();
     ctor.RegisterArray<std::vector<RaceRow>>();
+    ctor.RegisterArray<std::vector<ProgramStageRow>>();
     ctor.RegisterArray<std::vector<PendingRow>>();
 
     // Header and strip
@@ -506,6 +586,9 @@ void App::bindModel() {
     ctor.Bind("race_verdict", &model_.race_verdict);
     ctor.Bind("race_verdict_class", &model_.race_verdict_class);
     ctor.Bind("race_rows", &model_.race_rows);
+    // The Program tab (spec 010)
+    ctor.Bind("program_stages", &model_.program_stages);
+    ctor.Bind("program", &model_.program);
     // Dashboard
     ctor.Bind("needs", &model_.needs);
     ctor.Bind("needs_none", &model_.needs_none);
@@ -567,7 +650,7 @@ void App::bindModel() {
     ctor.Bind("selected_plot", &model_.selected_plot);
     ctor.Bind("selected_resource", &model_.selected_resource);
     ctor.Bind("ui_shortcuts", &model_.ui_shortcuts);
-    ctor.Bind("ui_game_over", &model_.ui_game_over);
+    ctor.Bind("end", &model_.end);
     ctor.Bind("ui_pause_menu_title", &model_.ui_pause_menu_title);
     ctor.Bind("ui_cancel", &model_.ui_cancel);
     ctor.Bind("ui_cancel_all", &model_.ui_cancel_all);
@@ -653,6 +736,15 @@ void App::bindModel() {
     ctor.BindEventCallback("research", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
         onResearch(intArg(a, 0));
     });
+    // The Program tab's three orders (spec 010).
+    ctor.BindEventCallback("deliver", [this, intArg](Rml::DataModelHandle, Rml::Event&, Args a) {
+        onDeliver(intArg(a, 0));
+    });
+    ctor.BindEventCallback("program_research", [this](Rml::DataModelHandle, Rml::Event&, Args) {
+        onProgramResearch();
+    });
+    ctor.BindEventCallback("complete_stage",
+                           [this](Rml::DataModelHandle, Rml::Event&, Args) { onCompleteStage(); });
     ctor.BindEventCallback("save", [this](Rml::DataModelHandle, Rml::Event&, Args) { onSave(); });
     ctor.BindEventCallback("load", [this](Rml::DataModelHandle, Rml::Event&, Args) { onLoad(); });
     ctor.BindEventCallback("new_game",
@@ -799,8 +891,10 @@ void App::update(double seconds) {
 bool App::onKey(Rml::Input::KeyIdentifier key) {
     switch (key) {
         case Rml::Input::KI_SPACE:
-            session_->togglePause();
-            refresh();
+            if (!session_->gameOver()) {
+                session_->togglePause();
+                refresh();
+            }
             return true;
         case Rml::Input::KI_1:
             onSetSpeed(1);
@@ -839,12 +933,20 @@ void App::onSetTab(int tab) {
     showPopover(false, false);
 }
 
+// The clock controls are off once the game is over (spec 010, edge case 11).
+// The session would ignore them too; the client does not ask.
 void App::onSetSpeed(int speed) {
+    if (session_->gameOver()) {
+        return;
+    }
     session_->setSpeed(static_cast<Speed>(std::clamp(speed, 0, 3)));
     refresh();
 }
 
 void App::onStep() {
+    if (session_->gameOver()) {
+        return;
+    }
     session_->stepOneDay();
     refresh();
 }
@@ -942,7 +1044,9 @@ void App::onApplyPolicy(bool enabled) {
     command.enabled = enabled ? std::uint8_t{1} : std::uint8_t{0};
     command.reserveTonnes = reserve;
     command.floorPrice = floor;
-    order(command);
+    if (!order(command)) {
+        return;
+    }
     const std::string& name = content_->resources[static_cast<std::size_t>(index)].name;
     setStatus(text(*content_, enabled ? "status.policy_starts" : "status.policy_stops",
                    {{"resource", name}}));
@@ -956,20 +1060,30 @@ void App::onToggleCoverCosts() {
         return;
     }
     const bool enable = !session_->view().coverCosts;
-    order(sim::SetCoverCosts{Session::kPlayer, enable ? std::uint8_t{1} : std::uint8_t{0}});
+    if (!order(sim::SetCoverCosts{Session::kPlayer, enable ? std::uint8_t{1} : std::uint8_t{0}})) {
+        return;
+    }
     setStatus(text(*content_, enable ? "status.cover_on" : "status.cover_off"));
 }
 
-void App::order(const sim::Command& command) {
+bool App::order(const sim::Command& command) {
+    // Every order the client gives goes through here, and none is given once
+    // the game is over (spec 010): the session would still queue it.
+    if (session_->gameOver()) {
+        return false;
+    }
     // Shown at once: with the clock stopped nothing else would redraw the
     // control until the next tick (spec 007).
     session_->submit(command);
     refresh();
+    return true;
 }
 
 void App::onSurvey(int plotIndex) {
-    order(sim::CommissionSurvey{Session::kPlayer,
-                                sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
+    if (!order(sim::CommissionSurvey{Session::kPlayer,
+                                     sim::PlotId(static_cast<std::uint32_t>(plotIndex))})) {
+        return;
+    }
     setStatus(text(*content_, "status.survey_queued"));
 }
 
@@ -979,13 +1093,18 @@ void App::onBid(int plotIndex) {
         setStatus(text(*content_, "status.bid_prompt"), true);
         return;
     }
-    order(sim::BidOnPlot{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex)),
-                         amount});
+    if (!order(sim::BidOnPlot{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex)),
+                              amount})) {
+        return;
+    }
     setStatus(text(*content_, "status.bid_queued", {{"amount", formatMoney(amount)}}));
 }
 
 void App::onBuild(int plotIndex) {
-    order(sim::BuildMine{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex))});
+    if (!order(
+            sim::BuildMine{Session::kPlayer, sim::PlotId(static_cast<std::uint32_t>(plotIndex))})) {
+        return;
+    }
     setStatus(text(*content_, "status.build_queued"));
 }
 
@@ -994,8 +1113,10 @@ void App::onToggleMine(int mineIndex) {
     for (const sim::MineView& mine : session_->view().mines) {
         if (mine.id == id) {
             const bool operate = mine.state != sim::MineState::Operating;
-            order(sim::SetMineState{Session::kPlayer, id,
-                                    operate ? std::uint8_t{1} : std::uint8_t{0}});
+            if (!order(sim::SetMineState{Session::kPlayer, id,
+                                         operate ? std::uint8_t{1} : std::uint8_t{0}})) {
+                return;
+            }
             setStatus(text(*content_, operate ? "status.mine_reopen" : "status.mine_mothball"));
             return;
         }
@@ -1013,8 +1134,10 @@ void App::onSell(int resourceIndex, bool all) {
         return;
     }
     // The sim decides whether the quantity is valid; its reason shows in the log.
-    order(sim::SellOre{Session::kPlayer, sim::ResourceId(static_cast<std::uint32_t>(resourceIndex)),
-                       tonnes});
+    if (!order(sim::SellOre{Session::kPlayer,
+                            sim::ResourceId(static_cast<std::uint32_t>(resourceIndex)), tonnes})) {
+        return;
+    }
     setStatus(text(*content_, "status.sale_queued", {{"tonnes", formatTonnes(tonnes)}}));
 }
 
@@ -1052,7 +1175,9 @@ void App::onRepayAll(int loanIndex) {
             // No money is counted here: the button's state comes from the
             // model, and the sim alone turns a repayment away (R-001).
             // The balance to the cent, read now rather than from the label.
-            order(sim::RepayLoan{Session::kPlayer, id, loan.remaining});
+            if (!order(sim::RepayLoan{Session::kPlayer, id, loan.remaining})) {
+                return;
+            }
             setStatus(text(*content_, "status.repayment_ordered",
                            {{"amount", formatMoney(loan.remaining)}}));
             return;
@@ -1071,7 +1196,9 @@ void App::onTakeLoan() {
         setStatus(text(*content_, "status.loan_prompt"), true);
         return;
     }
-    order(sim::TakeLoan{Session::kPlayer, amount});
+    if (!order(sim::TakeLoan{Session::kPlayer, amount})) {
+        return;
+    }
     resetLoanInput();  // the field follows the credit that is left
     setStatus(text(*content_, "status.loan_requested", {{"amount", formatMoney(amount)}}));
 }
@@ -1082,14 +1209,63 @@ void App::onRepay(int loanIndex) {
         setStatus(text(*content_, "status.repay_prompt"), true);
         return;
     }
-    order(sim::RepayLoan{Session::kPlayer, sim::LoanId(static_cast<std::uint32_t>(loanIndex)),
-                         amount});
+    if (!order(sim::RepayLoan{Session::kPlayer, sim::LoanId(static_cast<std::uint32_t>(loanIndex)),
+                              amount})) {
+        return;
+    }
     setStatus(text(*content_, "status.repayment_ordered", {{"amount", formatMoney(amount)}}));
 }
 
 void App::onResearch(int techIndex) {
-    order(sim::StartResearch{Session::kPlayer, sim::TechId(static_cast<std::uint32_t>(techIndex))});
+    if (!order(sim::StartResearch{Session::kPlayer,
+                                  sim::TechId(static_cast<std::uint32_t>(techIndex))})) {
+        return;
+    }
     setStatus(text(*content_, "status.research_queued"));
+}
+
+// Delivers the most the current stage can take of one good today: the
+// lesser of the stock and what is still needed, as the view has them and as
+// the button said (spec 010). The sim decides whether it is accepted.
+void App::onDeliver(int resourceIndex) {
+    const std::optional<sim::ProgramStageView>& stage = session_->view().program.stage;
+    if (!stage) {
+        return;
+    }
+    for (const sim::ProgramRequirementView& need : stage->requirements) {
+        if (static_cast<int>(need.resource.value()) != resourceIndex) {
+            continue;
+        }
+        const std::int64_t tonnes =
+            std::min(need.stockTonnes, need.neededTonnes - need.deliveredTonnes);
+        if (tonnes > 0 && order(sim::DeliverToProgram{Session::kPlayer, need.resource, tonnes})) {
+            setStatus(text(*content_, "status.delivery_queued",
+                           {{"tonnes", formatTonnes(tonnes)},
+                            {"resource", content_->resources[need.resource.index()].name}}));
+        }
+        return;
+    }
+}
+
+// The current stage's project, through the same order as the Research tab.
+void App::onProgramResearch() {
+    if (const std::optional<sim::ProgramStageView>& stage = session_->view().program.stage) {
+        onResearch(static_cast<int>(stage->research.value()));
+    }
+}
+
+// The status line names the cost the view quotes for the current stage; the
+// sim decides whether the order is accepted.
+void App::onCompleteStage() {
+    const std::optional<sim::ProgramStageView>& stage = session_->view().program.stage;
+    if (!stage) {
+        return;
+    }
+    const sim::Money cost = stage->cost;
+    if (order(sim::CompleteProgramStage{Session::kPlayer})) {
+        setStatus(
+            text(*content_, "status.stage_completion_queued", {{"amount", formatMoney(cost)}}));
+    }
 }
 
 void App::onCancel(int orderId) {

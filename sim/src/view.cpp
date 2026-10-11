@@ -301,10 +301,15 @@ void addUnlockProgress(const Content& content, const WorldState& state, CompanyI
             continue;
         }
         const TechDef& def = content.techs[tech.index()];
-        const bool ready = std::ranges::all_of(def.prerequisites, [&](TechId p) {
-            return std::find(self.completedTechs.begin(), self.completedTechs.end(), p) !=
-                   self.completedTechs.end();
-        });
+        // As the sim's own test for starting a project, money aside: its
+        // prerequisites done and the program stages it waits for complete
+        // (spec 010, BR-004).
+        const bool ready =
+            def.requiresProgramStage <= self.programStage &&
+            std::ranges::all_of(def.prerequisites, [&](TechId p) {
+                return std::find(self.completedTechs.begin(), self.completedTechs.end(), p) !=
+                       self.completedTechs.end();
+            });
         view.unlockReady[r] = ready ? 1 : 0;
     }
 }

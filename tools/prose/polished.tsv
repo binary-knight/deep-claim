@@ -16,7 +16,6 @@ notice.survey_complete	Survey crew finished on {plot}. The report is in.
 notice.mine_started	{company} poured footings for a mine on {plot}.
 notice.mine_operational	The mine on {plot} is operational. Headframe is turning.
 notice.mine_depleted	The mine on {plot} is worked out. Nothing left to pull.
-notice.mine_switched	The mine on {plot} changed operating status.
 notice.ore_sold	Sold {tonnes} of {resource} off the pile for {amount}.
 notice.cover_costs_sale	Had to sell {tonnes} of {resource} off the pile for {amount} to balance the ledger this month.
 notice.auto_sale_summary	Automatic sales moved {tonnes} of {resource} off the pile this month for {amount}.
@@ -81,6 +80,8 @@ status.loan_requested	Paperwork filed with the bank for a loan of {amount}.
 status.repay_prompt	Enter the amount to pay down against the debt.
 status.repayment_ordered	Repayment of {amount} ordered against the debt.
 status.research_queued	Work order filed with the engineers; research starts tomorrow if the order is accepted.
+status.delivery_queued	Delivery of {tonnes} of {resource} to the program queued for tomorrow. Once it is made it cannot be undone.
+status.stage_completion_queued	Stage completion queued; it goes ahead tomorrow for {amount} if the order is accepted.
 status.save_write_failed	Could not write company records to {name}.
 status.save_replace_failed	Could not replace the records at {name}: {reason}.
 status.saved	Company books saved to {name}.
@@ -411,3 +412,5 @@ ui.end_cash	Cash
 ui.end_mines	Mines
 ui.end_stages	Stages completed
 ui.end_new_game	New game
+notice.command_rejected.delivery	Couldn't deliver {resource} to the program: {reason}.
+notice.command_rejected.stage	Couldn't complete the program stage: {reason}.

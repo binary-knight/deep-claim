@@ -17,11 +17,12 @@
         <div class="stat"><span class="label">Cash, 90 days</span><price-chart class="spark" series="cash" days="90" mode="line"/></div>
         <div class="grow"></div>
         <div class="speed">
-            <button data-class-active="speed == 0" data-event-click="set_speed(0)">Pause</button>
-            <button data-class-active="speed == 1" data-event-click="set_speed(1)">1x</button>
-            <button data-class-active="speed == 2" data-event-click="set_speed(2)">5x</button>
-            <button data-class-active="speed == 3" data-event-click="set_speed(3)">20x</button>
-            <button data-event-click="step"><span class="long">Step day</span><span class="short">Step</span></button>
+            <!-- Off once the game is over (spec 010): the clock cannot be restarted. -->
+            <button data-class-active="speed == 0" data-class-disabled="game_over" data-event-click="set_speed(0)">Pause</button>
+            <button data-class-active="speed == 1" data-class-disabled="game_over" data-event-click="set_speed(1)">1x</button>
+            <button data-class-active="speed == 2" data-class-disabled="game_over" data-event-click="set_speed(2)">5x</button>
+            <button data-class-active="speed == 3" data-class-disabled="game_over" data-event-click="set_speed(3)">20x</button>
+            <button data-class-disabled="game_over" data-event-click="step"><span class="long">Step day</span><span class="short">Step</span></button>
             <!-- Orders wait for the clock (spec 007): the count opens the list.
                  It hangs under the buttons, out of the row, because the header
                  has no width to spare once the company name is a long one. -->
@@ -68,6 +69,8 @@
     <div id="body">
         <div id="rail">
             <div class="tab" data-class-active="tab == 0" data-event-click="set_tab(0)"><span class="ic dashboard"></span><span class="tl">Dashboard</span></div>
+            <!-- Program (spec 010) is tab 6 by number and second on the rail. -->
+            <div class="tab" data-class-active="tab == 6" data-event-click="set_tab(6)"><span class="ic program"></span><span class="tl">Program</span></div>
             <div class="tab" data-class-active="tab == 1" data-event-click="set_tab(1)"><span class="ic plots"></span><span class="tl">Plots</span></div>
             <div class="tab" data-class-active="tab == 2" data-event-click="set_tab(2)"><span class="ic market"></span><span class="tl">Market</span></div>
             <div class="tab" data-class-active="tab == 3" data-event-click="set_tab(3)"><span class="ic research"></span><span class="tl">Research</span></div>
@@ -149,7 +152,7 @@
                         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span><span class="sub">{{capacity_sub}}</span></div>
                         <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub">{{storage_sub}}</span></div>
                         <div class="stat"><span class="label">This month</span><span class="value" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span><span class="sub">{{instalment_sub}}</span></div>
-                        <div class="stat"><span class="label">Solvency</span><span class="chipline"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="sub">{{solvency_sub}}</span></div>
+                        <div class="stat"><span class="label">Solvency</span><span class="chipline"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="sub wrapok">{{solvency_sub}}</span></div>
                     </div>
                 </div>
                 <div class="sheet">
@@ -157,6 +160,60 @@
                     <div class="log">
                         <div data-for="e : recent" class="line" data-class-warn="e.warning"><span class="d">{{e.day}}</span><span class="t">{{e.text}}</span></div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Program (spec 010): the three stages, then the one being worked
+                 on: what it needs of each good, its cost, its research, and
+                 the three orders. A control is live when the sim would take
+                 its order; an order waiting for the clock stands in for its
+                 control as a chip with Cancel (spec 007). Every state is said
+                 in words; colour only repeats it. -->
+            <div id="program" data-if="tab == 6">
+                <h1>{{program.title}}</h1>
+                <p class="intro text2">{{program.intro}}</p>
+                <div class="notice" data-if="program.cover_warning != ''"><span class="ic">!</span><span class="msg cover">{{program.cover_warning}}</span></div>
+                <div class="sheet">
+                    <h2><span class="idx">01</span>Stages</h2>
+                    <div class="pstages">
+                        <div data-for="s : program_stages" class="pstage">
+                            <span class="title" data-class-now="s.current">{{s.heading}}</span>
+                            <span class="state"><span class="chip" data-class-good="s.state_class == 'good'" data-class-accent="s.state_class == 'accent'" data-class-muted="s.state_class == 'muted'">{{s.state}}</span></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="sheet" data-if="program.complete">
+                    <p class="done">{{program.done_line}}</p>
+                </div>
+                <div class="sheet" data-if="program.has_stage">
+                    <h2><span class="idx">02</span><span class="heading">{{program.heading}}</span></h2>
+                    <table>
+                        <tr><th>{{program.col_good}}</th><th class="n w-tonnes">{{program.col_needs}}</th><th class="n w-tonnes">{{program.col_delivered}}</th><th class="n w-tonnes">{{program.col_stock}}</th><th class="n w-tonnes">{{program.col_still}}</th><th class="act w-deliver"></th></tr>
+                        <tr data-for="n : program.needs" class="need">
+                            <td class="name wrap"><span class="gname">{{n.good}}</span><span class="sub warn locked" data-if="n.locked_note != ''">{{n.locked_note}}</span></td>
+                            <td class="n">{{n.needs}}</td>
+                            <td class="n">{{n.delivered}}</td>
+                            <td class="n">{{n.stock}}</td>
+                            <td class="n">{{n.still}}</td>
+                            <td class="act"><button class="sm primary" data-if="n.can_deliver && !n.order.pending" data-event-click="deliver(n.index)">{{n.deliver_label}}</button><button class="sm disabled" data-if="!n.can_deliver && !n.order.pending">{{n.deliver_label}}</button><span class="chip accent" data-if="n.order.pending">{{n.order.text}}</span><button class="sm" data-if="n.order.pending" data-event-click="cancel(n.order.id)">{{ui_cancel}}</button><span class="sub note" data-if="n.note != '' && !n.order.pending">{{n.note}}</span></td>
+                        </tr>
+                    </table>
+                    <div class="pfacts"><span class="cost num">{{program.cost}}</span><span class="rname">{{program.research_name}}</span><span class="rstate">{{program.research}}</span></div>
+                    <div class="actions pactions">
+                        <button data-if="program.research_open && program.can_research && !program.research_order.pending" data-event-click="program_research">{{program.research_label}}</button>
+                        <button class="disabled" data-if="program.research_open && !program.can_research && !program.research_order.pending">{{program.research_label}}</button>
+                        <span class="hrow" data-if="program.research_order.pending"><span class="chip accent">{{program.research_order.text}}</span><span class="chip warn" data-if="program.research_order.not_covered">{{ui_not_covered}}</span><button data-event-click="cancel(program.research_order.id)">{{ui_cancel}}</button></span>
+                        <button class="primary" data-if="program.ready && !program.complete_order.pending" data-event-click="complete_stage">{{program.complete_label}}</button>
+                        <button class="disabled" data-if="!program.ready && !program.complete_order.pending">{{program.complete_label}}</button>
+                        <span class="hrow" data-if="program.complete_order.pending"><span class="chip accent">{{program.complete_order.text}}</span><span class="chip warn" data-if="program.complete_order.not_covered">{{ui_not_covered}}</span><button data-event-click="cancel(program.complete_order.id)">{{ui_cancel}}</button></span>
+                    </div>
+                    <!-- Why Start research is off, as the Research tab says it;
+                         then what the stage still lacks, or that it lacks nothing. -->
+                    <span class="sub warn rblocked" data-if="program.research_blocked != ''">{{program.research_blocked}}</span>
+                    <span class="sub warn blocked" data-if="program.blocked_research != ''">{{program.blocked_research}}</span>
+                    <span class="sub warn blocked" data-if="program.blocked_deliveries != ''">{{program.blocked_deliveries}}</span>
+                    <span class="sub warn blocked" data-if="program.blocked_cash != ''">{{program.blocked_cash}}</span>
+                    <span class="sub good ready" data-if="program.ready_line != ''">{{program.ready_line}}</span>
                 </div>
             </div>
 
@@ -202,13 +259,17 @@
                             <h2><span class="idx">02</span>Owned</h2>
                             <table>
                                 <tr><th class="w-plot">Plot</th><th class="w-region">Region</th><th class="w-mine">Mine</th><th>Output</th><th>Remaining</th><th class="act w-act" data-class-wide="owned_orders"></th></tr>
-                                <tr data-for="o : owned" class="row" data-class-sel="o.index == selected_plot" data-event-click="select_plot(o.index)">
-                                    <td class="name num">{{o.name}}</td>
-                                    <td class="nw">{{o.region}}<span class="sub num">{{o.area}}</span></td>
-                                    <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
-                                    <td class="figure wrap">{{o.output}}<span class="sub" data-if="o.figures.shown" data-class-warn="o.figures.loss">{{o.figures.earns}} <span data-if="o.figures.loss">{{ui_mine_loss}}</span></span><span class="sub" data-if="o.figures.reopen != ''" data-class-warn="o.figures.reopen_loss">{{ui_mine_if_reopened}} {{o.figures.reopen}}</span><span class="sub" data-if="o.figures.break_even != ''">{{o.figures.break_even}}</span></td>
-                                    <td class="figure wrap">{{o.remaining}}</td>
-                                    <td class="act"><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button><span class="chip accent" data-if="o.mine_order.pending">{{o.mine_order.text}}</span><button class="sm" data-if="o.mine_order.pending" data-event-click="cancel(o.mine_order.id)">{{ui_cancel}}</button><span class="chip accent" data-if="o.build_order.pending">{{o.build_order.text}}</span><button class="sm" data-if="o.build_order.pending" data-event-click="cancel(o.build_order.id)">{{ui_cancel}}</button></td>
+                                <!-- The selection class is bound on the cells, not on the repeated row:
+                                     a binding on the repeated element is evaluated once more after the
+                                     row is removed, and RmlUi logs an out-of-bounds index when a new
+                                     game empties this list (the end screen's New game, spec 010). -->
+                                <tr data-for="o : owned" class="row" data-event-click="select_plot(o.index)">
+                                    <td class="name num" data-class-sel="o.index == selected_plot">{{o.name}}</td>
+                                    <td class="nw" data-class-sel="o.index == selected_plot">{{o.region}}<span class="sub num">{{o.area}}</span></td>
+                                    <td class="nw" data-class-sel="o.index == selected_plot"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
+                                    <td class="figure wrap" data-class-sel="o.index == selected_plot">{{o.output}}<span class="sub" data-if="o.figures.shown" data-class-warn="o.figures.loss">{{o.figures.earns}} <span data-if="o.figures.loss">{{ui_mine_loss}}</span></span><span class="sub" data-if="o.figures.reopen != ''" data-class-warn="o.figures.reopen_loss">{{ui_mine_if_reopened}} {{o.figures.reopen}}</span><span class="sub" data-if="o.figures.break_even != ''">{{o.figures.break_even}}</span></td>
+                                    <td class="figure wrap" data-class-sel="o.index == selected_plot">{{o.remaining}}</td>
+                                    <td class="act" data-class-sel="o.index == selected_plot"><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button><span class="chip accent" data-if="o.mine_order.pending">{{o.mine_order.text}}</span><button class="sm" data-if="o.mine_order.pending" data-event-click="cancel(o.mine_order.id)">{{ui_cancel}}</button><span class="chip accent" data-if="o.build_order.pending">{{o.build_order.text}}</span><button class="sm" data-if="o.build_order.pending" data-event-click="cancel(o.build_order.id)">{{ui_cancel}}</button></td>
                                 </tr>
                             </table>
                         </div>
@@ -378,7 +439,7 @@
                         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span><span class="sub">{{capacity_sub}}</span></div>
                         <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub">{{storage_sub}}</span></div>
                         <div class="stat"><span class="label">This month</span><span class="value" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span><span class="sub">{{instalment_sub}}</span></div>
-                        <div class="stat"><span class="label">Solvency</span><span class="chipline"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="sub">{{solvency_sub}}</span></div>
+                        <div class="stat"><span class="label">Solvency</span><span class="chipline"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="sub wrapok">{{solvency_sub}}</span></div>
                     </div>
                 </div>
                 <div class="split">
@@ -463,13 +524,29 @@
         <span class="muted" data-if="status_line == ''">{{ui_shortcuts}}</span>
     </div>
 
-    <div id="overlay" data-if="game_over">
+    <!-- The end screen (spec 010, BR-009). It covers play, header and all, so
+         no order control can be reached; New game is the only way on. Which
+         ending it was is said in the title and the body, not by a colour. -->
+    <div id="overlay" data-if="end.shown">
         <div class="panel">
-            <h1>Bankrupt</h1>
-            <p>{{ui_game_over}}</p>
-            <p class="warn">{{status_line}}</p>
-            <button class="primary" data-event-click="new_game">Start a new company</button>
-            <button data-event-click="load">Load last save</button>
+            <h1>{{end.title}}</h1>
+            <p class="body">{{end.body}}</p>
+            <p class="day">{{end.day}}</p>
+            <div class="cols">
+                <div data-for="c : end.companies" class="col">
+                    <span class="who">{{c.name}}</span>
+                    <span class="count">{{c.stages}}</span>
+                    <!-- Class binding one level below the repeated element. -->
+                    <div data-for="l : c.lines"><span class="sline" data-class-never="!l.reached">{{l.text}}</span></div>
+                </div>
+                <div class="col figures">
+                    <span class="who">{{end.figures_title}}</span>
+                    <div class="kv"><span class="k">{{end.cash_label}}</span><span class="v num">{{end.cash}}</span></div>
+                    <div class="kv"><span class="k">{{end.mines_label}}</span><span class="v num">{{end.mines}}</span></div>
+                    <div class="kv"><span class="k">{{end.stages_label}}</span><span class="v num">{{end.stages}}</span></div>
+                </div>
+            </div>
+            <div class="foot"><button class="primary" data-event-click="new_game">{{end.new_game}}</button></div>
         </div>
     </div>
 </body>

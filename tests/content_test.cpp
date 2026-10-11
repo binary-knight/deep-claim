@@ -79,7 +79,9 @@ content::Sources goodSources() {
       "idle_mine_grace_days": 30, "opex_reserve_days": 60, "cash_reserve": 500000,
       "research_floor": 2500000, "loan_floor": 750000, "loan_chunk": 2000000,
       "bootstrap_loan": 4000000, "first_mine_recoverable_share": 0.6,
-      "first_mine_required_return": 1.1, "supply_discount": 1
+      "first_mine_required_return": 1.1, "supply_discount": 1,
+      "program_reserve_share": 0.75, "program_cash_buffer": 1500000,
+      "program_ore_land_weight": 1.5, "program_research_progress": 0.5
     })";
     s.program = R"({
       "deadline_day": 10800,
@@ -408,8 +410,18 @@ TEST_CASE("The competitor's knobs load with bounds and are all required", "[cont
     CHECK(ai.firstMineRecoverableShare == sim::Fixed::fromRatio(6, 10));
     CHECK(ai.firstMineRequiredReturn == sim::Fixed::fromRatio(11, 10));
     CHECK(ai.supplyDiscount == sim::Fixed::one());
+    CHECK(ai.programReserveShare == sim::Fixed::fromRatio(3, 4));
+    CHECK(ai.programCashBuffer == sim::Money::fromUnits(1'500'000));
+    CHECK(ai.programOreLandWeight == sim::Fixed::fromRatio(3, 2));
+    CHECK(ai.programResearchProgress == sim::Fixed::fromRatio(1, 2));
 
     content::Sources s = goodSources();
+    s.ai = replaceOnce(s.ai, R"("program_reserve_share": 0.75)", R"("program_reserve_share": 1.1)");
+    s.ai = replaceOnce(s.ai, R"("program_cash_buffer": 1500000)", R"("program_cash_buffer": -1)");
+    s.ai =
+        replaceOnce(s.ai, R"("program_ore_land_weight": 1.5)", R"("program_ore_land_weight": 0.9)");
+    s.ai = replaceOnce(s.ai, R"("program_research_progress": 0.5)",
+                       R"("program_research_progress": 1.5)");
     s.ai = replaceOnce(s.ai, R"("required_return": 1.2)", R"("required_return": 0.9)");
     s.ai = replaceOnce(s.ai, R"("recoverable_share": 0.5)", R"("recoverable_share": 1.5)");
     s.ai = replaceOnce(s.ai, R"("max_open_prospects": 2)", R"("max_open_prospects": 0)");
@@ -433,6 +445,10 @@ TEST_CASE("The competitor's knobs load with bounds and are all required", "[cont
     CHECK(hasError(bad, "ai.json", "supply_discount", "must be between"));
     CHECK(hasError(bad, "ai.json", "first_mine_required_return", "must be between"));
     CHECK(hasError(bad, "ai.json", "first_mine_recoverable_share", "must be between"));
+    CHECK(hasError(bad, "ai.json", "program_reserve_share", "must be between"));
+    CHECK(hasError(bad, "ai.json", "program_cash_buffer", "must be at least"));
+    CHECK(hasError(bad, "ai.json", "program_ore_land_weight", "must be between"));
+    CHECK(hasError(bad, "ai.json", "program_research_progress", "must be between"));
 
     content::Sources missing = goodSources();
     missing.ai = replaceOnce(missing.ai, R"("reopen_margin": 1.25,)", "");

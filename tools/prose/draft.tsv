@@ -16,7 +16,6 @@ notice.survey_complete	Survey of {plot} complete
 notice.mine_started	{company} started building a mine on {plot}
 notice.mine_operational	Mine on {plot} is operational
 notice.mine_depleted	Mine on {plot} is depleted
-notice.mine_switched	Mine on {plot} changed state
 notice.ore_sold	Sold {tonnes} of {resource} for {amount}
 notice.cover_costs_sale	Sold {tonnes} of {resource} for {amount} to balance the ledger this month.
 notice.auto_sale_summary	Automatic sales moved {tonnes} of {resource} this month for {amount}.
@@ -81,6 +80,8 @@ status.loan_requested	Loan of {amount} requested.
 status.repay_prompt	Enter an amount to repay.
 status.repayment_ordered	Repayment of {amount} ordered.
 status.research_queued	Research queued; it starts tomorrow if the order is accepted.
+status.delivery_queued	Delivery of {tonnes} of {resource} to the program queued for tomorrow. Once it is made it cannot be undone.
+status.stage_completion_queued	Stage completion queued; it goes ahead tomorrow for {amount} if the order is accepted.
 status.save_write_failed	Could not write {name}
 status.save_replace_failed	Could not replace {name}: {reason}
 status.saved	Saved to {name}
@@ -411,3 +412,5 @@ ui.end_cash	Cash
 ui.end_mines	Mines
 ui.end_stages	Stages completed
 ui.end_new_game	New game
+notice.command_rejected.delivery	Order to deliver {resource} to the program rejected: {reason}
+notice.command_rejected.stage	Order to complete the program stage rejected: {reason}

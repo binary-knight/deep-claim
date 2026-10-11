@@ -106,7 +106,13 @@ TEST_CASE("Golden state hash of a played game is stable across platforms", "[det
     // losing-mine notice's re-arm count (BR-014): every mine gains
     // lossClearDays. With that field left out of the saved form the old
     // value still held, so the fixture's game plays out as before.
-    constexpr std::uint64_t kGoldenPlayed = 0x59fab58dbf9f668dULL;
+    // Moved a third time in the same step, from 0x59fab58dbf9f668d, when the
+    // competitor began to race (BR-011): it delivers to its program, sets
+    // its standing sell orders to keep what a stage needs, researches toward
+    // the program and completes stages, so the game it plays here is a
+    // different one. No saved field changed; kGolden above, where nobody
+    // gives an order, did not move.
+    constexpr std::uint64_t kGoldenPlayed = 0x1d4743bc9b26a84fULL;
     constexpr sim::Day kDays = sim::kDaysPerYear * 3;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());

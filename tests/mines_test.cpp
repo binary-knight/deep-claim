@@ -187,8 +187,24 @@ TEST_CASE("Mothballed mines stop producing and pay reduced opex", "[mines]") {
 
     simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 0});
     const sim::TickReport& switched = simulation.tick();
-    CHECK(hasNotice(switched.notices, sim::NoticeKind::MineSwitched));
+    // The notice says which way the mine went, on which plot (playtest 4).
+    const auto mothballed = std::find_if(
+        switched.notices.begin(), switched.notices.end(),
+        [](const sim::Notice& n) { return n.kind == sim::NoticeKind::MineMothballed; });
+    REQUIRE(mothballed != switched.notices.end());
+    CHECK(mothballed->company == kPlayer);
+    CHECK(mothballed->plot == plot);
+    CHECK(mothballed->mine == sim::MineId(0));
+    CHECK_FALSE(hasNotice(switched.notices, sim::NoticeKind::MineReopened));
+    CHECK(std::string_view(sim::noticeKindName(sim::NoticeKind::MineMothballed)) ==
+          "mine_mothballed");
+    CHECK(std::string_view(sim::noticeKindName(sim::NoticeKind::MineReopened)) == "mine_reopened");
+    CHECK_FALSE(sim::noticeIsPublic(sim::NoticeKind::MineMothballed));
+    CHECK_FALSE(sim::noticeIsPublic(sim::NoticeKind::MineReopened));
     CHECK(simulation.state().mines[0].state == sim::MineState::Mothballed);
+    // Ordering what is already so is not news.
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 0});
+    CHECK_FALSE(hasNotice(simulation.tick().notices, sim::NoticeKind::MineMothballed));
     const std::int64_t extracted = simulation.state().mines[0].extractedTonnes[0];
     const sim::Money before = simulation.state().companies[0].cash;
     simulation.tick();
@@ -198,7 +214,14 @@ TEST_CASE("Mothballed mines stop producing and pay reduced opex", "[mines]") {
               content.resources[0].mineOpexPerDay.scaled(content.balance.mineMothballOpexMult));
 
     simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 1});
-    simulation.tick();
+    const sim::TickReport& reopenedReport = simulation.tick();
+    const auto reopened =
+        std::find_if(reopenedReport.notices.begin(), reopenedReport.notices.end(),
+                     [](const sim::Notice& n) { return n.kind == sim::NoticeKind::MineReopened; });
+    REQUIRE(reopened != reopenedReport.notices.end());
+    CHECK(reopened->plot == plot);
+    CHECK(reopened->mine == sim::MineId(0));
+    CHECK_FALSE(hasNotice(reopenedReport.notices, sim::NoticeKind::MineMothballed));
     CHECK(simulation.state().mines[0].state == sim::MineState::Operating);
     CHECK(simulation.state().mines[0].extractedTonnes[0] > extracted);
 }

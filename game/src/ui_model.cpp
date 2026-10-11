@@ -18,6 +18,7 @@
 #include <format>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <variant>
@@ -823,6 +824,15 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
     }
 }
 
+// Presentation of the sim's two gates on a project (sim/src/research.cpp):
+// its prerequisites are complete, and so are the program stages it waits for
+// (spec 010: a stage's project opens when the stage before it is complete).
+bool techOpen(const sim::CompanyView& view, const sim::TechDef& tech) {
+    return tech.requiresProgramStage <= view.program.stagesCompleted &&
+           std::ranges::all_of(tech.prerequisites,
+                               [&](sim::TechId p) { return knowsTech(view, p); });
+}
+
 // A tech the player could start this minute: not known, prerequisites done,
 // affordable with the money available. The Research tab's Start button uses
 // the same test.
@@ -830,9 +840,7 @@ bool techStartable(const sim::Content& content, const sim::CompanyView& view, si
                    std::uint32_t i) {
     const sim::TechDef& tech = content.techs[i];
     return !view.bankrupt && !view.activeResearch && !knowsTech(view, sim::TechId(i)) &&
-           std::ranges::all_of(tech.prerequisites,
-                               [&](sim::TechId p) { return knowsTech(view, p); }) &&
-           tech.cost <= available;
+           techOpen(view, tech) && tech.cost <= available;
 }
 
 constexpr sim::Day kSurveyNewsDays = 15;
@@ -1558,8 +1566,7 @@ TechRow makeTechRow(const sim::Content& content, const sim::CompanyView& view, c
         needs += (needs.empty() ? "" : ", ") + content.techs[p.index()].name;
     }
     row.needs = needs.empty() ? "" : text(content, "ui.needs_tech", {{"tech", needs}});
-    const bool ready =
-        std::ranges::all_of(tech.prerequisites, [&](sim::TechId p) { return knowsTech(view, p); });
+    const bool ready = techOpen(view, tech);
     const bool researching = view.activeResearch && view.activeResearch->tech == sim::TechId(i);
     if (knowsTech(view, sim::TechId(i))) {
         row.chip = "done";
@@ -1613,6 +1620,157 @@ void fillTechs(const Session& session, const Orders& orders, UiModel& model) {
     model.lab_sub = busyUntil.empty()
                         ? text(content, "ui.lab_idle")
                         : text(content, "ui.lab_busy", {{"day", busyUntil}, {"tech", busyTech}});
+}
+
+// ---- the Program tab (spec 010) ----
+
+std::string stageHeading(const sim::Content& content, std::size_t stage) {
+    const std::string number = std::to_string(stage + 1);
+    return text(
+        content, "ui.program_stage_heading",
+        {{"number", number}, {"name", text(content, "ui.program_stage_" + number + "_name")}});
+}
+
+// The three stages, each complete, current or to come: the state is a word
+// on its chip, and the chip's colour only repeats it.
+void fillProgramStages(const sim::Content& content, const sim::ProgramView& program,
+                       UiModel& model) {
+    model.program_stages.clear();
+    for (std::size_t i = 0; i < content.program.stages.size(); ++i) {
+        ProgramStageRow row;
+        row.heading = stageHeading(content, i);
+        if (i < program.stagesCompleted) {
+            row.state = "complete";
+            row.state_class = "good";
+        } else if (i == program.stagesCompleted) {
+            row.state = "current";
+            row.state_class = "accent";
+            row.current = true;
+        } else {
+            row.state = "to come";
+            row.state_class = "muted";
+        }
+        model.program_stages.push_back(std::move(row));
+    }
+}
+
+ProgramNeedRow makeProgramNeedRow(const sim::Content& content, const sim::CompanyView& view,
+                                  const Orders& orders, const sim::ProgramRequirementView& need) {
+    const sim::ResourceId resource = need.resource;
+    const sim::ResourceDef& good = content.resources[resource.index()];
+    ProgramNeedRow row;
+    row.index = static_cast<int>(resource.value());
+    row.good = good.name;
+    row.needs = formatTonnes(need.neededTonnes);
+    row.delivered = formatTonnes(need.deliveredTonnes);
+    row.stock = formatTonnes(need.stockTonnes);
+    const std::int64_t still = std::max<std::int64_t>(need.neededTonnes - need.deliveredTonnes, 0);
+    row.still = formatTonnes(still);
+    // What the button offers: the sim takes at most what the stage still
+    // needs, and no more than is in stock.
+    const std::int64_t most = std::max<std::int64_t>(std::min(need.stockTonnes, still), 0);
+    row.can_deliver = most > 0 && !view.bankrupt;
+    row.deliver_label =
+        most > 0 ? text(content, "ui.program_deliver_amount", {{"tonnes", formatTonnes(most)}})
+                 : text(content, "ui.program_deliver");
+    row.note = most > 0 ? "" : text(content, "ui.program_nothing_to_deliver");
+    if (resourceLocked(content, view, resource)) {
+        row.locked_note =
+            text(content, "ui.program_blocked_locked",
+                 {{"resource", good.name}, {"tech", content.techs[good.unlockedBy.index()].name}});
+    }
+    row.order = markFor<sim::DeliverToProgram>(
+        orders,
+        [resource](const sim::DeliverToProgram& order) { return order.resource == resource; });
+    return row;
+}
+
+std::string programResearchText(const sim::Content& content, const sim::ProgramStageView& stage) {
+    switch (stage.researchState) {
+        case sim::ProgramResearchState::NotStarted:
+            return text(content, "ui.program_research_not_started");
+        case sim::ProgramResearchState::InProgress:
+            return text(
+                content, "ui.program_research_in_progress",
+                {{"day", std::to_string(stage.activeResearch ? stage.activeResearch->completesDay
+                                                             : sim::Day{0})}});
+        case sim::ProgramResearchState::Done:
+            return text(content, "ui.program_research_done");
+    }
+    return "";
+}
+
+// Complete stage is live exactly when the sim says the stage is ready. When
+// it is not, the lines say what the view's figures show is missing, in the
+// order the sim tests them: research, deliveries, cash. They explain the
+// sim's answer; they do not make it.
+void fillProgramCompletion(const sim::Content& content, const sim::CompanyView& view,
+                           const Orders& orders, const sim::ProgramStageView& stage,
+                           ProgramPanel& panel) {
+    const std::string cost = formatMoney(stage.cost);
+    panel.cost = text(content, "ui.program_cost", {{"amount", cost}});
+    panel.complete_label = text(content, "ui.program_complete_stage", {{"amount", cost}});
+    panel.complete_order = markFor<sim::CompleteProgramStage>(
+        orders, [](const sim::CompleteProgramStage&) { return true; });
+    panel.ready = stage.ready;
+    if (stage.ready) {
+        panel.ready_line = text(content, "ui.program_stage_ready");
+        return;
+    }
+    if (stage.researchState != sim::ProgramResearchState::Done) {
+        panel.blocked_research = text(content, "ui.program_blocked_research");
+    }
+    if (std::ranges::any_of(stage.requirements, [](const sim::ProgramRequirementView& need) {
+            return need.deliveredTonnes < need.neededTonnes;
+        })) {
+        panel.blocked_deliveries = text(content, "ui.program_blocked_deliveries");
+    }
+    if (stage.cost > spendableCash(view)) {
+        panel.blocked_cash = text(content, "ui.program_blocked_cash", {{"amount", cost}});
+    }
+}
+
+// Runs after fillTechs and fillFinance: Start research is the stage
+// project's own row on the Research tab, and the cover-costs warning follows
+// the switch as it will stand once a waiting order for it is given.
+void fillProgram(const Session& session, const Orders& orders, UiModel& model) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    fillProgramStages(content, view.program, model);
+    ProgramPanel panel;
+    panel.title = text(content, "ui.program_title");
+    panel.intro = text(content, "ui.program_intro");
+    if (!view.program.stage) {
+        panel.complete = true;
+        panel.done_line = text(content, "ui.program_complete");
+        model.program = std::move(panel);
+        return;
+    }
+    const sim::ProgramStageView& stage = *view.program.stage;
+    panel.has_stage = true;
+    panel.heading = stageHeading(content, stage.index);
+    panel.cover_warning = model.cover_costs ? text(content, "ui.program_cover_costs_warning") : "";
+    panel.col_good = text(content, "ui.program_good");
+    panel.col_needs = text(content, "ui.program_needs");
+    panel.col_delivered = text(content, "ui.program_delivered");
+    panel.col_stock = text(content, "ui.program_in_stock");
+    panel.col_still = text(content, "ui.program_still_needed");
+    for (const sim::ProgramRequirementView& need : stage.requirements) {
+        panel.needs.push_back(makeProgramNeedRow(content, view, orders, need));
+    }
+    panel.research = programResearchText(content, stage);
+    panel.research_open = stage.researchState == sim::ProgramResearchState::NotStarted;
+    if (stage.research.valid() && stage.research.index() < model.techs.size()) {
+        const TechRow& project = model.techs[stage.research.index()];
+        panel.research_name = project.name;
+        panel.research_label =
+            text(content, "ui.program_start_research", {{"amount", project.cost}});
+        panel.can_research = panel.research_open && project.can_start;
+        panel.research_blocked = panel.research_open ? project.blocked : "";
+        panel.research_order = project.order;
+    }
+    fillProgramCompletion(content, view, orders, stage, panel);
+    model.program = std::move(panel);
 }
 
 // ---- finance ----
@@ -1767,6 +1925,135 @@ void fillPauseRows(const Session& session, UiModel& model) {
     }
 }
 
+// ---- the end screen (spec 010) ----
+
+// Which ending the player reached. The player's own bankruptcy comes first;
+// otherwise it is the sim's result for the player, and a race that ended
+// with no founder ended on the deadline (BR-006).
+std::string endResult(const sim::CompanyView& view) {
+    if (view.bankrupt) {
+        return "bankrupt";
+    }
+    const sim::OutcomeView& outcome = view.outcome;
+    const std::size_t player = Session::kPlayer.index();
+    if (!outcome.ended || player >= outcome.results.size()) {
+        return "";
+    }
+    switch (outcome.results[player]) {
+        case sim::ProgramResult::Founded:
+            return "founded";
+        case sim::ProgramResult::LesserPartner:
+            return "partner";
+        case sim::ProgramResult::Lost:
+            return outcome.founder.valid() ? "lost" : "deadline";
+        case sim::ProgramResult::None:
+            break;
+    }
+    return "";
+}
+
+// The day the game ended. A race's end is in the outcome. A bankruptcy
+// leaves the outcome open: its day is the Bankrupt notice's in the log, the
+// last thing a finished game logs, or today's when a loaded game has no log.
+sim::Day endDay(const Session& session) {
+    const sim::CompanyView& view = session.view();
+    if (!view.bankrupt && view.outcome.ended) {
+        return view.outcome.day;
+    }
+    for (const LogEntry& entry : std::views::reverse(session.log())) {
+        if (entry.notice.kind == sim::NoticeKind::Bankrupt &&
+            entry.notice.company == Session::kPlayer) {
+            return entry.day;
+        }
+    }
+    return view.day;
+}
+
+// The day each of a company's stages was completed, as the log has them:
+// entry n-1 is stage n's day, or nothing when its notice is not in the log.
+// ProgramStageComplete carries the stage's number in `tonnes`.
+std::vector<std::optional<sim::Day>> stageDays(const Session& session, sim::CompanyId company) {
+    std::vector<std::optional<sim::Day>> days(session.content().program.stages.size());
+    for (const LogEntry& entry : session.log()) {
+        const sim::Notice& notice = entry.notice;
+        if (notice.kind == sim::NoticeKind::ProgramStageComplete && notice.company == company &&
+            notice.tonnes >= 1 && static_cast<std::size_t>(notice.tonnes) <= days.size()) {
+            days[static_cast<std::size_t>(notice.tonnes) - 1] = entry.day;
+        }
+    }
+    return days;
+}
+
+EndCompany endCompany(const Session& session, const sim::ProgramPublicView& program) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const std::size_t total = content.program.stages.size();
+    EndCompany row;
+    row.you = program.company == Session::kPlayer;
+    row.name =
+        row.you ? text(content, "ui.race_you") : view.companies[program.company.index()].name;
+    row.stages =
+        text(content, "ui.race_stage",
+             {{"done", std::to_string(program.stagesCompleted)}, {"total", std::to_string(total)}});
+    const std::vector<std::optional<sim::Day>> days = stageDays(session, program.company);
+    for (std::size_t stage = 0; stage < total; ++stage) {
+        const std::string number = std::to_string(stage + 1);
+        const std::optional<sim::Day> day = days[stage];
+        if (stage >= program.stagesCompleted) {
+            row.lines.push_back({text(content, "ui.end_stage_never", {{"number", number}}), false});
+        } else if (day.has_value()) {
+            row.lines.push_back({text(content, "ui.end_stage_days",
+                                      {{"number", number}, {"day", std::to_string(*day)}}),
+                                 true});
+        } else {
+            // The log has lost a stage the company completed: the count
+            // stands alone.
+            row.lines.clear();
+            break;
+        }
+    }
+    return row;
+}
+
+void fillEnd(const Session& session, UiModel& model) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    model.end = EndPanel();
+    EndPanel& end = model.end;
+    end.result = session.gameOver() ? endResult(view) : "";
+    end.shown = !end.result.empty();
+    if (!end.shown) {
+        return;
+    }
+    const std::size_t player = Session::kPlayer.index();
+    // The company the wording names: the player's own when it went
+    // bankrupt, the founder when another company won.
+    std::string named = view.companies[player].name;
+    if (!view.bankrupt && view.outcome.founder.valid()) {
+        named = view.companies[view.outcome.founder.index()].name;
+    }
+    end.title = text(content, "ui.end_" + end.result + "_title");
+    end.body = text(content, "ui.end_" + end.result + "_body", {{"company", named}});
+    end.day = text(content, "ui.end_day", {{"day", std::to_string(endDay(session))}});
+    if (!content.program.stages.empty() && player < view.programs.size()) {
+        end.companies.push_back(endCompany(session, view.programs[player]));
+        for (const sim::ProgramPublicView& program : view.programs) {
+            if (program.company != Session::kPlayer &&
+                program.company.index() < view.companies.size()) {
+                end.companies.push_back(endCompany(session, program));
+            }
+        }
+    }
+    end.figures_title = text(content, "ui.end_your_figures");
+    end.cash_label = text(content, "ui.end_cash");
+    end.cash = formatMoney(view.cash);
+    end.mines_label = text(content, "ui.end_mines");
+    end.mines = std::to_string(view.mines.size());
+    end.stages_label = text(content, "ui.end_stages");
+    end.stages = std::to_string(view.program.stagesCompleted);
+    end.new_game = text(content, "ui.end_new_game");
+}
+
 }  // namespace
 
 void refreshModel(const Session& session, UiModel& model) {
@@ -1789,7 +2076,6 @@ void refreshModel(const Session& session, UiModel& model) {
     model.speed = static_cast<int>(session.speed());
     model.game_over = session.gameOver();
     model.ui_shortcuts = text(content, "ui.shortcuts");
-    model.ui_game_over = text(content, "ui.game_over", {{"company", model.company}});
     model.ui_pause_menu_title = text(content, "ui.pause_menu_title");
     const Orders orders = readOrders(session);
     fillPending(session, orders, model);
@@ -1803,8 +2089,10 @@ void refreshModel(const Session& session, UiModel& model) {
     fillResources(session, orders, model);
     fillTechs(session, orders, model);
     fillFinance(session, orders, model);
+    fillProgram(session, orders, model);
     fillLog(session, model);
     fillPauseRows(session, model);
+    fillEnd(session, model);
 }
 
 }  // namespace game

@@ -1912,3 +1912,121 @@ TEST_CASE("The player's bankruptcy stops the clock whatever the rules say", "[se
     CHECK(why->company == game::Session::kPlayer);
     checkNothingMovesAfterTheEnd(session, out);
 }
+
+// ---- playtest 4: the log says what actually happened ----
+
+namespace {
+
+// A session whose player owns one working mine; `plot` is the plot it is on.
+void openAMine(game::Session& session, const sim::Content& content, sim::PlotId& plot) {
+    session.setAutoPause(neverPause());
+    plot = firstListedPlot(session);
+    REQUIRE(plot.valid());
+    session.submit(sim::BidOnPlot{{}, plot, session.view().plots[plot.index()].askPrice});
+    for (sim::Day d = 0; d <= content.balance.auctionWindowDays + 1; ++d) {
+        session.stepOneDay();
+    }
+    REQUIRE(session.view().plots[plot.index()].owner == game::Session::kPlayer);
+    const sim::PlotId owned = plot;
+    editWorld(session, content, soloSetup(), [&](sim::WorldState& world) {
+        world.companies[0].cash = sim::Money::fromUnits(50'000'000);
+        auto& deposits = world.hidden.plotDeposits[owned.index()].deposits;
+        deposits.clear();
+        deposits.push_back({sim::ResourceId(0), 10'000'000'000, 10'000'000'000});
+    });
+    session.submit(sim::BuildMine{{}, plot});
+    for (sim::Day d = 0; d <= content.balance.mineBuildDays + 1; ++d) {
+        session.stepOneDay();
+    }
+    REQUIRE(countKind(session, sim::NoticeKind::MineOperational) == 1);
+}
+
+// The text of the only rejection in the log.
+std::string onlyRejection(const game::Session& session) {
+    REQUIRE(countKind(session, sim::NoticeKind::CommandRejected) == 1);
+    return textOfKind(session, sim::NoticeKind::CommandRejected);
+}
+
+}  // namespace
+
+TEST_CASE("Mothballing and reopening a mine each say what happened and where",
+          "[session][playtest4]") {
+    const sim::Content content = raceContent();
+    game::Session session(content, 1, soloSetup());
+    sim::PlotId plot;
+    openAMine(session, content, plot);
+    const std::string where = "plot #" + std::to_string(plot.value() + 1);
+
+    session.submit(sim::SetMineState{{}, sim::MineId(0), 0});
+    session.stepOneDay();
+    REQUIRE(countKind(session, sim::NoticeKind::MineMothballed) == 1);
+    CHECK(countKind(session, sim::NoticeKind::MineReopened) == 0);
+    CHECK(textOfKind(session, sim::NoticeKind::MineMothballed) ==
+          "The mine on " + where + " has been mothballed.");
+
+    session.submit(sim::SetMineState{{}, sim::MineId(0), 1});
+    session.stepOneDay();
+    CHECK(countKind(session, sim::NoticeKind::MineMothballed) == 1);
+    REQUIRE(countKind(session, sim::NoticeKind::MineReopened) == 1);
+    CHECK(textOfKind(session, sim::NoticeKind::MineReopened) ==
+          "The mine on " + where + " has been reopened.");
+}
+
+TEST_CASE("A refused order is described as the order it was", "[session][playtest4]") {
+    const sim::Content content = raceContent();
+    game::Session session(content, 7, test::setup());
+    session.setAutoPause(neverPause());
+
+    SECTION("a delivery to the program is not called a sale") {
+        // Stage 1 needs iron; the company has none to hand over.
+        session.submit(sim::DeliverToProgram{{}, sim::ResourceId(0), 500});
+        session.stepOneDay();
+        const game::LogEntry* entry = firstOfKind(session, sim::NoticeKind::CommandRejected);
+        REQUIRE(entry != nullptr);
+        CHECK(entry->notice.order == sim::RejectedOrder::Delivery);
+        CHECK(entry->notice.resource == sim::ResourceId(0));
+        CHECK(onlyRejection(session) ==
+              "Couldn't deliver Iron to the program: " +
+                  game::rejectReasonClause(content, sim::RejectReason::InsufficientInventory) +
+                  ".");
+        CHECK(onlyRejection(session).find("sale") == std::string::npos);
+    }
+    SECTION("a delivery the stage does not need says so") {
+        session.submit(sim::DeliverToProgram{{}, sim::ResourceId(1), 10});
+        session.stepOneDay();
+        CHECK(onlyRejection(session) ==
+              "Couldn't deliver Copper to the program: the current stage of the program does "
+              "not need that delivery.");
+    }
+    SECTION("completing a stage that is not ready names the stage, not just an order") {
+        session.submit(sim::CompleteProgramStage{});
+        session.stepOneDay();
+        const game::LogEntry* entry = firstOfKind(session, sim::NoticeKind::CommandRejected);
+        REQUIRE(entry != nullptr);
+        CHECK(entry->notice.order == sim::RejectedOrder::StageCompletion);
+        CHECK(entry->notice.reason == sim::RejectReason::ProgramStageNotReady);
+        CHECK(onlyRejection(session) ==
+              "Couldn't complete the program stage: that stage still needs its research "
+              "finished or its deliveries made.");
+    }
+    SECTION("a sale is still a sale") {
+        session.submit(sim::SellOre{{}, sim::ResourceId(0), 500});
+        session.stepOneDay();
+        const game::LogEntry* entry = firstOfKind(session, sim::NoticeKind::CommandRejected);
+        REQUIRE(entry != nullptr);
+        CHECK(entry->notice.order == sim::RejectedOrder::Other);
+        CHECK(onlyRejection(session) ==
+              "Couldn't carry out the sale of Iron: " +
+                  game::rejectReasonClause(content, sim::RejectReason::InsufficientInventory) +
+                  ".");
+    }
+    SECTION("a sell rule the sim turns away keeps the wording it had") {
+        sim::SetSellPolicy policy;
+        policy.resource = sim::ResourceId(0);
+        policy.enabled = 1;
+        policy.reserveTonnes = -1;
+        session.submit(policy);
+        session.stepOneDay();
+        CHECK(onlyRejection(session).starts_with("Couldn't carry out the sale of Iron: "));
+    }
+}

@@ -272,7 +272,9 @@ void applySetMineState(WorldState& state, const SetMineState& command, TickRepor
         return;
     }
     mine.state = target;
-    report.notices.push_back(mineNotice(NoticeKind::MineSwitched, mine, command.mine));
+    const NoticeKind kind =
+        target == MineState::Operating ? NoticeKind::MineReopened : NoticeKind::MineMothballed;
+    report.notices.push_back(mineNotice(kind, mine, command.mine));
 }
 
 bool mineHasExtractable(const Content& content, const WorldState& state, const Mine& mine) {

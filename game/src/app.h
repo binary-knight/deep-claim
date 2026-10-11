@@ -97,8 +97,9 @@ private:
     void onNeedAction(int action, int target);
     void onTogglePause(int index);
     // Queues an order with the session and redraws, so its control shows
-    // it pending straight away.
-    void order(const sim::Command& command);
+    // it pending straight away. Once the game is over nothing is queued and
+    // the answer is false (spec 010).
+    bool order(const sim::Command& command);
     void onSurvey(int plotIndex);
     void onBid(int plotIndex);
     void onBuild(int plotIndex);
@@ -118,6 +119,11 @@ private:
     void syncLoanInput();
     void resetLoanInput();
     void onResearch(int techIndex);
+    // The Program tab (spec 010): deliver the most the current stage can
+    // take of a good, start the stage's project, complete the stage.
+    void onDeliver(int resourceIndex);
+    void onProgramResearch();
+    void onCompleteStage();
     // Orders waiting for the clock (spec 007): withdraw one, or all of them.
     void onCancel(int orderId);
     void onCancelAll();

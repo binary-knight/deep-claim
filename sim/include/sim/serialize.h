@@ -348,7 +348,8 @@ void serialize(Archive& ar, AiParams& ai) {
        ai.paybackHorizonDays, ai.bidPremium, ai.bidPremiumHigh, ai.maxOpenProspects,
        ai.reopenMargin, ai.idleMineGraceDays, ai.opexReserveDays, ai.cashReserve, ai.researchFloor,
        ai.loanFloor, ai.loanChunk, ai.bootstrapLoan, ai.firstMineRecoverableShare,
-       ai.firstMineRequiredReturn, ai.supplyDiscount);
+       ai.firstMineRequiredReturn, ai.supplyDiscount, ai.programReserveShare, ai.programCashBuffer,
+       ai.programOreLandWeight, ai.programResearchProgress);
 }
 
 template <class Archive>

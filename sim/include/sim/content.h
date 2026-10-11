@@ -202,6 +202,22 @@ struct AiParams {
     Money loanFloor;      // borrow when producing with less cash than this
     Money loanChunk;      // size of an ordinary loan
     Money bootstrapLoan;  // size of the one loan taken to buy a first plot
+    // Racing for the program (spec 010, BR-011).
+    // Share of the stock of a good the current stage still needs that is
+    // delivered instead of offered for sale: 1 keeps everything needed, 0
+    // sells it all and never delivers.
+    Fixed programReserveShare;
+    // Spendable cash kept for operations: a program project (a stage's, or
+    // one that unlocks a needed ore) starts only if this much is left after
+    // it, and with less than this, plus the cost of such a project while one
+    // is waiting to start, the company sells rather than delivers.
+    Money programCashBuffer;
+    // Multiplier, at least 1, on the surveyed value of an ore a current or
+    // coming stage needs and the company's mines will not supply in time.
+    Fixed programOreLandWeight;
+    // Share of the current stage's deliveries met from which its project is
+    // started ahead of every ordinary project.
+    Fixed programResearchProgress;
 };
 
 // One good a program stage needs, in whole tonnes of the company's own

@@ -112,8 +112,10 @@ const char* noticeKindName(NoticeKind kind) {
             return "mine_operational";
         case NoticeKind::MineDepleted:
             return "mine_depleted";
-        case NoticeKind::MineSwitched:
-            return "mine_switched";
+        case NoticeKind::MineMothballed:
+            return "mine_mothballed";
+        case NoticeKind::MineReopened:
+            return "mine_reopened";
         case NoticeKind::OreSold:
             return "ore_sold";
         case NoticeKind::StorageCharged:
@@ -189,7 +191,8 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::SurveyComplete:
         case NoticeKind::MineOperational:
         case NoticeKind::MineDepleted:
-        case NoticeKind::MineSwitched:
+        case NoticeKind::MineMothballed:
+        case NoticeKind::MineReopened:
         case NoticeKind::OreSold:
         case NoticeKind::StorageCharged:
         case NoticeKind::LoanTaken:

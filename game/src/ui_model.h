@@ -5,7 +5,7 @@
 // prepared here each time the sim state changes; the RML never touches sim
 // types directly. The layout follows docs/design/handoff.md: a status strip,
 // an icon rail, the H4 dashboard (what needs you, then what you own, then
-// the money) and the five tabs.
+// the money), the Program tab (spec 010) and the five tabs.
 
 #include "sim/content.h"
 #include "sim/ids.h"
@@ -253,6 +253,115 @@ struct RaceRow {
     bool you = false;
 };
 
+// One stage of the program in the Program tab's list of three (spec 010).
+struct ProgramStageRow {
+    std::string heading;      // "Stage 1: Launch site"
+    std::string state;        // chip text: "complete", "current", "to come"
+    std::string state_class;  // chip class: good, accent, muted
+    bool current = false;
+};
+
+// One good the current stage asks for. The tonnes are the sim's
+// (sim::ProgramRequirementView), formatted.
+struct ProgramNeedRow {
+    int index = 0;  // resource index: what the Deliver button delivers
+    std::string good;
+    std::string needs;      // "60,000 t"
+    std::string delivered;  // "12,000 t"
+    std::string stock;      // in the company's stock today
+    std::string still;      // still needed
+    // The most that can be delivered now: the lesser of the stock and what
+    // is still needed. The button says how much; with nothing to deliver it
+    // is off, reads "Deliver", and `note` under it says why.
+    bool can_deliver = false;
+    std::string deliver_label;  // "Deliver 12,000 t" or "Deliver"
+    std::string note;
+    std::string locked_note;  // "Lithium needs Lithium Processing before we can dig it." or ""
+    OrderMark order;          // a delivery of this good waiting for the clock
+};
+
+// The Program tab (spec 010): the stage the player is working on, or the
+// line that says every stage is done. Whether a stage can be completed is
+// the sim's answer (sim::ProgramStageView::ready); the lines that say what
+// is missing are read off the same view's figures and decide nothing.
+struct ProgramPanel {
+    std::string title;          // "The program"
+    std::string intro;          // what a stage needs, and that a delivery is final
+    std::string cover_warning;  // cover costs is on and may sell held stock, or ""
+    bool complete = false;      // every stage is complete: `done_line` stands alone
+    std::string done_line;
+    // The current stage; everything below is empty once the program is complete.
+    bool has_stage = false;
+    std::string heading;  // "Stage 1: Launch site"
+    // Column headings, from the catalogue.
+    std::string col_good;
+    std::string col_needs;
+    std::string col_delivered;
+    std::string col_stock;
+    std::string col_still;
+    std::vector<ProgramNeedRow> needs;
+    std::string cost;           // "Cost $5.00M"
+    std::string research_name;  // the stage's project
+    std::string research;       // "Research not started", "Research finishes day 240", ...
+    // Start research: offered while the project has not started, live when
+    // the Research tab would start it too (its row is the one source).
+    bool research_open = false;
+    bool can_research = false;
+    std::string research_label;    // "Start research ($2.00M)"
+    std::string research_blocked;  // why it is off, as the Research tab says it, or ""
+    OrderMark research_order;
+    // Complete stage: live exactly when the sim says the stage is ready.
+    bool ready = false;
+    std::string complete_label;  // "Complete stage ($5.00M)"
+    OrderMark complete_order;
+    std::string ready_line;          // everything is in place, or ""
+    std::string blocked_research;    // the research is not finished, or ""
+    std::string blocked_deliveries;  // deliveries are outstanding, or ""
+    std::string blocked_cash;        // spendable cash does not cover the cost, or ""
+};
+
+// One stage's line under a company on the end screen (spec 010).
+struct EndStageLine {
+    std::string text;      // "Stage 1: day 412" or "Stage 3: not reached"
+    bool reached = false;  // the words say so; the colour only repeats it
+};
+
+// One company's race on the end screen: the stages it completed and the day
+// of each. The count is the sim's (sim::ProgramPublicView). The days are
+// read from the session's log (the public ProgramStageComplete notices): the
+// view does not carry them. When the log no longer holds a notice for every
+// stage the company completed (it keeps the last Session::kMaxLogEntries
+// lines, and a loaded game starts it again), `lines` is empty and the count
+// stands alone rather than a stage being shown as not reached.
+struct EndCompany {
+    std::string name;    // "You" for the player, else the company's name
+    std::string stages;  // "2 of 3 stages complete"
+    std::vector<EndStageLine> lines;
+    bool you = false;
+};
+
+// The end screen (spec 010, BR-009), which covers play once the session says
+// the game is over. Which ending it was is the sim's (the view's bankrupt
+// flag and outcome); the player's own bankruptcy comes before the race.
+struct EndPanel {
+    bool shown = false;
+    // "founded", "partner", "lost", "deadline" or "bankrupt"; "" while playing.
+    // Not shown: the title and body say it in words.
+    std::string result;
+    std::string title;
+    std::string body;
+    std::string day;                    // "The game ended on day 3396"
+    std::vector<EndCompany> companies;  // the player first, then every rival
+    std::string figures_title;          // "Your figures"
+    std::string cash_label;
+    std::string cash;
+    std::string mines_label;
+    std::string mines;  // how many mines the player has, in any state
+    std::string stages_label;
+    std::string stages;    // how many stages the player completed
+    std::string new_game;  // the one button
+};
+
 // Grouped by screen rather than by size; the padding is a few dozen bytes.
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct UiModel {
@@ -270,7 +379,9 @@ struct UiModel {
     std::string debt;
     std::string speed_label;
     int speed = 0;  // 0 paused, 1, 2, 3
-    int tab = 0;    // 0 dashboard, 1 plots, 2 market, 3 research, 4 finance, 5 log
+    // 0 dashboard, 1 plots, 2 market, 3 research, 4 finance, 5 log, 6 program
+    // (second on the rail, after the Dashboard).
+    int tab = 0;
     bool game_over = false;
     bool deck = false;        // Steam Deck sizes (narrow window or --deck)
     std::string status_line;  // transient feedback (saved, rejected, paused ...)
@@ -313,6 +424,13 @@ struct UiModel {
     std::string race_verdict;
     std::string race_verdict_class;  // chip class: "good" ahead, "warn" behind, "" level
     std::vector<RaceRow> race_rows;  // the player first, then every rival
+
+    // Program tab (spec 010)
+    std::vector<ProgramStageRow> program_stages;  // every stage, in order
+    ProgramPanel program;
+
+    // End screen (spec 010)
+    EndPanel end;
 
     // Dashboard
     std::vector<NeedRow> needs;
@@ -390,7 +508,6 @@ struct UiModel {
 
     // Prose from the catalogue
     std::string ui_shortcuts;
-    std::string ui_game_over;
     std::string ui_pause_menu_title;
     std::string ui_cancel;
     std::string ui_cancel_all;

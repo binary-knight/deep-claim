@@ -162,7 +162,8 @@ enum class NoticeKind : std::uint8_t {
     MineStarted,        // public: company, plot, mine, amount = capex
     MineOperational,    // private: company, plot, mine
     MineDepleted,       // private: company, plot, mine
-    MineSwitched,       // private: company, plot, mine (state changed)
+    MineMothballed,     // private: company, plot, mine (an operating mine was mothballed)
+    MineReopened,       // private: company, plot, mine (a mothballed mine is operating again)
     OreSold,            // private: company, resource, tonnes, amount = proceeds
     StorageCharged,     // private: company, amount
     LoanTaken,          // private: company, loan, amount = principal
@@ -194,6 +195,15 @@ enum class NoticeKind : std::uint8_t {
                              // tonnes = that stage (1 for the first)
 };
 
+// Which order a CommandRejected notice refused, where the notice's other
+// fields do not say: a refused delivery carries a resource and tonnes exactly
+// as a refused sale does, and a refused stage completion carries nothing.
+enum class RejectedOrder : std::uint8_t {
+    Other,            // the fields that are set say what was ordered
+    Delivery,         // DeliverToProgram: resource, tonnes
+    StageCompletion,  // CompleteProgramStage
+};
+
 struct Notice {
     NoticeKind kind = NoticeKind::CommandRejected;
     CompanyId company;
@@ -207,6 +217,7 @@ struct Notice {
     std::int64_t tonnes = 0;
     Money amount;
     RejectReason reason = RejectReason::None;
+    RejectedOrder order = RejectedOrder::Other;  // CommandRejected only
 };
 
 // Stable identifiers for logs, CSV and UI text lookup.

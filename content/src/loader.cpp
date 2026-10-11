@@ -985,12 +985,29 @@ void parseAi(const json& document, sim::AiParams& ai, ErrorSink& sink) {
         return;
     }
     const Node node(document, "", sink);
-    node.allowKeys({"sell_above_base", "dump_storage_share", "recoverable_share", "required_return",
-                    "payback_horizon_days", "bid_premium", "bid_premium_high", "max_open_prospects",
-                    "reopen_margin", "idle_mine_grace_days", "opex_reserve_days", "cash_reserve",
-                    "research_floor", "loan_floor", "loan_chunk", "bootstrap_loan",
-                    "first_mine_recoverable_share", "first_mine_required_return",
-                    "supply_discount"});
+    node.allowKeys({"sell_above_base",
+                    "dump_storage_share",
+                    "recoverable_share",
+                    "required_return",
+                    "payback_horizon_days",
+                    "bid_premium",
+                    "bid_premium_high",
+                    "max_open_prospects",
+                    "reopen_margin",
+                    "idle_mine_grace_days",
+                    "opex_reserve_days",
+                    "cash_reserve",
+                    "research_floor",
+                    "loan_floor",
+                    "loan_chunk",
+                    "bootstrap_loan",
+                    "first_mine_recoverable_share",
+                    "first_mine_required_return",
+                    "supply_discount",
+                    "program_reserve_share",
+                    "program_cash_buffer",
+                    "program_ore_land_weight",
+                    "program_research_progress"});
     const sim::Fixed zero = sim::Fixed::zero();
     const sim::Fixed one = sim::Fixed::one();
     const sim::Fixed ten = sim::Fixed::fromInt(10);
@@ -1021,6 +1038,12 @@ void parseAi(const json& document, sim::AiParams& ai, ErrorSink& sink) {
     ai.loanFloor = valueOr(node.money("loan_floor", true, none), none);
     ai.loanChunk = valueOr(node.money("loan_chunk", true, sim::Money::fromCents(1)), none);
     ai.bootstrapLoan = valueOr(node.money("bootstrap_loan", true, sim::Money::fromCents(1)), none);
+    // Spec 010 (BR-011): how the competitor races for the program.
+    ai.programReserveShare = valueOr(node.fixed("program_reserve_share", true, zero, one), one);
+    ai.programCashBuffer = valueOr(node.money("program_cash_buffer", true, none), none);
+    ai.programOreLandWeight = valueOr(node.fixed("program_ore_land_weight", true, one, ten), one);
+    ai.programResearchProgress =
+        valueOr(node.fixed("program_research_progress", true, zero, one), one);
 }
 
 // ---------------------------------------------------------------------------
@@ -1151,6 +1174,8 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"notice.command_rejected.research", "tech,reason"},
     {"notice.command_rejected.loan", "reason"},
     {"notice.command_rejected.loan_amount", "amount,reason"},
+    {"notice.command_rejected.delivery", "resource,reason"},
+    {"notice.command_rejected.stage", "reason"},
     {"notice.plot_listed", "plot,amount"},
     {"notice.plot_relisted", "plot,amount"},
     {"notice.plot_sold", "company,plot,amount"},
@@ -1161,7 +1186,6 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"notice.mine_started", "company,plot"},
     {"notice.mine_operational", "plot"},
     {"notice.mine_depleted", "plot"},
-    {"notice.mine_switched", "plot"},
     {"notice.ore_sold", "tonnes,resource,amount"},
     {"notice.cover_costs_sale", "tonnes,resource,amount"},
     {"notice.auto_sale_summary", "tonnes,resource,amount"},
@@ -1285,6 +1309,8 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"status.repay_prompt", ""},
     {"status.repayment_ordered", "amount"},
     {"status.research_queued", ""},
+    {"status.delivery_queued", "tonnes,resource"},
+    {"status.stage_completion_queued", "amount"},
     {"status.save_write_failed", "name"},
     {"status.save_replace_failed", "name,reason"},
     {"status.saved", "name"},

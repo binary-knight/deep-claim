@@ -54,6 +54,14 @@ std::string plotName(sim::PlotId id) {
 std::string rejectionText(const sim::Content& content, const sim::Notice& n) {
     const bool hasAmount = n.amount != sim::Money::zero();
     const std::string reason = rejectReasonClause(content, n.reason);
+    // The orders whose fields alone would read as another order's.
+    if (n.order == sim::RejectedOrder::Delivery) {
+        return text(content, "notice.command_rejected.delivery",
+                    {{"resource", resourceName(content, n.resource)}, {"reason", reason}});
+    }
+    if (n.order == sim::RejectedOrder::StageCompletion) {
+        return text(content, "notice.command_rejected.stage", {{"reason", reason}});
+    }
     if (n.plot.valid()) {
         return hasAmount ? text(content, "notice.command_rejected.plot_amount",
                                 {{"plot", plotName(n.plot)},
