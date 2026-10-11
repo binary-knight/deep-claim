@@ -59,6 +59,10 @@ public:
     void ui(sim::Day day, std::string_view kind, std::string_view detail);
     void marker(sim::Day day, std::string_view note);
     void screenshot(sim::Day day, std::string_view file);
+    // The end record. A game has one: once it is written, further calls
+    // write nothing until newGame() or loaded() starts another game. So a
+    // host may write it when the game ends and again when it replaces the
+    // game or closes, and the outcome is in the trace whichever comes first.
     void end(sim::Day day);
     // The end record with the outcome, when `view` (the player's) shows the
     // game is over: the race has ended or the player is bankrupt. For a game
@@ -68,6 +72,7 @@ public:
 private:
     void line(const std::string& json);
     std::ostream* out_;
+    bool ended_ = false;  // the current game's end record has been written
 };
 
 // How the game ended, as an end record carries it (spec 010).

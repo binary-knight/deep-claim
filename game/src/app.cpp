@@ -141,10 +141,7 @@ App::App(Rml::Context& context, platform::Services& services, const sim::Content
 }
 
 App::~App() {
-    if (trace_) {
-        // With the outcome, when the game was played to its end (spec 010).
-        trace_->end(session_->day(), session_->view());
-    }
+    traceEnd();
     PriceChartElement::setProvider(nullptr);
     PriceChartElement::setCashProvider(nullptr);
     if (document_ != nullptr) {
@@ -153,7 +150,18 @@ App::~App() {
     context_->RemoveDataModel("game");
 }
 
+void App::traceEnd() {
+    // With the outcome, when the game was played to its end (spec 010). The
+    // writer keeps one end record a game, so this is safe to call again.
+    if (trace_ && session_) {
+        trace_->end(session_->day(), session_->view());
+    }
+}
+
 void App::newGame(std::uint64_t seed) {
+    // The game being replaced ends here as far as the trace goes: without
+    // this a finished game followed by New game would lose its outcome.
+    traceEnd();
     sim::GameSetup setup;
     setup.playerName = std::string(services_->playerName());
     setup.aiNames = {"Northfield Minerals"};
@@ -864,6 +872,12 @@ void App::refreshNow() {
 
 void App::update(double seconds) {
     const int ticked = session_->advance(seconds);
+    if (session_->gameOver()) {
+        // Recorded the moment the game ends, however it got there (the
+        // clock, a single step, a finished save loaded), not when the
+        // window closes.
+        traceEnd();
+    }
     statusAge_ += seconds;
     if (const std::optional<sim::Notice> why = session_->takePausedBy()) {
         // The clock stopped for this: say so and keep it on screen longer.
@@ -948,6 +962,9 @@ void App::onStep() {
         return;
     }
     session_->stepOneDay();
+    if (session_->gameOver()) {
+        traceEnd();
+    }
     refresh();
 }
 
@@ -1067,14 +1084,13 @@ void App::onToggleCoverCosts() {
 }
 
 bool App::order(const sim::Command& command) {
-    // Every order the client gives goes through here, and none is given once
-    // the game is over (spec 010): the session would still queue it.
-    if (session_->gameOver()) {
+    // Every order the client gives goes through here, and none is taken once
+    // the game is over (spec 010): the session refuses it and says so.
+    if (!session_->submit(command)) {
         return false;
     }
     // Shown at once: with the clock stopped nothing else would redraw the
     // control until the next tick (spec 007).
-    session_->submit(command);
     refresh();
     return true;
 }

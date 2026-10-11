@@ -106,13 +106,19 @@ std::optional<sim::Notice> Session::takePausedBy() {
     return notice;
 }
 
-void Session::submit(sim::Command command) {
+bool Session::submit(sim::Command command) {
+    // A finished game takes no orders (spec 010). The sim would refuse it on
+    // the next tick, but no tick is coming: it would sit in the queue.
+    if (gameOver()) {
+        return false;
+    }
     sim::setCommandCompany(command, kPlayer);
     PendingOrder order;
     order.id = nextOrderId_++;
     order.command = command;
     traceOrder("order_queued", order);
     pending_.push_back(order);
+    return true;
 }
 
 bool Session::cancel(std::uint64_t id) {
@@ -340,8 +346,17 @@ void Session::tickOnce() {
     }
     simulation_.tick();
     refreshView();
-    cashHistory_.push_back(view_.cash);
+    // The day the game ends on does not close (spec 010): the sim freezes on
+    // it, so the day's figure is corrected, not followed by another.
+    const bool dayClosed = view_.day != processed;
+    if (dayClosed) {
+        cashHistory_.push_back(view_.cash);
+    } else {
+        cashHistory_.back() = view_.cash;
+    }
     if (trace_ != nullptr) {
+        // For the tick that ends the game this repeats the day before's
+        // number with the final hash, which is how a replay knows the end.
         trace_->dayTicked(view_.day, simulation_.stateHash());
     }
     const std::vector<sim::Notice> notices = simulation_.reportFor(kPlayer);
@@ -355,7 +370,7 @@ void Session::tickOnce() {
             pausedBy_ = *ending;
         }
     }
-    if (trace_ != nullptr && view_.day % sim::kDaysPerMonth == 0) {
+    if (trace_ != nullptr && dayClosed && view_.day % sim::kDaysPerMonth == 0) {
         trace_->state(*content_, view_);
     }
 }

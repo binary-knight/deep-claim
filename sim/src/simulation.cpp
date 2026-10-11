@@ -231,9 +231,20 @@ const TickReport& Simulation::tick() {
         return report_;
     }
     // Pipeline order is fixed (see DESIGN.md). Steps for systems that do not
-    // exist yet are absent, not stubbed. Step 1 can end the game (the last
-    // program stage completed); the day it ends on is still played out.
-    applyCommands();                            // 1
+    // exist yet are absent, not stubbed.
+    //
+    // The game can end in step 1 (an order completes the last program stage;
+    // the orders queued behind it are refused) or in step 1b (the deadline
+    // day has come and its orders founded nothing). Either way the world
+    // freezes there: no later step runs and the day does not advance, so
+    // Outcome::day is the day the state stays on, nothing that happens later
+    // in a day can contradict the results, and the state is one a save holds
+    // (every other step leaves its records dated before the day it ends on).
+    applyCommands();                         // 1
+    runProgram(*content_, state_, report_);  // 1b (spec 010): the deadline
+    if (gameEnded(state_)) {
+        return report_;
+    }
     runPlotMarket(*content_, state_, report_);  // 2
     runSurveys(*content_, state_, report_);     // 3
     runMines(*content_, state_, report_);       // 4
@@ -242,7 +253,6 @@ const TickReport& Simulation::tick() {
     runFinance(*content_, state_, report_);     // 6
     runResearch(*content_, state_, report_);    // 7
     runEvents(*content_, state_, report_);      // 8
-    runProgram(*content_, state_, report_);     // 8b (spec 010): the deadline
     ++state_.day;                               // 9
     return report_;
 }

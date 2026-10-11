@@ -126,12 +126,20 @@ private:
         if (result_.session->gameOver()) {
             return false;
         }
-        if (result_.session->day() + 1 != record.day) {
-            return fail(std::format("trace is on day {} but the replay is on day {}", record.day,
-                                    result_.session->day()));
+        // The record carries the day the tick left the game on: the next
+        // day, or the same one when that tick ended the game, since the
+        // world freezes on the day it ends.
+        const sim::Day before = result_.session->day();
+        if (record.day != before + 1 && record.day != before) {
+            return fail(
+                std::format("trace is on day {} but the replay is on day {}", record.day, before));
         }
         result_.session->stepOneDay();
         ++result_.daysTicked;
+        if (result_.session->day() != record.day) {
+            return fail(std::format("trace reaches day {} but the replay reached day {}",
+                                    record.day, result_.session->day()));
+        }
         if (!result_.firstDivergence.has_value() && result_.session->stateHash() != record.hash) {
             result_.firstDivergence = record.day;
         }

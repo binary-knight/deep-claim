@@ -54,6 +54,11 @@ std::string plotName(sim::PlotId id) {
 std::string rejectionText(const sim::Content& content, const sim::Notice& n) {
     const bool hasAmount = n.amount != sim::Money::zero();
     const std::string reason = rejectReasonClause(content, n.reason);
+    // After the end every order is refused for the one reason, and it reads
+    // the same whatever the order was (spec 010).
+    if (n.reason == sim::RejectReason::GameEnded) {
+        return text(content, "notice.command_rejected", {{"reason", reason}});
+    }
     // The orders whose fields alone would read as another order's.
     if (n.order == sim::RejectedOrder::Delivery) {
         return text(content, "notice.command_rejected.delivery",

@@ -369,6 +369,7 @@ void TraceWriter::newGame(sim::Seed seed, const sim::GameSetup& setup, std::uint
     j["content"] = hex(contentHash);
     j["build"] = std::string(build);
     line(j.dump());
+    ended_ = false;
 }
 
 void TraceWriter::loaded(sim::Day day, std::string_view file, std::uint64_t stateHash) {
@@ -378,6 +379,7 @@ void TraceWriter::loaded(sim::Day day, std::string_view file, std::uint64_t stat
     j["file"] = std::string(file);
     j["hash"] = hex(stateHash);
     line(j.dump());
+    ended_ = false;  // a game taken up from a save has its own end
 }
 
 void TraceWriter::saved(sim::Day day, std::string_view file) {
@@ -504,10 +506,14 @@ void TraceWriter::screenshot(sim::Day day, std::string_view file) {
 }
 
 void TraceWriter::end(sim::Day day) {
+    if (ended_) {
+        return;
+    }
     Json j;
     j["t"] = "end";
     j["day"] = day;
     line(j.dump());
+    ended_ = true;
 }
 
 namespace {
@@ -544,6 +550,9 @@ std::optional<std::string_view> playerResultWord(const sim::CompanyView& view) {
 }  // namespace
 
 void TraceWriter::end(sim::Day day, const sim::CompanyView& view) {
+    if (ended_) {
+        return;
+    }
     Json j;
     j["t"] = "end";
     j["day"] = day;
@@ -556,6 +565,7 @@ void TraceWriter::end(sim::Day day, const sim::CompanyView& view) {
         j["outcome"] = outcome;
     }
     line(j.dump());
+    ended_ = true;
 }
 
 std::string encodeCommand(const sim::Command& command) {

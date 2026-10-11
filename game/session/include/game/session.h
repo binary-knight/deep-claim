@@ -81,8 +81,10 @@ public:
 
     // ---- player ----
     // Queues an order, always bound to the player. It reaches the sim at the
-    // start of the next tick; until then it can be cancelled.
-    void submit(sim::Command command);
+    // start of the next tick; until then it can be cancelled. Once the game
+    // is over (gameOver) no order is taken: nothing is queued or traced and
+    // the answer is false. True when the order was queued.
+    bool submit(sim::Command command);
     // What is waiting for the clock, in the order given.
     [[nodiscard]] const std::vector<PendingOrder>& pendingOrders() const { return pending_; }
     // Withdraws one waiting order; false when no order has that id (it was

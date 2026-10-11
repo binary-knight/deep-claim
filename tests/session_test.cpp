@@ -1494,7 +1494,7 @@ sim::WorldState raceWorld(const sim::Content& content) {
 // goods delivered and the cash at hand.
 void putStageInReach(const sim::Content& content, sim::Company& company, std::uint32_t stage) {
     company.programStage = stage;
-    company.programStageDays.assign(stage, 0);
+    company.programStageDays.assign(stage, 1);
     for (std::uint32_t s = 0; s <= stage; ++s) {
         company.completedTechs.push_back(content.program.stages[s].research);
     }
@@ -1503,6 +1503,16 @@ void putStageInReach(const sim::Content& content, sim::Company& company, std::ui
         company.programDelivered[need.resource.index()] = need.tonnes;
     }
     company.cash = sim::Money::fromUnits(20'000'000);
+}
+
+// The company with this many stages complete as a save holds them: each with
+// its day and its research.
+void putStagesBehind(const sim::Content& content, sim::Company& company, std::uint32_t stages) {
+    company.programStage = stages;
+    company.programStageDays.assign(stages, 1);
+    for (std::uint32_t s = 0; s < stages; ++s) {
+        company.completedTechs.push_back(content.program.stages[s].research);
+    }
 }
 
 // The save's own orders are applied by the next tick, which is how a test
@@ -1566,9 +1576,11 @@ TEST_CASE("The session stops on the day the player founds the program", "[sessio
     CHECK(session.advance(1.0) == 1);  // 20 days were due; the game ended on the first
 
     CHECK(session.gameOver());
-    CHECK(session.day() == eve + 1);
+    CHECK(session.day() == eve);  // the world freezes on the day it ends
     CHECK(session.view().outcome.ended);
     CHECK(session.view().outcome.day == eve);
+    CHECK(session.cashHistory().size() == 1);  // the day's figure, corrected
+    CHECK(session.cashHistory().back() == session.view().cash);
     CHECK(session.view().outcome.founder == game::Session::kPlayer);
     // The end stops the clock whatever the rules say, and says why.
     CHECK(session.speed() == game::Speed::Paused);
@@ -1587,12 +1599,10 @@ TEST_CASE("The session stops on the day the rival founds the program", "[session
     putStageInReach(content, world.companies[kRival.index()], 2);
 
     SECTION("with the player two stages in, a lesser partner") {
-        world.companies[game::Session::kPlayer.index()].programStage = 2;
-        world.companies[game::Session::kPlayer.index()].programStageDays.assign(2, 0);
+        putStagesBehind(content, world.companies[game::Session::kPlayer.index()], 2);
     }
     SECTION("with the player behind, lost") {
-        world.companies[game::Session::kPlayer.index()].programStage = 1;
-        world.companies[game::Session::kPlayer.index()].programStageDays.assign(1, 0);
+        putStagesBehind(content, world.companies[game::Session::kPlayer.index()], 1);
     }
     const bool partner = world.companies[game::Session::kPlayer.index()].programStage == 2;
     std::ostringstream out;
@@ -1607,7 +1617,8 @@ TEST_CASE("The session stops on the day the rival founds the program", "[session
     CHECK(session.advance(1.0) == 1);
 
     CHECK(session.gameOver());
-    CHECK(session.day() == eve + 1);
+    CHECK(session.day() == eve);
+    CHECK(session.view().outcome.day == eve);
     CHECK(session.view().outcome.founder == kRival);
     CHECK(session.view().outcome.results.at(game::Session::kPlayer.index()) ==
           (partner ? sim::ProgramResult::LesserPartner : sim::ProgramResult::Lost));
@@ -1638,9 +1649,15 @@ TEST_CASE("The session stops when the deadline passes with nobody finished", "[s
     CHECK(session.gameOver());
     CHECK(session.view().outcome.ended);
     CHECK_FALSE(session.view().outcome.founder.valid());
-    CHECK(session.day() == session.view().outcome.day + 1);
+    // Six days close; the tick for the deadline day ends the game on it.
+    CHECK(ticked == 7);
+    CHECK(session.day() == content.program.deadlineDay);
+    CHECK(session.view().outcome.day == session.day());
     CHECK(countText(out.str(), R"("t":"day")") == static_cast<std::size_t>(ticked));
-    CHECK(session.cashHistory().size() == static_cast<std::size_t>(ticked) + 1);
+    // The last record repeats the day with the final hash.
+    CHECK(countText(out.str(), R"("day":6,"hash")") == 2);
+    // One figure a day, the starting day included.
+    CHECK(session.cashHistory().size() == static_cast<std::size_t>(session.day()) + 1);
     CHECK(session.speed() == game::Speed::Paused);
     const std::optional<sim::Notice> why = session.takePausedBy();
     REQUIRE(why.has_value());
@@ -1701,12 +1718,59 @@ TEST_CASE("The session reports the outcome the sim set", "[session][spec010]") {
     CHECK(other.advance(3.0) == 0);
 }
 
+TEST_CASE("The session takes no order once the game is over", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    putStageInReach(content, world.companies[game::Session::kPlayer.index()], 2);
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world)));
+    session.setTrace(&trace);
+    session.setAutoPause(neverPause());
+
+    // While the game is being played an order is queued, and says so.
+    CHECK(session.submit(sim::CompleteProgramStage{}));
+    CHECK(session.pendingOrders().size() == 1);
+    CHECK(countText(out.str(), "order_queued") == 1);
+    session.stepOneDay();
+    REQUIRE(session.gameOver());
+    REQUIRE(session.pendingOrders().empty());
+
+    // After the end: refused, nothing queued, nothing traced, no id used.
+    const std::string traced = out.str();
+    const std::uint64_t hash = session.stateHash();
+    CHECK_FALSE(session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(500'000)}));
+    CHECK_FALSE(session.submit(sim::DeliverToProgram{{}, sim::ResourceId(0), 10}));
+    CHECK(session.pendingOrders().empty());
+    CHECK(session.committed() == sim::Money::zero());
+    CHECK(out.str() == traced);
+    session.stepOneDay();
+    CHECK(session.stateHash() == hash);
+    CHECK(session.log().back().notice.kind != sim::NoticeKind::CommandRejected);
+}
+
+TEST_CASE("A bankrupt player's session takes no order", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    sim::Company& player = world.companies[game::Session::kPlayer.index()];
+    player.bankrupt = 1;
+    player.monthsInsolvent = content.balance.bankruptcyGraceMonths + 1;
+    player.cash = sim::Money::fromUnits(-1);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world)));
+    REQUIRE(session.gameOver());
+    REQUIRE_FALSE(session.outcome().ended);
+
+    CHECK_FALSE(session.submit(sim::TakeLoan{{}, sim::Money::fromUnits(500'000)}));
+    CHECK(session.pendingOrders().empty());
+}
+
 TEST_CASE("The end record of a session's trace carries the outcome", "[session][spec010]") {
     const sim::Content content = raceContent();
     sim::WorldState world = raceWorld(content);
     putStageInReach(content, world.companies[kRival.index()], 2);
-    world.companies[game::Session::kPlayer.index()].programStage = 2;
-    world.companies[game::Session::kPlayer.index()].programStageDays.assign(2, 0);
+    putStagesBehind(content, world.companies[game::Session::kPlayer.index()], 2);
     std::ostringstream out;
     game::TraceWriter trace(out);
     game::Session session(content, 7, test::setup());
@@ -2029,6 +2093,28 @@ TEST_CASE("A refused order is described as the order it was", "[session][playtes
                   game::rejectReasonClause(content, sim::RejectReason::InsufficientInventory) +
                   ".");
         CHECK(onlyRejection(session).find("sale") == std::string::npos);
+    }
+    SECTION("an order refused because the game is over reads the same whatever it was") {
+        const std::string expected =
+            "Couldn't carry out the order: the game is over and no "
+            "more orders are taken.";
+        sim::Notice refused;
+        refused.kind = sim::NoticeKind::CommandRejected;
+        refused.company = game::Session::kPlayer;
+        refused.reason = sim::RejectReason::GameEnded;
+        CHECK(game::describeNotice(content, session.view(), refused) == expected);
+        // The fields of the order it was do not change the sentence.
+        refused.order = sim::RejectedOrder::Delivery;
+        refused.resource = sim::ResourceId(0);
+        refused.tonnes = 500;
+        CHECK(game::describeNotice(content, session.view(), refused) == expected);
+        refused.order = sim::RejectedOrder::StageCompletion;
+        CHECK(game::describeNotice(content, session.view(), refused) == expected);
+        refused.order = sim::RejectedOrder::Other;
+        refused.loan = sim::LoanId(0);
+        refused.amount = sim::Money::fromUnits(100);
+        refused.plot = sim::PlotId(2);
+        CHECK(game::describeNotice(content, session.view(), refused) == expected);
     }
     SECTION("a delivery the stage does not need says so") {
         session.submit(sim::DeliverToProgram{{}, sim::ResourceId(1), 10});

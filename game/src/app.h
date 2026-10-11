@@ -74,6 +74,10 @@ private:
     void newGame(std::uint64_t seed);
     void openTrace();
     void traceUi(std::string_view kind, std::string_view detail);
+    // Writes the trace's end record for the current game, with the outcome
+    // when it is over. Called when the game ends, when it is replaced and
+    // when the app closes; the writer keeps one a game.
+    void traceEnd();
     // Keeps a copy of save bytes next to the trace so a replay can follow a load.
     std::string keepSaveCopy(const char* role, const std::vector<std::uint8_t>& bytes);
     void requestScreenshot();

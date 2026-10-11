@@ -1105,6 +1105,11 @@ sim::ProgramStage parseProgramStage(const Node& node, const sim::Content& conten
     if (!requirements) {
         return stage;
     }
+    // A stage with nothing to deliver would be bought with cash and research
+    // alone, which is not the race the program is for.
+    if (requirements->empty()) {
+        node.report("requires", "a stage must require at least one good");
+    }
     for (const Node& requirement : *requirements) {
         parseProgramRequirement(requirement, content, stage);
     }

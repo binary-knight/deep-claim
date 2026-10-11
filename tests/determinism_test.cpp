@@ -250,7 +250,12 @@ TEST_CASE("Golden state hash of a played race is stable across platforms", "[det
     // content fixture, so tuning data/*.json does not move it. A deliberate
     // change to sim state or rules moves it once: update the constant in the
     // same commit and record the reason in docs/DESIGN.md.
-    constexpr std::uint64_t kGoldenRace = 0x588363dbb9c693f3ULL;
+    // Moved once by the review fixes for spec 010 step 1 (was
+    // 0x588363dbb9c693f3): the world now freezes on the day it ends. The
+    // order that founds the program is the last thing that happens, so the
+    // rest of that day's pipeline no longer runs and the day does not
+    // advance; the outcome's day equals the state's day.
+    constexpr std::uint64_t kGoldenRace = 0xae14b05ab3e56760ULL;
     constexpr sim::Day kRivalStartsDay = 45;
     constexpr sim::Day kLongestRace = sim::kDaysPerYear * 2;
     const sim::Content content = test::makeContent();
@@ -291,6 +296,7 @@ TEST_CASE("Golden state hash of a played race is stable across platforms", "[det
                       [](const sim::Research& project) { return project.complete == 0; }));
     CHECK(world.outcome.ended != 0);
     CHECK(world.outcome.day == player.programStageDays[2]);
+    CHECK(world.outcome.day == world.day);  // the world froze on the day it ended
     CHECK(world.outcome.founder == kPlayer);
     REQUIRE(world.outcome.results.size() == 2);
     CHECK(world.outcome.results[kPlayer.index()] == sim::ProgramResult::Founded);

@@ -1349,3 +1349,428 @@ A blank cell means the figure was not recorded.
   been seen on a display, run through CI on Windows/MSVC or playtested.
   The reviews are done (2026-10-10) and their outcomes are in the spec
   under "Reviews".
+
+## The race for the program (spec 010, step 1)
+
+The spec is `spec/race-for-the-program.md`. Its decision records are
+`docs/adrs/F-2026-10-11-first-slice-race-for-the-program-001` to `-004`.
+This section covers step 1 only, the race. Plants, mine life and the
+final tuning are steps 2 to 4 and are not built. Recorded on 2026-10-11,
+after the build. Where the build differs from the design
+(`.etc_sdlc/features/active/F-2026-10-11-first-slice-race-for-the-program/design.md`)
+the difference is listed under "Departures from the design" below. The
+tuned values, the sweep evidence and what is still open are in the spec
+under "Decisions" and "Open after step 1".
+
+- **What it adds.** A game now ends. Two companies race to complete a
+  three-stage program before a deadline. Each stage needs cash, one
+  research project and goods the company has delivered from its own
+  stock. The first company to complete the third stage founds the
+  program. Before this spec a game ended only when the player went
+  bankrupt.
+- **The program is content.** `data/program.json` holds `deadline_day`
+  (10,800) and `stages`, each with `id`, `cost`, `research` (a tech id)
+  and `requires` (a list of `resource` and `tonnes`). It loads into
+  `Content::program` (`ProgramDef`: `deadlineDay` and `stages`). The
+  loader runs it after resources and techs, because stages name both. It
+  requires exactly three stages, a cost of at least one cent, a known
+  tech and known resources, at least one good required by every stage,
+  and lithium among the third stage's needs (BR-002). A stage's project must be the tech whose
+  `requires_program_stage` equals the stage's position counting from
+  zero, so the two files cannot disagree. In-code content may leave the
+  program empty; the client then shows no race item.
+- **Saved state on a company.** `Company::programStage` counts stages
+  complete, 0 to 3. `Company::programDelivered` holds tonnes per resource
+  delivered toward the stage being worked on, and is cleared when the
+  stage completes. `Company::programStageDays` holds the day each stage
+  was completed, oldest first, so it has `programStage` entries. On load
+  a save is refused when the stage count is above the number of stages,
+  when a delivery is negative, above the current stage's need or set for
+  a resource that stage does not need, or when the stage days are not
+  one per stage complete, in order, at least day 1 and not later than
+  today. A company must also hold, among its completed techs, the
+  project of every stage it has completed.
+- **The world's outcome.** `WorldState::outcome` is `{ ended, day,
+  founder, results }`. `results` has one `ProgramResult` per company:
+  `None` while the game is being played, then `Founded`, `LesserPartner`
+  or `Lost`. The sim sets it once and nothing changes afterwards
+  (decision record 001).
+- **A save cannot claim an ending the world does not show.** Load
+  validation (`validateOutcome` in `sim/src/save.cpp`) checks the
+  outcome against the companies and the deadline.
+  - A game still being played has an empty outcome, no company with
+    every stage complete, and a day at or before the deadline day.
+  - An ended game has an outcome day that is not zero and equals the
+    state's day.
+  - With a founder: the founder is solvent, has every stage complete, is
+    the only company that has, completed its last stage on the outcome's
+    day, and founded on or before the deadline day.
+  - With no founder: the outcome's day is the deadline day and no
+    company has every stage complete.
+  - Every company's result is the one the rule gives. The rule for a
+    company that did not found the program is one function,
+    `programResultBesideFounder` in `sim/include/sim/program.h`. The
+    ending applies it and the validator checks against it.
+- **Two orders.** `DeliverToProgram { company, resource, tonnes }` and
+  `CompleteProgramStage { company }` are appended to the `Command`
+  variant, so the positions saves write for the older orders do not
+  move. Both rules are in `sim/src/program.cpp`.
+  - A delivery moves tonnes from stock to the program. It is not a sale:
+    it earns nothing and the market does not see it. It cannot be
+    undone. It is refused for a bankrupt company
+    (`CompanyBankrupt`), an unknown resource, a finished program
+    (`ProgramComplete`), a good the current stage does not need or more
+    than it still needs (`ProgramNotNeeded`), zero or negative tonnes
+    (`InvalidQuantity`) and more than is in stock
+    (`InsufficientInventory`). An accepted delivery raises a private
+    `ProgramDelivered` notice.
+  - Completing a stage needs the stage's research done and every
+    requirement delivered in full (`ProgramStageNotReady` otherwise) and
+    the cost within the company's available cash (`InsufficientFunds`).
+    It charges the cost, clears the deliveries, advances the stage and
+    records the day. It raises a public `ProgramStageComplete` notice
+    with the cost, the number of the stage just completed and the
+    stage's tech.
+  - One private function, `completionBlocker`, decides whether a stage
+    may be completed. `validateCompleteProgramStage` and
+    `programStageReady` both answer from it, so the view's ready flag
+    and the order's acceptance cannot differ.
+  - `programProgressPermille` is the mean over the stage's requirements
+    of the share of each delivered, in thousandths, rounded down. Each
+    good counts by its own need. Research and cash are not part of it.
+- **Stage research is ordinary research** (decision record 002). The
+  three projects are in `data/techs.json` with `requires_program_stage`
+  0, 1 and 2 (`TechDef::requiresProgramStage`). A project that waits for
+  a stage the company has not completed is refused as
+  `TechNeedsProgramStage`. Starting a stage's project raises the usual
+  private `ResearchStarted` notice and a public `ProgramResearchStarted`
+  notice with the stage's number (BR-004). The projects have no effects.
+- **One rule for what can be started.** `sim::researchOpenTo` says
+  whether a company may start a project, money and a busy lab aside. It
+  and `validateStartResearch` both answer from one private function in
+  `sim/src/research.cpp`. A busy lab is still the reason given ahead of
+  a missing prerequisite or stage.
+- **The ending.** The first company to complete the last stage founds
+  the program, inside the commands step, and the game ends with that
+  order. The founder is `Founded`. Any other company is `LesserPartner`
+  if it has completed at least two stages and is not bankrupt, and
+  `Lost` otherwise. A public `ProgramFounded` notice follows the stage's
+  own. If the deadline day comes and its orders found nothing, every
+  company is `Lost` and a public `DeadlinePassed` notice is raised. A rival's
+  bankruptcy does not end the game. The player's own bankruptcy ends it
+  for the player in the session, with the outcome still open.
+- **A finished world refuses every order.** `Simulation::dispatch`
+  checks `gameEnded` for each order, so orders queued behind the one
+  that founds the program are refused the same day, each with a
+  `CommandRejected` notice and the reason `GameEnded`. A tick on a world
+  that has already ended applies the queue, which refuses everything,
+  and does nothing else: no step runs and the day does not advance. The
+  golden race test ticks a finished world once more and the hash does
+  not change.
+- **Tick order.** Commands (1), program (1b), plot market (2), surveys
+  (3), mines (4), sell policies (4b), markets (5), finance (6), research
+  (7), events (8), then the day advances (9). Step 1b is `runProgram`,
+  the deadline check: when the game has not ended and the day has
+  reached `Content::program.deadlineDay`, it ends the game. Orders are
+  applied first, so a last stage completed on the deadline day founds
+  the program. Nothing else of the deadline day is played.
+- **The day a game ends on is not played out.** The world freezes
+  straight after that day's orders (tick step 1, where an order
+  completing the last stage founds the program and the orders queued
+  behind it are refused) or after the deadline check that follows them
+  (step 1b). No later step of that tick runs and the day does not
+  advance, so the outcome's day always equals the state's day. Nothing
+  that happens later in a day, such as a bankruptcy in the finance step,
+  can contradict the results. This was changed in the review fix round;
+  as first built the rest of the day ran and the day advanced.
+- **Why the program step moved.** Save validation reads the state's day
+  as a between-ticks day: every other step leaves its records dated
+  before the day the tick ends on. A world frozen after a full pipeline
+  would not load. An ended world may hold records from its last day's
+  orders, dated today, and validation allows them only when the outcome
+  is ended.
+- **The view.** Everything about the race is public (BR-007).
+  `CompanyView` gained `deadlineDay`, `outcome` (`OutcomeView`),
+  `program` (the viewer's own) and `programs` (one `ProgramPublicView`
+  per company).
+  - `ProgramView` holds stages complete, a complete flag, the stage days
+    and the current stage. `ProgramStageView` holds the stage's index,
+    cost, tech, research state (not started, in progress, done), the
+    project in progress with its finish day, each requirement's needed,
+    delivered and in-stock tonnes, the progress in thousandths and
+    `ready`, which is `sim::programStageReady`.
+  - `ProgramPublicView` holds, for every company, stages complete, the
+    complete flag, the stage days, progress in thousandths and the
+    research state of its current stage. A rival's entry is as full as
+    the viewer's own.
+  - `CompanyView::researchOpen` holds one flag per tech, from
+    `sim::researchOpenTo`. The AI and the client read it in place of
+    their own copies of the rule. A `StartResearch` order for a project
+    marked 0 is always refused.
+- **The session.** `Session::gameOver()` is true when the player is
+  bankrupt or the outcome has ended. `Session::outcome()` returns the
+  view's outcome. Once the game is over, `setSpeed` forces the clock to
+  paused, `advance` and `stepOneDay` play no day, and `tickOnce` writes
+  no history and no trace record. `Session::submit` returns a bool and
+  refuses an order once the game is over: nothing is queued or traced
+  and the answer is false. The sim would refuse it on the next tick, but
+  no tick is coming. Every `GameEnded` rejection reads the same whatever
+  the order was: "Couldn't carry out the order: the game is over and no
+  more orders are taken." On the day the game ends, the notice
+  that ended it (`ProgramFounded`, `DeadlinePassed` or the player's own
+  `Bankrupt`) is the one handed over as the reason the clock stopped,
+  whatever else the day raised, and the clock stops under any rule set.
+  For the Committed figure a `CompleteProgramStage` order costs the
+  current stage's cost and a `DeliverToProgram` order costs nothing.
+- **The rival-program stop rule.** `game::PauseOn::RivalProgram`, key
+  `rival_program`, maps `ProgramResearchStarted` and
+  `ProgramStageComplete` from another company to an auto-pause reason
+  (BR-010). It is on by default and listed with the other stop rules.
+  With the rule off the log line still appears.
+- **The trace.** The two new orders are written and read by name. The
+  `end` record carries an `outcome` when the game was over for the
+  player: `ended`, `day`, `founder` (a company index or null) and
+  `result`, one of `founded`, `lesser_partner`, `lost` or `bankrupt`. A
+  bankrupt player is `bankrupt` whatever the race came to, and if the
+  race is still open the day is the day the session stood on. A game
+  closed while still being played writes the plain `end` record. A game
+  has one `end` record. It is written at the moment the game ends, when
+  a new game replaces it, or on close, whichever comes first; the writer
+  ignores later calls until another game starts.
+  `kTraceVersion` and `kSaveVersion` are still 1. Saves and traces from
+  before this step are refused by the content fingerprint.
+- **The AI races** (`sim/src/ai_controller.cpp`, BR-011). It gives no
+  orders once it is bankrupt or the game has ended. Its program orders
+  are placed ahead of every other rule.
+  - It completes a stage on the day the view says the stage is ready.
+    When the research and deliveries are in and only the cost is
+    missing, the cost is earmarked so no other rule spends it.
+  - For a company with standing sell orders, it sets each order's
+    reserve to what the stage still needs of that good and releases it
+    when the need is met. Sell policies run the day the ore is dug, so
+    without this there would be no stock to deliver.
+  - It delivers `program_reserve_share` of its stock of each good the
+    stage still needs, cut to the need, and sells the rest. The share is
+    rounded down, but a company that keeps any share delivers at least
+    one tonne when it holds stock and the stage needs it. It delivers
+    nothing while its spendable cash is under `program_cash_buffer` plus
+    the cost of a program project that is waiting to start.
+  - It multiplies the surveyed value of an ore by
+    `program_ore_land_weight` when the program is short of it: the
+    current and coming stages need more than its operating mines will
+    dig before the deadline at the rate they dug yesterday.
+  - For research the program comes first. The order is: whatever
+    unlocks an ore the current stage needs; the stage's own project,
+    once the stage's delivery progress has reached
+    `program_research_progress`; whatever unlocks an ore a coming stage
+    needs. A program project is paid from spendable cash as long as the
+    buffer is left. While it cannot be afforded nothing else is started.
+  - The four knobs are in `data/ai.json`. The loader bounds the two
+    shares to 0 to 1 and the land weight to 1 to 10.
+- **The runner's race measures.** A run stops when its game ends and
+  never ticks a finished world. A run of exactly the deadline's length
+  makes one tick more, so `--years 30` always reaches an outcome. Days
+  in the runner's output count from 1: `founded_day` and `end_day` are
+  the outcome's day plus one, like `stage_days`. The ending tick is not
+  sampled. A day that never came is printed as
+  `never_day`. Each seed's row carries `outcome` (`founded`, `deadline`
+  or `running`), `founder` (-1 for nobody), `founded_day`, `end_day`,
+  `stage_days` for each company and `rejected_commands`. Orders refused
+  because the game had just ended are not counted against the AI. The
+  summary carries seeds founded, at the deadline and still running, wins
+  by company, the founding day and the founder's day for each stage. A
+  figure sampled at a year a seed never reached is null.
+- **The gates now.** A sweep's exit code is its gated checks. Gated:
+  `opening_has_mineable_plots`, `median_first_mine_day` (under day 250),
+  `world_valid`, `ai_commands_valid` and the three race checks of
+  BR-013. The race checks are set for 50 seeds and held to the same
+  shares, rounded up, for other counts: `founded_before_deadline` (at
+  least 40 seeds end by a founding), `win_balance` (no company founds in
+  more than 35) and `bankruptcies` (at most one seed). They are
+  evaluated only by a sweep that covers the deadline. A shorter one
+  prints them as "not evaluated" and they pass.
+- **What is no longer gated.** The checks that assumed a 20-year
+  open-ended game are still printed, with `"gated": false`:
+  `unlisted_land_at_year_8` (spec 005), `seeds_with_bankruptcy`,
+  `mines_leader_over_trailer` and `depletion_by_year_8` (spec 006), and
+  spec 008's `bite_iron`, `bite_copper`, `bite_nickel`, `idled_mines`,
+  `cash_y10` and `bankruptcy_y1_10`. A game now ends when the program is
+  founded, so a seed is measured only as far as its game went. Spec
+  008's decision record 003 therefore no longer describes the gates in
+  force. The record is not edited.
+- **CTest.** In an optimized build without the sanitizers,
+  `runner_sweep` runs `sim_runner --sweep 50 --years 30 --ai 1 --sanity`
+  (AC-010), is judged by its exit code, has a 180-second timeout and
+  fails if a gated check prints "not evaluated". The tuning task
+  reported 38 to 39 seconds for that sweep on the shipped data. Any
+  other build runs two seeds, or one under the sanitizers, for 30 years
+  and is judged by its output: every seed's game must have ended and
+  every check must be printed. `runner_outcome` (one seed, two years)
+  checks that a single run reports a game still running.
+  `runner_bite_measures` now also checks that a short sweep reports the
+  race checks as not evaluated.
+- **The client.** Three additions, all read from the view.
+  - The status strip under the header carries a race item on every tab:
+    the time left to the deadline in years and days, or who founded the
+    program, and a chip that says Ahead, Behind or Level. The Dashboard
+    has a race strip with a row per company: stages complete, a progress
+    bar with its figure, and the research state.
+  - The Program tab is tab 6 by number and second on the rail. It lists
+    the three stages, then the current stage's needs (needed, delivered,
+    in stock, still needed) with a Deliver button per good that offers
+    the lesser of the stock and what is still needed. It shows the
+    stage's cost and research, Start research and Complete stage. Orders
+    go through the pending queue of spec 007 and can be cancelled.
+    Complete stage is live exactly when the view's `ready` is true. The
+    tab says what is missing, warns when cover-costs is on, and says
+    which project unlocks a good the company cannot dig yet.
+  - The end screen covers play once `Session::gameOver()` is true. It
+    shows the result, the day the game ended, every company's stages and
+    the day of each, the player's cash, mines and stages, and one
+    button, New game. The speed buttons are off.
+- **Playtest 4 fixes** (BR-014).
+  - The losing-mine notice needs a loss worth having. A day is a losing
+    day only when the mine's loss is at least
+    `mine_loss_notice_min_share` (0.05) of its running cost.
+  - The notice is not re-armed by one good day. `Mine::lossClearDays`
+    counts consecutive days that were not losing days since the notice.
+    The announcement is cleared when the count reaches
+    `mine_loss_rearm_days` (30), or when the mine stops counting (it
+    stops operating, its owner goes bankrupt or it has no output to
+    price). A losing day sets the count back to zero. This replaces the
+    spec 008 rule above, under which one profitable day cleared the
+    announcement. On load a save is refused when the count is not zero
+    on a mine without an announcement, beside a count of losing days, or
+    above the re-arm number.
+  - The mothball notice says what happened. `MineMothballed` and
+    `MineReopened` are two private notice kinds, each with its own
+    sentence.
+  - The Market tab shows prices exact to the cent (`game::exactPrice`,
+    in `game/session/include/game/format.h`).
+
+### Golden hashes (spec 010, step 1)
+
+All three values are in `tests/determinism_test.cpp`, use the in-code
+content fixture and were recorded on Linux/GCC. They are confirmed for
+Windows/MSVC only when CI runs.
+
+- **`kGolden`** (seed 42, one year, no orders) moved twice.
+  - `0x2a5da3177ab7c69d` to `0x01906a0707315707`: every company gained
+    its program stage and deliveries, and the world gained an outcome.
+  - `0x01906a0707315707` to `0x059a7c79213dd307`: every company gained
+    its list of stage days. Nobody completes a stage in this run, so the
+    list is hashed empty, by its length alone.
+  - `Mine::lossClearDays` did not move it, for the reason spec 008's
+    mine fields did not: no mine is built in this run.
+- **`kGoldenPlayed`** (seed 42, three years, the AI gives both
+  companies' orders) moved four times.
+  - `0xc0980b717725177f` to `0xb6d511501247ec2d`: the program stage and
+    deliveries on a company and the outcome on the world. No rule
+    changed.
+  - `0xb6d511501247ec2d` to `0x59fab58dbf9f668d`: every mine gained
+    `lossClearDays`, the losing-notice re-arm count. With the field left
+    out of the saved form the old value still held, so the game played
+    was the same.
+  - `0x59fab58dbf9f668d` to `0x1d4743bc9b26a84f`: the AI now races. It
+    delivers, sets sell-order reserves, researches toward the program
+    and completes stages, so the game it plays is a different one. No
+    saved field changed, and `kGolden` did not move.
+  - `0x1d4743bc9b26a84f` to `0x41192679894c4afc`: the stage days on a
+    company. With the field left out of the saved form the old value
+    still held. The same change added `researchOpen` to the view, which
+    the AI reads; that did not move the value.
+- **`kGoldenRace`** = `0xae14b05ab3e56760` is new: "Golden state hash of
+  a played race is stable across platforms". It was first recorded as
+  `0x588363dbb9c693f3` and moved once, in the review fix round, when the
+  world began to freeze on the day it ends: the rest of that day's
+  pipeline no longer runs and the day does not advance. `kGolden` and
+  `kGoldenPlayed` did not move for that change, since neither game ends. Neither run above is
+  certain to reach the program's rules. Here both companies are given
+  stock and cash and race by rote on the fixture's small program, with
+  real orders applied by ticks. The player completes all three stages
+  and founds the program. The rival starts on day 45, completes two and
+  is part-way through the third. The state hashed holds stage days,
+  deliveries toward an unfinished stage, a stage project still running
+  and an outcome with a founder and a lesser partner. The same value
+  must come back from a save, and one more tick must not change it.
+- **Once per step.** The spec asks for the golden hashes to move once
+  per step (BR-026, AC-019). They moved once per change to state or
+  behaviour instead, as the tasks landed, with each reason above.
+
+### Departures from the design (spec 010, step 1)
+
+- **`deadline_day` is in `data/program.json`**, not `data/balance.json`.
+  The deadline belongs to the race and loads with it.
+- **The lesser-partner threshold is a named constant**,
+  `kLesserPartnerStages = 2` in `sim/src/program.cpp`, not data. It is
+  part of the rule: the spec fixes it at two of the three stages.
+- **The mine field is `lossClearDays`**, not `profitDays`. It counts
+  days that are not losing days, which includes a day at break-even and
+  a day with a loss under the set share.
+- **`MineSwitched` became two notice kinds**, `MineMothballed` and
+  `MineReopened`. The design did not say how the notice would be fixed.
+  BR-014 asks for it to say which happened.
+- **A rejected order's notice says which kind of order it was.**
+  `Notice::order` is a `RejectedOrder` (`Other`, `Delivery`,
+  `StageCompletion`), set only on `CommandRejected`. A refused delivery
+  carries a resource and tonnes exactly as a refused sale does, and a
+  refused stage completion carries nothing, so without it the log could
+  not word either.
+- **`programStageReady` and `programProgressPermille` take the world
+  state** and a company id. The design gave them the content and a
+  company. Readiness needs available cash, which is read from the state.
+- **The deadline is in the status strip under the header**, not in the
+  header row. It did not fit there once the company name and the figures
+  were long ones.
+- **Stage days were added to saved state and the view.** The design
+  kept only the count of stages complete. The end screen needed the days
+  in a long game and after a load, when the session's log is gone, so
+  the sim keeps them (`Company::programStageDays`). The runner reads its
+  own from the `ProgramStageComplete` notices.
+- **A fourth AI knob**, `program_research_progress`. The design listed
+  three.
+- **The runner gates only the opening, validity and race checks.** The
+  design added the race checks and did not say the older gates would
+  stop gating. Spec 008's bite checks are reported and no longer gated,
+  so spec 008's decision record 003 no longer describes the gates in
+  force.
+- **Excess is refused, not cut.** The design's layer table says a
+  delivery "is capped at the remaining need". The sim refuses a delivery
+  above the remaining need as `ProgramNotNeeded`, as AC-002 asks. The
+  cut to the need is made by whoever gives the order: the AI and the
+  Program tab's Deliver button.
+- **The runner's own default is still 20 years.** The design said the
+  gated sweep's default becomes 30. The `runner_sweep` CTest passes
+  `--years 30` instead.
+- **The same-day finish is not recorded.** The spec's first edge case
+  says two companies completing stage 3 on the same day is "recorded in
+  the outcome as a same-day finish". `Outcome` has no field for it. The
+  lower company index is applied first and founds the program. The
+  other's order is refused as `GameEnded` and it finishes as a lesser
+  partner on its two stages. The Codex review raised this and it was
+  declined: the first order applied wins.
+- **The program step follows the orders, not the events.** The design's
+  tick order put the program step after events, and as first built the
+  day a game ended on was played out. Now the deadline check is step 1b
+  and the world freezes on the day it ends. The reason is that save
+  validation reads the state's day as a between-ticks day, so a world
+  frozen after a full pipeline would not load. It also means a
+  bankruptcy later the same day cannot contradict a lesser-partner
+  result.
+
+### Numbers and what is open (spec 010, step 1)
+
+The shipped numbers are provisional. Base demand was raised to 3 to 10
+times spec 008's, by ore, so one standard mine moves its own price by
+about 4.8 percent (BR-012; a data test limits it to 6 percent). The
+program's costs and tonnages and the stage projects' costs and durations
+were retuned against it. Every value, its reason and the sweep evidence
+are in the spec under "Tuned and provisional values", with the final
+sweeps on seeds 1 to 50 and 51 to 100. What is not done is in the spec
+under "Open after step 1". Among it: about 30 sentences are unpolished
+drafts; the race is paced by the research clock and the deadline hardly
+bites; spec 008's bite is largely gone at this market depth; the golden
+values are unconfirmed on Windows; the client has not been seen on a
+display; and the security review and the spec-compliance check have not
+been run for step 1. The code review and the Codex review are done
+(2026-10-11) and their outcomes are in the spec under "Reviews".

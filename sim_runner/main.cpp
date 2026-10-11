@@ -5,14 +5,18 @@
 // AI commands, a dead economy, or a world that fails validation).
 //
 // The game ends (spec 010): the first company to complete the program founds
-// it, or the deadline passes with no founder. A run plays until the game ends
-// or the requested days run out, whichever is first, and never ticks a
-// finished world. The deadline closes the day after the last one a run of
-// exactly that length would play, so such a run plays that one day more:
+// it, or the deadline day comes with no founder. A run plays until the game
+// ends or the requested days run out, whichever is first, and never ticks a
+// finished world. The world freezes on the day it ends: the tick that ends
+// the game applies that day's orders and no more, and the day does not
+// advance. The deadline is looked at on the day after the last one a run of
+// exactly that length would play, so such a run makes that one tick more:
 // --years 30 reaches the deadline outcome. Nothing else plays past its days.
-// Days in the output are 1-based (Outcome::day + 1 for the day the game
-// ended); a day that never came is printed as never_day, one past the last
-// day the run could have played.
+// Days in the output are 1-based, stage_days, founded_day and end_day alike:
+// the sim's day, counted from zero, plus one. founded_day and end_day are
+// the outcome's own day (Outcome::day + 1) when the game ended; end_day is
+// the last day played when it did not. A day that never came is printed as
+// never_day, one past the last day the run could have played.
 //
 // With --sweep N it instead plays N consecutive seeds and reports, per seed
 // and in summary, how the world's land and opening behaved (spec 005): the
@@ -79,10 +83,11 @@ struct Options {
     sim::Day tickLimit = 0;
 };
 
-// The deadline closes at the end of the day numbered Content::program's
-// deadlineDay, counting from zero: one day after a run of exactly that many
-// days would stop. Such a run plays it, so a run to the deadline always has
-// an outcome. Any other run plays its days and no more.
+// The deadline is looked at on the day numbered Content::program's
+// deadlineDay, counting from zero, after that day's orders: one day after a
+// run of exactly that many days would stop. Such a run makes that tick, so a
+// run to the deadline always has an outcome; the tick ends the game and the
+// day does not advance. Any other run plays its days and no more.
 sim::Day tickLimitFor(sim::Day days, const sim::Content& content) {
     return days == content.program.deadlineDay ? days + 1 : days;
 }
@@ -121,6 +126,12 @@ std::string_view outcomeName(RunOutcome outcome) {
             break;
     }
     return "running";
+}
+
+// The day the run ended on, 1-based: the outcome's own day when the game
+// ended (the world froze on it), the last day played when it did not.
+std::int64_t endDayOf(const sim::WorldState& state) {
+    return sim::gameEnded(state) ? std::int64_t{state.outcome.day} + 1 : std::int64_t{state.day};
 }
 
 // The founder's index, or -1 when nobody founded the program.
@@ -346,6 +357,11 @@ void recordDay(const sim::Content& content, const sim::Simulation& simulation,
     }
     recordStageDays(report, stats.stageDays);
     const sim::WorldState& state = simulation.state();
+    if (sim::gameEnded(state)) {
+        // The tick that ends the game closes no day: cash and prices stand
+        // as the day before left them and are not counted a second time.
+        return;
+    }
     for (std::size_t c = 0; c < state.companies.size(); ++c) {
         stats.peakCashCents[c] = std::max(stats.peakCashCents[c], state.companies[c].cash.cents());
         std::int64_t debt = 0;
@@ -388,7 +404,9 @@ RunStats run(const Options& options, const sim::Content& content, sim::Simulatio
         }
         const sim::TickReport& report = simulation.tick();
         recordDay(content, simulation, report, stats);
-        if (csv != nullptr && simulation.state().day % sim::kDaysPerMonth == 0) {
+        // Not for the tick that ends the game: it closes no day.
+        if (csv != nullptr && !sim::gameEnded(simulation.state()) &&
+            simulation.state().day % sim::kDaysPerMonth == 0) {
             writeCsvRows(*csv, simulation);
         }
     }
@@ -445,15 +463,15 @@ void printSummary(const Options& options, const sim::Content& content,
     std::cout << "{\n";
     std::cout << std::format("  \"seed\": {},\n  \"days\": {},\n  \"state_hash\": \"{:016x}\",\n",
                              options.seed, final.day, simulation.stateHash());
-    // How the game ended, or that the run stopped first. end_day is the last
-    // day played, which is the day the game ended when it did.
+    // How the game ended, or that the run stopped first. founded_day and
+    // end_day are the outcome's day when the game ended (see endDayOf).
     const std::int64_t never = neverDay(options);
     const bool founded = outcomeOf(final) == RunOutcome::Founded;
     std::cout << std::format(
         "  \"outcome\": {}, \"founder\": {}, \"founded_day\": {}, \"end_day\": {}, "
         "\"never_day\": {},\n",
         jsonString(outcomeName(outcomeOf(final))), founderIndex(final),
-        founded ? std::int64_t{final.day} : never, final.day, never);
+        founded ? endDayOf(final) : never, endDayOf(final), never);
     std::cout << "  \"companies\": [\n";
     for (std::uint32_t c = 0; c < final.companies.size(); ++c) {
         const sim::Company& company = final.companies[c];
@@ -620,7 +638,8 @@ struct SweepRow {
     // stood, who founded the program (-1 = nobody), the day each company
     // completed each stage (1-based, 0 = never) and the orders refused, not
     // counting those refused because the game had ended.
-    sim::Day endDay = 0;
+    sim::Day endDay = 0;              // days closed: what the per-day samples are measured over
+    std::int64_t reportedEndDay = 0;  // end_day as printed, 1-based (see endDayOf)
     RunOutcome outcome = RunOutcome::Running;
     std::int64_t founder = -1;
     std::vector<std::vector<sim::Day>> stageDays;
@@ -857,16 +876,22 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
         if (state.nextListing != listedBefore && state.nextListing == state.listingQueue.size()) {
             row.lastNewListingDay = report.day + 1;
         }
+        recordStageDays(report, row.stageDays);
+        row.rejectedCommands +=
+            static_cast<std::uint32_t>(std::ranges::count_if(report.notices, countsAgainstAi));
+        if (sim::gameEnded(state)) {
+            // The tick that ends the game closes no day: there is nothing
+            // new to sample, and sampling would count the day before twice.
+            break;
+        }
         recordFirstMine(report, row);
         recordLand(content, state, row);
         recordContest(state, report, row);
         recordBitePrices(content, state, row);
         recordBiteCompanies(state, row);
-        recordStageDays(report, row.stageDays);
-        row.rejectedCommands +=
-            static_cast<std::uint32_t>(std::ranges::count_if(report.notices, countsAgainstAi));
     }
     row.endDay = state.day;
+    row.reportedEndDay = endDayOf(state);
     row.outcome = outcomeOf(state);
     row.founder = founderIndex(state);
     finishContest(options, content, state, row);
@@ -1064,7 +1089,7 @@ std::string biteJson(const SweepRow& row) {
 
 // The day a seed's program was founded, or never.
 std::int64_t foundedDay(const SweepRow& row, std::int64_t never) {
-    return row.outcome == RunOutcome::Founded ? std::int64_t{row.endDay} : never;
+    return row.outcome == RunOutcome::Founded ? row.reportedEndDay : never;
 }
 bool isFounded(const SweepRow& row) {
     return row.outcome == RunOutcome::Founded;
@@ -1081,8 +1106,8 @@ std::vector<std::int64_t> winsByCompany(const std::vector<SweepRow>& rows) {
     return wins;
 }
 
-// The spec 010 part of a row. end_day is the last day played, which is the
-// day the game ended when it did.
+// The spec 010 part of a row. end_day is the outcome's day when the game
+// ended and the last day played when it did not, 1-based (see endDayOf).
 std::string raceJson(const Options& options, const SweepRow& row) {
     const std::int64_t never = neverDay(options);
     std::string stages;
@@ -1092,8 +1117,8 @@ std::string raceJson(const Options& options, const SweepRow& row) {
     return std::format(
         "\"outcome\": {}, \"founder\": {}, \"founded_day\": {}, \"end_day\": {}, "
         "\"stage_days\": [{}], \"rejected_commands\": {}",
-        jsonString(outcomeName(row.outcome)), row.founder, foundedDay(row, never), row.endDay,
-        stages, row.rejectedCommands);
+        jsonString(outcomeName(row.outcome)), row.founder, foundedDay(row, never),
+        row.reportedEndDay, stages, row.rejectedCommands);
 }
 
 // Whether any company went bankrupt on a day after `after` and up to `upTo`
@@ -1131,7 +1156,7 @@ void writeContestCsv(std::ostream& csv, const SweepRow& row) {
 // The spec 010 columns of one CSV row, which end it.
 void writeRaceCsv(std::ostream& csv, const SweepRow& row, std::int64_t never) {
     csv << ',' << outcomeName(row.outcome) << ',' << row.founder << ',' << foundedDay(row, never)
-        << ',' << row.endDay;
+        << ',' << row.reportedEndDay;
     for (const std::vector<sim::Day>& days : row.stageDays) {
         for (const sim::Day day : days) {
             csv << ',' << dayOrNever(day, never);

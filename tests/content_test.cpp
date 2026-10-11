@@ -1004,6 +1004,15 @@ TEST_CASE("A stage's research project must require exactly the stages before it"
                    "tech 'program_stage_1' must have requires_program_stage 0"));
 }
 
+TEST_CASE("A program stage must require at least one good", "[content][spec010]") {
+    content::Sources s = goodSources();
+    s.program = replaceOnce(s.program, R"("requires": [{"resource": "iron", "tonnes": 2000}])",
+                            R"("requires": [])");
+    const auto result = content::loadFromStrings(s);
+    CHECK_FALSE(result.ok());
+    CHECK(hasError(result, "program.json", "stages[1].requires", "at least one good"));
+}
+
 TEST_CASE("The third stage must require lithium", "[content][spec010]") {
     content::Sources s = goodSources();
     s.program = replaceOnce(s.program, R"(, {"resource": "lithium", "tonnes": 50})", "");

@@ -877,9 +877,44 @@ TEST_CASE("The reserve share sets how much of a needed good is kept from sale", 
     CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kIron) == 1);
     CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 599);
 
-    // A share of the stock that rounds to less than a tonne gives no order.
+    // A share of the stock that rounds to less than a tonne still delivers
+    // one: rounded away, the tonne would be sold and the stage never fed.
     setStock(view, kIron, 1);
+    orders = ordersFor(content, view);
+    CHECK(tonnesOrdered<sim::DeliverToProgram>(orders, kIron) == 1);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 0);
+
+    // With no stock there is nothing to deliver, and with nothing kept the
+    // one tonne is sold like the rest.
+    setStock(view, kIron, 0);
     CHECK(positionOf<sim::DeliverToProgram>(ordersFor(content, view)) == -1);
+    setStock(view, kIron, 1);
+    content.ai.programReserveShare = sim::Fixed::zero();
+    orders = ordersFor(content, view);
+    CHECK(positionOf<sim::DeliverToProgram>(orders) == -1);
+    CHECK(tonnesOrdered<sim::SellOre>(orders, kIron) == 1);
+}
+
+TEST_CASE("A good that arrives a tonne a day still reaches the program", "[ai][spec010]") {
+    // The shipped share is a half. Half of one tonne rounds to none, and
+    // what is not delivered is sold the same day, so a slow ore would never
+    // be delivered and its stage never finished.
+    sim::Content content = test::makeContent();
+    content.ai.programReserveShare = sim::Fixed::fromRatio(1, 2);
+    sim::CompanyView view = racerView(content, 0, sim::ProgramResearchState::NotStarted);
+    constexpr std::int64_t kDays = 25;
+    std::int64_t delivered = 0;
+    std::int64_t sold = 0;
+    for (std::int64_t day = 0; day < kDays; ++day) {
+        setStock(view, kIron, 1);  // the day's output; yesterday's has gone
+        const std::vector<sim::Command> orders = ordersFor(content, view);
+        delivered += tonnesOrdered<sim::DeliverToProgram>(orders, kIron);
+        sold += tonnesOrdered<sim::SellOre>(orders, kIron);
+        setDelivered(view, 0, delivered);
+    }
+    CHECK(delivered == kDays);
+    CHECK(sold == 0);
+    CHECK(view.program.stage->progressPermille == kDays);  // of the 1,000 t stage 1 needs
 }
 
 namespace {
@@ -1219,7 +1254,8 @@ TEST_CASE("The view offers an unlocking project only when its program stage is r
 
     sim::WorldState advanced = simulation.state();
     advanced.companies[0].programStage = 1;
-    advanced.companies[0].programStageDays.assign(1, 0);
+    advanced.companies[0].programStageDays.assign(1, 1);
+    advanced.companies[0].completedTechs.push_back(content.program.stages[0].research);
     REQUIRE(simulation.load(sim::saveGame(advanced, {}, sim::hashContent(content))));
     CHECK(simulation.view(sim::CompanyId(0)).unlockReady[kLithium.index()] == 1);
 }

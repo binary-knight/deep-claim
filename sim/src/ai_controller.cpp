@@ -358,7 +358,8 @@ Money pendingProjectCost(const Content& content, const CompanyView& view, bool p
 // orders and is applied first; for an AI company, which has no sell policy
 // and no cover-costs rule (Simulation's makeCompany), those orders are the
 // only way stock leaves. Delivered as it arrives, at most one order a good a
-// day: stock held back would pay storage for nothing. A company with less
+// day: stock held back would pay storage for nothing. The share is rounded
+// down, but never to nothing while there is stock and a need. A company with less
 // spendable cash than its buffer sells instead, since a delivery earns
 // nothing; so does one that cannot yet pay for the project the program wants
 // next, or it would sit at its buffer and never start it.
@@ -371,6 +372,7 @@ std::vector<std::int64_t> decideDeliveries(const Content& content, const Company
     if (stage == nullptr || budget.cash < floor) {
         return delivered;
     }
+    const bool keeps = content.ai.programReserveShare > Fixed::zero();
     for (const ProgramRequirementView& requirement : stage->requirements) {
         const std::size_t r = requirement.resource.index();
         const std::int64_t stock =
@@ -379,7 +381,12 @@ std::vector<std::int64_t> decideDeliveries(const Content& content, const Company
         // last tonnes a stage needs are not rounded away.
         const std::int64_t share =
             checkedMulDiv(stock, content.ai.programReserveShare.raw(), Fixed::kScale).value_or(0);
-        const std::int64_t tonnes = std::min(share, stillNeeded(requirement));
+        // A company that keeps any share delivers at least one tonne of what
+        // it holds. A share that rounds down to nothing would leave the whole
+        // of a small stock to the selling rule, day after day, and a good
+        // that arrives a tonne at a time would never reach the program.
+        const std::int64_t least = keeps ? std::min<std::int64_t>(stock, 1) : 0;
+        const std::int64_t tonnes = std::min(std::max(share, least), stillNeeded(requirement));
         if (tonnes <= 0) {
             continue;
         }

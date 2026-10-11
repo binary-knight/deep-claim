@@ -1,6 +1,8 @@
 #include "sim/save.h"
 
 #include "sim/archive.h"
+#include "sim/program.h"
+#include "sim/research.h"
 #include "sim/serialize.h"
 #include "sim/types.h"
 
@@ -18,6 +20,14 @@ namespace sim {
 namespace {
 
 constexpr std::array<std::uint8_t, 4> kMagic = {'D', 'C', 'S', 'V'};
+
+// Whether an order can have been applied on `day`. A day's orders are
+// applied and then the day closes, so in a world still being played the
+// latest such day is yesterday. A finished world froze on the day it ended,
+// after that day's orders (spec 010), so there it is today.
+bool ordersAppliedOn(const WorldState& state, Day day) {
+    return state.outcome.ended != 0 ? day <= state.day : day < state.day;
+}
 
 bool validateDeposits(const Content& content, const WorldState& state) {
     for (const PlotDeposits& deposits : state.hidden.plotDeposits) {
@@ -75,11 +85,24 @@ bool validateSellPolicies(const Content& content, const Company& company) {
 }
 
 // Each stage complete has the day it was completed (spec 010): in the order
-// the stages were completed, and none on a day that has not come.
+// the stages were completed, none on a day that has not come, and none on
+// day 0, when no stage's research can be finished.
 bool validateProgramStageDays(const Company& company, Day today) {
     const std::vector<Day>& days = company.programStageDays;
     return days.size() == company.programStage && std::ranges::is_sorted(days) &&
-           std::ranges::all_of(days, [today](Day day) { return day <= today; });
+           std::ranges::all_of(days, [today](Day day) { return day >= 1 && day <= today; });
+}
+
+// A stage cannot be completed without its research project, so a company
+// holds the project of every stage it has completed.
+bool validateProgramResearch(const Content& content, const Company& company) {
+    const std::vector<ProgramStage>& stages = content.program.stages;
+    for (std::size_t s = 0; s < company.programStage && s < stages.size(); ++s) {
+        if (!techCompleted(company, stages[s].research)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // The program (spec 010): the stage counts stages complete, and deliveries
@@ -90,7 +113,7 @@ bool validateProgram(const Content& content, const Company& company, Day today) 
     const std::vector<ProgramStage>& stages = content.program.stages;
     if (company.programStage > stages.size() ||
         company.programDelivered.size() != content.resources.size() ||
-        !validateProgramStageDays(company, today)) {
+        !validateProgramStageDays(company, today) || !validateProgramResearch(content, company)) {
         return false;
     }
     std::vector<std::int64_t> needed(content.resources.size(), 0);
@@ -393,7 +416,7 @@ bool validateMineAccounting(const Content& content, const WorldState& state, con
 bool validateMineShape(const Content& content, const WorldState& state, const Mine& mine,
                        MineId id) {
     if (!mine.plot.valid() || mine.plot.index() >= state.plots.size() || !mine.owner.valid() ||
-        mine.owner.index() >= state.companies.size() || mine.builtDay >= state.day ||
+        mine.owner.index() >= state.companies.size() || !ordersAppliedOn(state, mine.builtDay) ||
         static_cast<std::uint64_t>(mine.builtDay) + content.balance.mineBuildDays !=
             mine.operationalDay ||
         mine.operationalDay > kMaxDeadline ||
@@ -494,8 +517,12 @@ bool validateMarkets(const Content& content, const WorldState& state) {
         const ResourceDef& resource = content.resources[i];
         const Money floor = resource.basePrice.scaled(content.balance.priceFloorMult);
         const Money cap = resource.basePrice.scaled(content.balance.priceCapMult);
-        if (market.price < floor || market.price > cap || market.soldToday != 0 ||
-            market.demandMult < content.balance.demandMultMin ||
+        // The day's sales are counted by the price update that closes the
+        // day, so between days there are none. A finished world froze after
+        // its last day's orders (spec 010) and keeps what they sold.
+        const std::int64_t mostSold = state.outcome.ended != 0 ? kMaxSupplyPerDay : 0;
+        if (market.price < floor || market.price > cap || market.soldToday < 0 ||
+            market.soldToday > mostSold || market.demandMult < content.balance.demandMultMin ||
             market.demandMult > content.balance.demandMultMax ||
             market.supplySmoothed < Fixed::zero() ||
             market.supplySmoothed > Fixed::fromInt(kMaxSupplyPerDay) ||
@@ -564,7 +591,7 @@ bool validateResearchRecord(const Content& content, const WorldState& state,
                             std::vector<std::uint64_t>& lastEnd) {
     if (!research.company.valid() || research.company.index() >= state.companies.size() ||
         !research.tech.valid() || research.tech.index() >= content.techs.size() ||
-        research.complete > 1 || research.startedDay >= state.day ||
+        research.complete > 1 || !ordersAppliedOn(state, research.startedDay) ||
         research.completesDay > kMaxDeadline) {
         return false;
     }
@@ -638,38 +665,91 @@ bool validateEvents(const Content& content, const WorldState& state) {
     return true;
 }
 
+bool programComplete(const Content& content, const Company& company) {
+    const std::size_t stages = content.program.stages.size();
+    return stages != 0 && company.programStage == stages;
+}
+
+// A game still being played: no company has completed the program, which
+// would have founded it, and the deadline has not passed. The deadline day
+// itself can be saved before its tick: the deadline is looked at after that
+// day's orders.
+bool validateRaceOpen(const Content& content, const WorldState& state) {
+    return state.day <= content.program.deadlineDay &&
+           std::ranges::none_of(state.companies, [&](const Company& company) {
+               return programComplete(content, company);
+           });
+}
+
+// The results an ended game holds are the ones the rules give: the founder
+// founded it and every other company is a lesser partner or has lost by the
+// sim's own rule (programResultBesideFounder).
+bool validateResults(const WorldState& state) {
+    const Outcome& outcome = state.outcome;
+    const bool founded = outcome.founder.valid();
+    for (std::size_t c = 0; c < state.companies.size(); ++c) {
+        const bool isFounder = founded && outcome.founder.index() == c;
+        const ProgramResult expected =
+            isFounder ? ProgramResult::Founded
+                      : programResultBesideFounder(state.companies[c], founded);
+        if (outcome.results[c] != expected) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A founded program: the founder is a solvent company that has completed
+// every stage, the last of them on the day the game ended, and it is the
+// only one that has, since the order behind the founding one is refused.
+// The program is founded on or before the deadline day.
+bool validateFounding(const Content& content, const WorldState& state) {
+    const Outcome& outcome = state.outcome;
+    if (outcome.founder.index() >= state.companies.size() ||
+        outcome.day > content.program.deadlineDay) {
+        return false;
+    }
+    const Company& founder = state.companies[outcome.founder.index()];
+    if (founder.bankrupt != 0 || !programComplete(content, founder) ||
+        founder.programStageDays.back() != outcome.day) {
+        return false;
+    }
+    const auto finished = std::ranges::count_if(
+        state.companies, [&](const Company& company) { return programComplete(content, company); });
+    return finished == 1;
+}
+
+// The deadline passed with no founder: on the deadline day, with no company
+// having completed the program.
+bool validateDeadlinePassed(const Content& content, const WorldState& state) {
+    return state.outcome.day == content.program.deadlineDay &&
+           std::ranges::none_of(state.companies, [&](const Company& company) {
+               return programComplete(content, company);
+           });
+}
+
 // The outcome (spec 010): one result per company. A game in progress carries
-// no day, founder or result. An ended one names a day that has been played,
-// gives every company a result and, when the program was founded, names the
-// one company whose result says so.
-bool validateOutcome(const WorldState& state) {
+// no day, founder or result, and is one the rules would not have ended. An
+// ended one froze on the day it ended, which is not day 0, and its founder,
+// results and day agree with the companies and the deadline: a save cannot
+// claim an ending the world does not show.
+bool validateOutcome(const Content& content, const WorldState& state) {
     const Outcome& outcome = state.outcome;
     if (outcome.ended > 1 || outcome.results.size() != state.companies.size()) {
         return false;
     }
-    const auto is = [](ProgramResult wanted) {
-        return [wanted](ProgramResult result) { return result == wanted; };
-    };
     if (outcome.ended == 0) {
-        return outcome.day == 0 && !outcome.founder.valid() &&
-               std::ranges::all_of(outcome.results, is(ProgramResult::None));
+        const bool blank = outcome.day == 0 && !outcome.founder.valid() &&
+                           std::ranges::all_of(outcome.results, [](ProgramResult result) {
+                               return result == ProgramResult::None;
+                           });
+        return blank && validateRaceOpen(content, state);
     }
-    if (outcome.day == 0 || outcome.day > state.day) {
+    if (outcome.day == 0 || outcome.day != state.day || !validateResults(state)) {
         return false;
     }
-    const bool resultsKnown = std::ranges::all_of(outcome.results, [](ProgramResult result) {
-        return result == ProgramResult::Founded || result == ProgramResult::LesserPartner ||
-               result == ProgramResult::Lost;
-    });
-    const auto founded = std::ranges::count_if(outcome.results, is(ProgramResult::Founded));
-    if (!resultsKnown) {
-        return false;
-    }
-    if (!outcome.founder.valid()) {
-        return founded == 0;
-    }
-    return founded == 1 && outcome.founder.index() < outcome.results.size() &&
-           outcome.results[outcome.founder.index()] == ProgramResult::Founded;
+    return outcome.founder.valid() ? validateFounding(content, state)
+                                   : validateDeadlinePassed(content, state);
 }
 
 bool validateWorldImpl(const Content& content, const WorldState& state) {
@@ -678,11 +758,11 @@ bool validateWorldImpl(const Content& content, const WorldState& state) {
     }
     // Deposits first: later checks index by resource and assume valid ids.
     return validateDeposits(content, state) && validateCompanies(content, state) &&
-           validateOutcome(state) && validatePlots(content, state) && validateAuctions(state) &&
-           validateListingQueue(state) && validateSurveys(content, state) &&
-           validateMines(content, state) && validateMarkets(content, state) &&
-           validateLoans(content, state) && validateResearch(content, state) &&
-           validateEvents(content, state);
+           validateOutcome(content, state) && validatePlots(content, state) &&
+           validateAuctions(state) && validateListingQueue(state) &&
+           validateSurveys(content, state) && validateMines(content, state) &&
+           validateMarkets(content, state) && validateLoans(content, state) &&
+           validateResearch(content, state) && validateEvents(content, state);
 }
 
 }  // namespace

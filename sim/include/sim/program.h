@@ -5,10 +5,13 @@
 // counts the stages completed; the program is complete when it equals the
 // number of stages in Content::program.
 //
-// The ending (tick pipeline step 8b for the deadline): the first company to
-// complete the last stage founds the program, in the commands step, and the
-// game ends there; if the deadline day closes with no founder, everyone has
-// lost. WorldState::outcome is set once and a finished world never changes.
+// The ending: the first company to complete the last stage founds the
+// program, in the commands step (tick pipeline step 1), and the game ends
+// with that order; if the deadline day comes and its orders found nothing,
+// everyone has lost (step 1b, straight after the orders). The world freezes
+// on the day it ends: no later step of that tick runs and the day does not
+// advance, so Outcome::day equals WorldState::day from then on.
+// WorldState::outcome is set once and a finished world never changes.
 
 #include "sim/commands.h"
 #include "sim/content.h"
@@ -54,15 +57,22 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
 [[nodiscard]] std::int64_t programProgressPermille(const Content& content, const WorldState& state,
                                                    CompanyId company);
 
-// True once the outcome is set. From then on a tick changes nothing and
-// every order is rejected as GameEnded.
+// How the race ends for a company that did not found the program: a lesser
+// partner when another company founded it and this one has completed at
+// least two stages and is not bankrupt; lost otherwise, and always when
+// nobody founded it. The one statement of the rule: the ending applies it
+// and a save is checked against it.
+[[nodiscard]] ProgramResult programResultBesideFounder(const Company& company, bool founded);
+
+// True once the outcome is set. From then on a tick changes nothing, the
+// day included, and every order is rejected as GameEnded.
 [[nodiscard]] bool gameEnded(const WorldState& state);
 
-// The deadline, at the end of the day after events: when the game has not
-// ended and the day has reached Content::program.deadlineDay, every company
-// has lost and a public DeadlinePassed notice is raised. Orders are applied
-// earlier in the day, so a last stage completed on the deadline day founds
-// the program.
+// The deadline, straight after the day's orders: when the game has not ended
+// and the day has reached Content::program.deadlineDay, every company has
+// lost and a public DeadlinePassed notice is raised. Orders are applied
+// first, so a last stage completed on the deadline day founds the program.
+// Nothing else of the deadline day is played.
 void runProgram(const Content& content, WorldState& state, TickReport& report);
 
 }  // namespace sim

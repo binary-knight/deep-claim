@@ -75,15 +75,6 @@ std::optional<RejectReason> completionBlocker(const Content& content, const Worl
     return std::nullopt;
 }
 
-// How the race ended for a company that did not found the program. Without
-// a founder nobody is a partner to anything; a bankrupt company has lost
-// whatever it had completed.
-ProgramResult resultBesideFounder(const Company& company, bool founded) {
-    const bool partner =
-        founded && company.bankrupt == 0 && company.programStage >= kLesserPartnerStages;
-    return partner ? ProgramResult::LesserPartner : ProgramResult::Lost;
-}
-
 // Sets the outcome, once: today, the founder if there is one, and a result
 // for every company.
 void endGame(WorldState& state, CompanyId founder) {
@@ -94,8 +85,9 @@ void endGame(WorldState& state, CompanyId founder) {
     outcome.results.assign(state.companies.size(), ProgramResult::Lost);
     for (std::size_t c = 0; c < state.companies.size(); ++c) {
         const bool isFounder = founder.valid() && founder.index() == c;
-        outcome.results[c] = isFounder ? ProgramResult::Founded
-                                       : resultBesideFounder(state.companies[c], founder.valid());
+        outcome.results[c] = isFounder
+                                 ? ProgramResult::Founded
+                                 : programResultBesideFounder(state.companies[c], founder.valid());
     }
 }
 
@@ -201,6 +193,12 @@ std::int64_t programProgressPermille(const Content& content, const WorldState& s
         shares += checkedMulDiv(delivered, kPermille, requirement.tonnes).value_or(kPermille);
     }
     return shares / static_cast<std::int64_t>(stage->requirements.size());
+}
+
+ProgramResult programResultBesideFounder(const Company& company, bool founded) {
+    const bool partner =
+        founded && company.bankrupt == 0 && company.programStage >= kLesserPartnerStages;
+    return partner ? ProgramResult::LesserPartner : ProgramResult::Lost;
 }
 
 bool gameEnded(const WorldState& state) {

@@ -650,12 +650,14 @@ TEST_CASE("A trace with queued and cancelled orders replays to the same game", "
 
 namespace {
 
-// A save of a fresh game in which the player's first program stage is one
-// delivery and one order from done: its research complete, the iron it needs
-// in stock and plenty of cash. The fixture's first stage costs 1,000,000 and
-// needs 1,000 t of iron (resource 0).
+// A save of a game one day old in which the player's first program stage is
+// one delivery and one order from done: its research complete, the iron it
+// needs in stock and plenty of cash. The fixture's first stage costs
+// 1,000,000 and needs 1,000 t of iron (resource 0). Not day 0: a save
+// holds no stage completed then, when no research can be finished.
 std::vector<std::uint8_t> saveWithStageInReach(const sim::Content& content, sim::Seed seed) {
-    const sim::Simulation fresh(content, seed, test::setup());
+    sim::Simulation fresh(content, seed, test::setup());
+    fresh.tick();
     sim::WorldState state = fresh.state();
     sim::Company& player = state.companies[game::Session::kPlayer.index()];
     player.completedTechs.push_back(content.program.stages[0].research);
@@ -748,7 +750,7 @@ namespace {
 sim::CompanyView endedView(sim::CompanyId founder, sim::ProgramResult playerResult) {
     sim::CompanyView view;
     view.me = game::Session::kPlayer;
-    view.day = 412;
+    view.day = 411;  // the world froze on the day it ended
     view.outcome.ended = true;
     view.outcome.day = 411;
     view.outcome.founder = founder;
@@ -832,6 +834,38 @@ TEST_CASE("The end record says how the game ended for the player", "[trace][spec
     }
 }
 
+TEST_CASE("A trace holds one end record for each game", "[trace][spec010]") {
+    // The client writes the end record when the game ends, when the game is
+    // replaced and when it closes, whichever comes first: the writer keeps
+    // the later ones out.
+    const sim::CompanyView ended = endedView(game::Session::kPlayer, sim::ProgramResult::Founded);
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    const auto ends = [&] { return linesWith(out.str(), R"("t":"end")").size(); };
+    trace.newGame(1, test::setup(), 0, "test");
+
+    trace.end(ended.day, ended);
+    REQUIRE(ends() == 1);
+    trace.end(ended.day, ended);
+    trace.end(ended.day);
+    CHECK(ends() == 1);
+    CHECK(linesWith(out.str(), "\"outcome\"").size() == 1);
+
+    // A new game is another game, with its own end.
+    trace.newGame(2, test::setup(), 0, "test");
+    trace.end(7);
+    trace.end(7, ended);
+    CHECK(ends() == 2);
+    CHECK(linesWith(out.str(), "\"outcome\"").size() == 1);  // closed while being played
+
+    // So is a game taken up again from a save.
+    trace.loaded(3, "old.dcsave", 0);
+    trace.end(ended.day, ended);
+    trace.end(ended.day, ended);
+    CHECK(ends() == 3);
+    CHECK(linesWith(out.str(), "\"outcome\"").size() == 2);
+}
+
 TEST_CASE("End records read back with and without an outcome", "[trace][spec010]") {
     game::TraceRecord record;
     std::string error;
@@ -891,7 +925,7 @@ std::vector<std::uint8_t> saveWithFoundingInReach(const sim::Content& content, s
     sim::Company& player = state.companies[game::Session::kPlayer.index()];
     const std::size_t last = content.program.stages.size() - 1;
     player.programStage = static_cast<std::uint32_t>(last);
-    player.programStageDays.assign(last, 0);
+    player.programStageDays.assign(last, 1);
     for (const sim::ProgramStage& stage : content.program.stages) {
         player.completedTechs.push_back(stage.research);
     }

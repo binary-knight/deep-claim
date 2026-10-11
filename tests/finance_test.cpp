@@ -328,9 +328,13 @@ TEST_CASE("Program state and the outcome survive save and load and are part of t
     edited.companies[0].programDelivered[0] = 1'234;
     edited.companies[0].programDelivered[2] = 50;
     edited.companies[1].programStage = 3;
-    edited.companies[1].programStageDays = {3, 5, 9};
+    edited.companies[1].programStageDays = {3, 5, 10};
+    // A stage complete has its research (the fixture's techs 2, 3 and 4).
+    edited.companies[0].completedTechs = {sim::TechId(2), sim::TechId(3)};
+    edited.companies[1].completedTechs = {sim::TechId(2), sim::TechId(3), sim::TechId(4)};
+    // The world froze on the day the program was founded.
     edited.outcome.ended = 1;
-    edited.outcome.day = 9;
+    edited.outcome.day = edited.day;
     edited.outcome.founder = kRival;
     edited.outcome.results = {sim::ProgramResult::LesserPartner, sim::ProgramResult::Founded};
     sim::Simulation original(content, 4, test::setup());
@@ -344,9 +348,9 @@ TEST_CASE("Program state and the outcome survive save and load and are part of t
     CHECK(loaded.companies[1].programStage == 3);
     CHECK(loaded.companies[1].programDelivered == edited.companies[1].programDelivered);
     CHECK(loaded.companies[0].programStageDays == std::vector<sim::Day>{4, 7});
-    CHECK(loaded.companies[1].programStageDays == std::vector<sim::Day>{3, 5, 9});
+    CHECK(loaded.companies[1].programStageDays == std::vector<sim::Day>{3, 5, 10});
     CHECK(loaded.outcome.ended == 1);
-    CHECK(loaded.outcome.day == 9);
+    CHECK(loaded.outcome.day == 10);
     CHECK(loaded.outcome.founder == kRival);
     CHECK(loaded.outcome.results == edited.outcome.results);
     CHECK(restored.stateHash() == original.stateHash());
@@ -385,11 +389,17 @@ TEST_CASE("Saves with impossible program state are rejected", "[finance][spec010
 
     // The stage counts stages complete: none to all of them, never more.
     // Each stage complete has its day (tests/program_test.cpp covers those).
-    const auto atStage = [](sim::Company& c, std::uint32_t stage) {
+    // and its research (the fixture's techs 2, 3 and 4, one per stage).
+    const auto atStage = [&](sim::Company& c, std::uint32_t stage) {
         c.programStage = stage;
-        c.programStageDays.assign(stage, 0);
+        c.programStageDays.assign(stage, 1);
+        for (std::uint32_t s = 0; s < stage && s < stages; ++s) {
+            c.completedTechs.push_back(content.program.stages[s].research);
+        }
     };
-    CHECK(loads([&](sim::Company& c) { atStage(c, stages); }));
+    // Every stage but the last: all of them would have founded the program
+    // (tests/program_test.cpp covers a save against the ending it claims).
+    CHECK(loads([&](sim::Company& c) { atStage(c, stages - 1); }));
     CHECK_FALSE(loads([&](sim::Company& c) { atStage(c, stages + 1); }));
 
     // One delivery figure per resource.
@@ -448,12 +458,34 @@ TEST_CASE("A program with no stages accepts only an untouched company",
 
 TEST_CASE("Saves with an impossible outcome are rejected", "[finance][spec010][save]") {
     using Result = sim::ProgramResult;
-    const sim::Content content = test::makeContent();
+    // The shape of an outcome. The companies are put where the outcome says
+    // they are, so that only its shape is in question here: a save checked
+    // against the ending it claims is covered in tests/program_test.cpp.
+    constexpr sim::Day kToday = 20;
+    sim::Content content = test::makeContent();
+    content.program.deadlineDay = kToday;  // the day a deadline loss is dated
     sim::Simulation simulation(content, 1, test::setup());
-    simulation.tick(20);
+    simulation.tick(kToday);
+    const auto withStages = [&](sim::Company& company, std::uint32_t stages, sim::Day lastDay) {
+        company.programStage = stages;
+        company.programStageDays.assign(stages, 1);
+        for (std::uint32_t s = 0; s < stages; ++s) {
+            company.completedTechs.push_back(content.program.stages[s].research);
+        }
+        if (stages != 0) {
+            company.programStageDays.back() = lastDay;
+        }
+    };
     const auto loads = [&](std::uint8_t ended, sim::Day day, sim::CompanyId founder,
                            std::vector<Result> results) {
         sim::WorldState edited = simulation.state();
+        for (std::size_t c = 0; c < edited.companies.size() && c < results.size(); ++c) {
+            if (results[c] == Result::Founded) {
+                withStages(edited.companies[c], 3, std::min(day, kToday));
+            } else if (results[c] == Result::LesserPartner) {
+                withStages(edited.companies[c], 2, 1);
+            }
+        }
         edited.outcome.ended = ended;
         edited.outcome.day = day;
         edited.outcome.founder = founder;
@@ -463,6 +495,7 @@ TEST_CASE("Saves with an impossible outcome are rejected", "[finance][spec010][s
     };
     const sim::CompanyId nobody;
     const sim::Day today = simulation.state().day;
+    REQUIRE(today == kToday);
 
     // A game in progress: no day, no founder, no results.
     CHECK(loads(0, 0, nobody, {Result::None, Result::None}));
@@ -473,35 +506,37 @@ TEST_CASE("Saves with an impossible outcome are rejected", "[finance][spec010][s
     CHECK_FALSE(loads(0, 0, nobody, {Result::LesserPartner, Result::None}));
 
     // Every ending the rules allow.
-    CHECK(loads(1, 5, kPlayer, {Result::Founded, Result::Lost}));
-    CHECK(loads(1, 5, kRival, {Result::LesserPartner, Result::Founded}));
-    CHECK(loads(1, 5, kRival, {Result::Lost, Result::Founded}));
+    CHECK(loads(1, today, kPlayer, {Result::Founded, Result::Lost}));
+    CHECK(loads(1, today, kRival, {Result::LesserPartner, Result::Founded}));
+    CHECK(loads(1, today, kRival, {Result::Lost, Result::Founded}));
     CHECK(loads(1, today, nobody, {Result::Lost, Result::Lost}));
 
-    // The flag is 0 or 1, and an ended game says when: a day that has been
-    // played, never day 0 and never one still to come.
-    CHECK_FALSE(loads(2, 5, kPlayer, {Result::Founded, Result::Lost}));
+    // The flag is 0 or 1, and an ended game says when: the day the world
+    // froze on, never day 0, an earlier day or one still to come.
+    CHECK_FALSE(loads(2, today, kPlayer, {Result::Founded, Result::Lost}));
     CHECK_FALSE(loads(1, 0, kPlayer, {Result::Founded, Result::Lost}));
+    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Founded, Result::Lost}));
+    CHECK_FALSE(loads(1, today - 1, nobody, {Result::Lost, Result::Lost}));
     CHECK_FALSE(loads(1, today + 1, kPlayer, {Result::Founded, Result::Lost}));
 
     // One result per company, each a result that exists.
-    CHECK_FALSE(loads(1, 5, nobody, {Result::Lost}));
-    CHECK_FALSE(loads(1, 5, nobody, {Result::Lost, Result::Lost, Result::Lost}));
-    CHECK_FALSE(loads(1, 5, nobody, {}));
+    CHECK_FALSE(loads(1, today, nobody, {Result::Lost}));
+    CHECK_FALSE(loads(1, today, nobody, {Result::Lost, Result::Lost, Result::Lost}));
+    CHECK_FALSE(loads(1, today, nobody, {}));
     CHECK_FALSE(loads(0, 0, nobody, {Result::None}));
     // A result past the last one is what a corrupt save would carry.
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
-    CHECK_FALSE(loads(1, 5, nobody, {Result::Lost, static_cast<Result>(4)}));
+    CHECK_FALSE(loads(1, today, nobody, {Result::Lost, static_cast<Result>(4)}));
 
     // Once the game has ended every company has a result.
-    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Founded, Result::None}));
-    CHECK_FALSE(loads(1, 5, nobody, {Result::None, Result::Lost}));
+    CHECK_FALSE(loads(1, today, kPlayer, {Result::Founded, Result::None}));
+    CHECK_FALSE(loads(1, today, nobody, {Result::None, Result::Lost}));
 
     // The founder is a company, the one whose result is "founded", and the
     // only one.
-    CHECK_FALSE(loads(1, 5, sim::CompanyId(2), {Result::Lost, Result::Lost}));
-    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Lost, Result::Founded}));
-    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Lost, Result::Lost}));
-    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Founded, Result::Founded}));
-    CHECK_FALSE(loads(1, 5, nobody, {Result::Founded, Result::Lost}));
+    CHECK_FALSE(loads(1, today, sim::CompanyId(2), {Result::Lost, Result::Lost}));
+    CHECK_FALSE(loads(1, today, kPlayer, {Result::Lost, Result::Founded}));
+    CHECK_FALSE(loads(1, today, kPlayer, {Result::Lost, Result::Lost}));
+    CHECK_FALSE(loads(1, today, kPlayer, {Result::Founded, Result::Founded}));
+    CHECK_FALSE(loads(1, today, nobody, {Result::Founded, Result::Lost}));
 }
