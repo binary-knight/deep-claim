@@ -3,6 +3,7 @@
 #include "sim/fixed.h"
 #include "sim/money.h"
 #include "sim/simulation.h"
+#include "sim/types.h"
 #include "sim/world_state.h"
 #include "sim/worldgen.h"
 
@@ -11,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -22,7 +24,7 @@ TEST_CASE("Shipped data files load cleanly", "[content][data]") {
     const sim::Content& c = *result.content;
 
     CHECK(c.resources.size() == 4);
-    CHECK(c.techs.size() == 10);
+    CHECK(c.techs.size() == 13);  // ten improvements and the three stage projects (spec 010)
     CHECK(c.regions.size() == 3);
     CHECK(c.events.size() == 4);
 
@@ -35,6 +37,41 @@ TEST_CASE("Shipped data files load cleanly", "[content][data]") {
     CHECK(c.findResource("lithium").valid());
     CHECK(c.resources[c.findResource("lithium").index()].unlockedBy ==
           c.findTech("lithium_processing"));
+}
+
+TEST_CASE("Shipped research tree holds the three program stage projects",
+          "[content][data][spec010]") {
+    // Spec 010, step 1: each stage of the program needs its own research
+    // project, and a project cannot start before the stage ahead of it is
+    // complete. The projects change nothing by themselves, so they carry no
+    // effects. Costs and durations are provisional until the race is tuned.
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& c = *result.content;
+
+    struct StageProject {
+        std::string_view id;
+        std::uint32_t requiresStage;
+        std::int64_t cost;
+        sim::Day durationDays;
+    };
+    constexpr std::array<StageProject, 3> kProjects = {{
+        {"program_stage_1", 0, 2'000'000, 240},
+        {"program_stage_2", 1, 6'000'000, 360},
+        {"program_stage_3", 2, 12'000'000, 480},
+    }};
+    for (const StageProject& project : kProjects) {
+        INFO(project.id);
+        const sim::TechId id = c.findTech(project.id);
+        REQUIRE(id.valid());
+        const sim::TechDef& tech = c.techs[id.index()];
+        CHECK(tech.requiresProgramStage == project.requiresStage);
+        CHECK(tech.cost == sim::Money::fromUnits(project.cost));
+        CHECK(tech.durationDays == project.durationDays);
+        CHECK(tech.effects.empty());
+        CHECK(tech.prerequisites.empty());
+    }
 }
 
 TEST_CASE("Shipped ores break even at the chosen share of base price", "[content][data][spec008]") {

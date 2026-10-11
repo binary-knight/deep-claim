@@ -180,6 +180,12 @@ tech.bulk_logistics.name	Bulk Logistics
 tech.bulk_logistics.description	Rail sidings and covered stockpiles keep the weather off the pile. Storage costs drop by 40%.
 tech.lithium_processing.name	Lithium Processing
 tech.lithium_processing.description	A concentrator plant turns raw lithium ore into saleable concentrate. Without one in place, lithium cannot be mined or sold.
+tech.program_stage_1.name	Program stage one: launch site
+tech.program_stage_1.description	The engineering work for a launch site, needed before the first stage of the program can be completed.
+tech.program_stage_2.name	Program stage two: launch vehicle
+tech.program_stage_2.description	The design of a launch vehicle, needed before the second stage of the program can be completed.
+tech.program_stage_3.name	Program stage three: deep space payload
+tech.program_stage_3.description	The design of a deep-space payload, needed before the third stage of the program can be completed.
 notice.idle_mine_warning	The mine on {plot} ran all month with nothing it can extract. It still costs full opex; mothball it or research what it needs.
 notice.mine_found_nothing	No ore the crew can work on {plot}. The mine stands idle.
 ui.days_in	in {days} days
