@@ -5,6 +5,12 @@ length and failure; see Decisions at the end). It sets what to build after
 spec 007 and in what order. Each system still gets its own spec, and the
 numbers belong there.
 
+**Superseded in part, 2026-10-11.** `docs/design/core-loop.md` changes the
+order and the centre of gravity: the goal (system 7) comes first as a
+deadline, a race and a space program that consumes goods; processing moves
+from "later" to the middle of the game; systems 1 and 2 become parts of
+that loop. The diagnosis and the four pillars below still stand.
+
 ## Why this document exists
 
 The owner's direction (`DOMAIN.md`): build the whole Earth mining game

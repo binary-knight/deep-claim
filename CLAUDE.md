@@ -53,7 +53,7 @@ assumption you will regret.
 - **Plan first.** Plan before coding and wait for the owner's approval. A spec must be approved before it is built.
 - **Ask before** adding a dependency or changing the architecture.
 - **Decisions** are put to the owner as multiple-choice prompts with a recommendation.
-- **Earth first.** Build the Earth mining game until it is fun, challenging and strategic. Do not draft space, asteroid, conflict or multiplayer designs, and do not park Earth problems for a later phase (see `DOMAIN.md`, "What Deep Claim Is Not").
+- **Earth first.** Build the Earth game until it is fun, challenging and strategic. Its premise and goal are in `DOMAIN.md` and `docs/design/core-loop.md` (a deadline, a race, a space program built from what the company makes). Do not design in detail what lies beyond founding the program (space operations, the endings, conflict, multiplayer), and do not park Earth problems for a later phase (see `DOMAIN.md`, "What Deep Claim Is Not").
 - **Determinism is non-negotiable.** No wall clock, no floating point in sim state, seeded streams only. A change to sim state moves the golden hash once, with the reason recorded in `docs/DESIGN.md`.
 - **Rules live in the sim** (R-001). **Tunable numbers live in `data/*.json`** with the reasoning in the spec (R-003).
 - **Prose.** Text the code shows the player goes in `data/strings.json` (R-002). Draft it plainly, then polish it with the agy CLI through `tools/prose/polish.sh`; numbers, units, names and `{placeholders}` must survive unchanged. See `tools/prose/README.md`.

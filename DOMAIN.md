@@ -14,12 +14,27 @@ Deep Claim (working title) is a single-player management game for desktop
 computers in which the player runs a mining company: buying land at auction,
 surveying it, building mines, selling ore into moving markets, borrowing,
 researching, and competing with AI-run rival companies. It belongs to the
-business-simulation ("tycoon") genre of PC games. The long-term vision is a
-deep but approachable simulation, easy to learn and hard to master, that
-begins with mining on Earth and grows, once the player is rich enough, into
-a space program and asteroid mining, with military and espionage rivalry
-between companies. Only the Earth game is being built now. [README.md;
-docs/DESIGN.md "Architecture split"; owner, 2026-10-10]
+business-simulation ("tycoon") genre of PC games, with production chains in
+the manner of Factorio or Satisfactory (plants as nodes with flows between
+them, not machines laid out on a floor).
+
+The premise, set by the owner on 2026-10-11: the world is dying and
+humanity has a deadline, its cause unclear at the start and revealed by
+play. Mining companies old and new race to build the capital, the
+materials and the manufactured components for a space program that offers
+a way out. The player starts one of them. A game covers the last decades
+before the deadline. If a rival's program succeeds first, the world is
+saved on the rival's terms; if nobody's does, everyone loses. More than one
+way out exists (carrying biological humanity elsewhere, or digitising
+minds), and which the player reaches depends on how they played. Running
+through it is the question of what human and artificial consciousness are,
+and whether humanity treats AI as subjugated or as a partner.
+
+The long-term vision is a deep but approachable simulation, easy to learn
+and hard to master, with military and espionage rivalry between companies.
+The build order is still Earth first. [README.md; docs/DESIGN.md
+"Architecture split"; docs/design/core-loop.md; owner, 2026-10-10 and
+2026-10-11]
 
 ---
 
@@ -37,6 +52,16 @@ another AI. Until this is solved on Earth, the game is a working simulation
 without a strategy game on top of it. [docs/playtests/2026-10-10.md findings
 2 to 4; docs/specs/006-balance.md "Goal"; owner direction 2026-10-10 in
 docs/HANDOFF.md]
+
+Playtest 4 (2026-10-11) showed that tuning the market cannot fix this by
+itself: spec 008 made the squeeze real but the player's own mine flooded
+its market and no mine could be run at a profit, and a deeper market only
+brings back the game that cannot be lost. The owner's verdict: nothing
+stops a profitable player from sitting still for ever, so there is "no
+tension, no real reason to play or complexity". The answer adopted is the
+core loop in `docs/design/core-loop.md`: a deadline, a race, and a program
+that consumes what the company can make, so that money is a means and
+standing still loses. [docs/playtests/2026-10-11.md; docs/design/core-loop.md]
 
 ---
 
@@ -154,12 +179,14 @@ Most of these are boundaries of order, not of ambition: the long-term game
 is larger than what is being built now, and the sequence is deliberate.
 [owner, 2026-10-10]
 
-- **Not a space game yet.** The whole Earth mining game comes first and must
-  be fun, challenging, rewarding and hard to put down on its own. Space is
-  the late game the player earns: once they have amassed enormous wealth they
-  slowly build a space program, with asteroid mining as the eventual goal.
-  No space or asteroid design is drafted until the Earth game holds up, and
-  no Earth problem is parked for a space phase.
+- **Not a space game yet.** The Earth game comes first and must be fun,
+  challenging, rewarding and hard to put down on its own. Its goal is now
+  set: found the space program before the deadline and before the rivals,
+  by building the capital, materials and components it needs. The story's
+  later chapters (launchers in use, mining beyond Earth, the research toward
+  a way out, the endings, the AI relationship) are part of the premise but
+  are not designed in detail until the Earth loop holds up in play, and no
+  Earth problem is parked for a later phase.
 - **Not multiplayer yet.** Today the game is single-player and offline
   against AI-run companies. Play against other people is a future aim, so
   nothing should be built that makes it impossible (the deterministic,
@@ -171,8 +198,13 @@ is larger than what is being built now, and the sequence is deliberate.
 - **Not yet a deep geological, engineering or systems simulation.** That
   depth is where the game is headed: relatively complex underneath, with a
   gentle learning curve. Today deposits are tonnages, a mine is one unit per
-  plot and there is no logistics map. Depth is added where it creates
-  decisions, never as detail for its own sake.
+  plot and there is no logistics map. Processing and manufacturing chains
+  are the next depth to be added; crews and equipment follow as numbers per
+  site, not named staff or individual machines. Depth is added where it
+  creates decisions, never as detail for its own sake.
+- **Not a factory-layout game.** Production is plants with capacity and
+  flows between them, sited in regions. The player does not place machines
+  or belts on a floor. [owner, 2026-10-11]
 - **Never hard to learn.** Easy to learn, hard to master. A system the player
   cannot grasp from the screen in front of them is out of scope however
   realistic it is.
