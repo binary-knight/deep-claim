@@ -103,6 +103,16 @@ launcher() {
 }
 launcher "Play.bat" ""
 launcher "Play (Deck size).bat" " --deck"
+# For when the game will not start: runs it in the console window and keeps
+# what it prints in log.txt beside the game.
+printf '@echo off\r\nset "DEEP_CLAIM_PLAYTEST=%%~dp0playtest"\r\n"%%~dp0deep_claim.exe" > "%%~dp0log.txt" 2>&1\r\necho Exit code %%errorlevel%% >> "%%~dp0log.txt"\r\ntype "%%~dp0log.txt"\r\npause\r\n' \
+    > "$share/Play (with log).bat"
+
+# A zip carries no Unix permissions, and a Linux file share will not let
+# Windows run a program or load a DLL that is not marked executable.
+chmod a+rx "$share"/*.exe "$share"/*.dll "$share"/*.bat
+chmod -R a+rX "$share"
+chmod a+rwx "$share/playtest"
 
 echo
 echo "Ready in $share: $(describe)"
