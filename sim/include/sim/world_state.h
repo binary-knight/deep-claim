@@ -77,6 +77,9 @@ struct Company {
     // program is complete).
     std::uint32_t programStage = 0;
     std::vector<std::int64_t> programDelivered;
+    // The day each stage was completed, oldest first: one entry per stage
+    // complete, so programStage of them.
+    std::vector<Day> programStageDays;
 };
 
 // One commodity market per resource. Everything here is public.

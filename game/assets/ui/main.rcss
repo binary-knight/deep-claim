@@ -434,8 +434,11 @@ td.act .chip { margin-left: 4dp; }
 .prices .pr { display: flex; flex-direction: row; align-items: center; margin-bottom: 10dp; }
 .prices .pr .nm { display: block; flex: 1 1 0; width: 60dp; margin-right: 10dp; font-weight: 600; white-space: nowrap; overflow: hidden; }
 .prices .pr .nm .sub { font-weight: 400; font-family: "JetBrains Mono"; }
-.prices .pr price-chart { display: block; width: 90dp; height: 26dp; margin-right: 10dp; }
-.prices .pr .num { display: block; width: 72dp; white-space: nowrap; text-align: right; }
+/* The price is exact to the cent (spec 010 BR-014): "$140,000.00", the most
+   the price cap lets lithium reach, is 88dp. The chart gives up the 16dp, so
+   a resource's name keeps the room it had. */
+.prices .pr price-chart { display: block; width: 74dp; height: 26dp; margin-right: 10dp; }
+.prices .pr .num { display: block; width: 88dp; white-space: nowrap; text-align: right; }
 .prices .pr .num .sub { font-family: "JetBrains Mono"; }
 price-chart.table { display: block; width: 150dp; height: 34dp; }
 price-chart.big { display: block; width: 100%; height: 170dp; margin-bottom: 8dp; }
@@ -512,6 +515,9 @@ body.deck #pausemenu { width: 300dp; }
 body.deck th.w-res { width: 200dp; }
 body.deck th.w-chart { width: 120dp; }
 body.deck price-chart.table { width: 120dp; }
+/* Exact prices (spec 010 BR-014): at this frame's 14dp the base line under
+   a price is 8dp a character, and "base $14,000.00, x10.00" is 184dp. */
+body.deck th.w-price { width: 184dp; }
 /* The mine figures (spec 008) sit under the output and want the room: in
    this frame the dashboard's area drops under the region, as it stands on
    the Plots tab. A 12-character figure is 96dp here and must fit the Output

@@ -324,9 +324,11 @@ TEST_CASE("Program state and the outcome survive save and load and are part of t
     fresh.tick(10);
     sim::WorldState edited = fresh.state();
     edited.companies[0].programStage = 2;
+    edited.companies[0].programStageDays = {4, 7};
     edited.companies[0].programDelivered[0] = 1'234;
     edited.companies[0].programDelivered[2] = 50;
     edited.companies[1].programStage = 3;
+    edited.companies[1].programStageDays = {3, 5, 9};
     edited.outcome.ended = 1;
     edited.outcome.day = 9;
     edited.outcome.founder = kRival;
@@ -341,6 +343,8 @@ TEST_CASE("Program state and the outcome survive save and load and are part of t
     CHECK(loaded.companies[0].programDelivered == edited.companies[0].programDelivered);
     CHECK(loaded.companies[1].programStage == 3);
     CHECK(loaded.companies[1].programDelivered == edited.companies[1].programDelivered);
+    CHECK(loaded.companies[0].programStageDays == std::vector<sim::Day>{4, 7});
+    CHECK(loaded.companies[1].programStageDays == std::vector<sim::Day>{3, 5, 9});
     CHECK(loaded.outcome.ended == 1);
     CHECK(loaded.outcome.day == 9);
     CHECK(loaded.outcome.founder == kRival);
@@ -357,6 +361,7 @@ TEST_CASE("Program state and the outcome survive save and load and are part of t
     CHECK(hashWith([](sim::WorldState&) {}) == hash);
     CHECK(hashWith([](sim::WorldState& s) { s.companies[0].programStage = 1; }) != hash);
     CHECK(hashWith([](sim::WorldState& s) { s.companies[0].programDelivered[0] += 1; }) != hash);
+    CHECK(hashWith([](sim::WorldState& s) { s.companies[0].programStageDays[0] += 1; }) != hash);
     CHECK(hashWith([](sim::WorldState& s) { s.outcome.ended = 0; }) != hash);
     CHECK(hashWith([](sim::WorldState& s) { s.outcome.day += 1; }) != hash);
     CHECK(hashWith([](sim::WorldState& s) { s.outcome.founder = kPlayer; }) != hash);
@@ -379,8 +384,13 @@ TEST_CASE("Saves with impossible program state are rejected", "[finance][spec010
     CHECK(loads([](sim::Company&) {}));
 
     // The stage counts stages complete: none to all of them, never more.
-    CHECK(loads([&](sim::Company& c) { c.programStage = stages; }));
-    CHECK_FALSE(loads([&](sim::Company& c) { c.programStage = stages + 1; }));
+    // Each stage complete has its day (tests/program_test.cpp covers those).
+    const auto atStage = [](sim::Company& c, std::uint32_t stage) {
+        c.programStage = stage;
+        c.programStageDays.assign(stage, 0);
+    };
+    CHECK(loads([&](sim::Company& c) { atStage(c, stages); }));
+    CHECK_FALSE(loads([&](sim::Company& c) { atStage(c, stages + 1); }));
 
     // One delivery figure per resource.
     CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered.push_back(0); }));
@@ -396,9 +406,9 @@ TEST_CASE("Saves with impossible program state are rejected", "[finance][spec010
 
     // The need is the current stage's: stage 2 wants 2,000 and 200 of
     // resource 1, and resource 2 not at all.
-    const auto atStageTwo = [](std::int64_t first, std::int64_t second, std::int64_t third) {
+    const auto atStageTwo = [&](std::int64_t first, std::int64_t second, std::int64_t third) {
         return [=](sim::Company& c) {
-            c.programStage = 1;
+            atStage(c, 1);
             c.programDelivered[0] = first;
             c.programDelivered[1] = second;
             c.programDelivered[2] = third;
@@ -411,7 +421,7 @@ TEST_CASE("Saves with impossible program state are rejected", "[finance][spec010
 
     // A finished program holds no deliveries.
     CHECK_FALSE(loads([&](sim::Company& c) {
-        c.programStage = stages;
+        atStage(c, stages);
         c.programDelivered[0] = 1;
     }));
 }
@@ -429,7 +439,10 @@ TEST_CASE("A program with no stages accepts only an untouched company",
         return scratch.load(sim::saveGame(edited, {}, sim::hashContent(content)));
     };
     CHECK(loads([](sim::Company&) {}));
-    CHECK_FALSE(loads([](sim::Company& c) { c.programStage = 1; }));
+    CHECK_FALSE(loads([](sim::Company& c) {
+        c.programStage = 1;
+        c.programStageDays.assign(1, 0);
+    }));
     CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered[0] = 1; }));
 }
 

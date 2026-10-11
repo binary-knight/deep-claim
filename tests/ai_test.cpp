@@ -254,6 +254,31 @@ TEST_CASE("A company with no mine buys on the first-mine terms", "[ai]") {
 
 namespace {
 
+// The orders the AI gives for a hand-built view. The sim's views say which
+// projects are open (CompanyView::researchOpen, from sim::researchOpenTo);
+// a view built by hand is given the same marks here, from what it holds:
+// a project not known and not in progress, its prerequisites known and the
+// stages it waits for complete.
+std::vector<sim::Command> decideFor(const sim::Content& content, sim::CompanyView view) {
+    const auto known = [&](sim::TechId tech) {
+        return std::find(view.completedTechs.begin(), view.completedTechs.end(), tech) !=
+               view.completedTechs.end();
+    };
+    view.researchOpen.assign(content.techs.size(), 0);
+    for (std::uint32_t t = 0; t < content.techs.size(); ++t) {
+        const sim::TechDef& def = content.techs[t];
+        const bool researching = view.activeResearch && view.activeResearch->tech == sim::TechId(t);
+        const bool open = !known(sim::TechId(t)) && !researching &&
+                          std::all_of(def.prerequisites.begin(), def.prerequisites.end(), known) &&
+                          def.requiresProgramStage <= view.program.stagesCompleted;
+        view.researchOpen[t] = open ? 1 : 0;
+    }
+    sim::HeuristicController ai(content);
+    std::vector<sim::Command> out;
+    ai.decide(view, out);
+    return out;
+}
+
 // A hand-built view for the rival: one listed plot at an ask of 1M with a
 // 2M mine quote, surveyed at `tonnes` of iron, and cash for anything. In the
 // fixture iron sells at 60 and a mine costs 8,000 a day for 400 t, so every
@@ -306,9 +331,7 @@ sim::CompanyView prospectView(const sim::Content& content, std::int64_t tonnes, 
 }
 
 bool bids(const sim::Content& content, const sim::CompanyView& view) {
-    sim::HeuristicController ai(content);
-    std::vector<sim::Command> out;
-    ai.decide(view, out);
+    const std::vector<sim::Command> out = decideFor(content, view);
     return std::any_of(out.begin(), out.end(), [](const sim::Command& command) {
         return std::holds_alternative<sim::BidOnPlot>(command);
     });
@@ -578,9 +601,7 @@ sim::CompanyView mineOwnerView(const sim::Content& content, sim::MineState state
 // The run flag of the order the AI gives its one mine: 0 to idle it, 1 to
 // reopen it, nothing when it leaves the mine alone.
 std::optional<std::uint8_t> mineOrder(const sim::Content& content, const sim::CompanyView& view) {
-    sim::HeuristicController ai(content);
-    std::vector<sim::Command> out;
-    ai.decide(view, out);
+    const std::vector<sim::Command> out = decideFor(content, view);
     std::optional<std::uint8_t> order;
     for (const sim::Command& command : out) {
         if (const auto* set = std::get_if<sim::SetMineState>(&command)) {
@@ -755,10 +776,7 @@ sim::CompanyView racerView(const sim::Content& content, std::uint32_t index,
 }
 
 std::vector<sim::Command> ordersFor(const sim::Content& content, const sim::CompanyView& view) {
-    sim::HeuristicController ai(content);
-    std::vector<sim::Command> out;
-    ai.decide(view, out);
-    return out;
+    return decideFor(content, view);
 }
 
 // Tonnes of `resource` in the orders of type Order (SellOre or
@@ -1201,6 +1219,7 @@ TEST_CASE("The view offers an unlocking project only when its program stage is r
 
     sim::WorldState advanced = simulation.state();
     advanced.companies[0].programStage = 1;
+    advanced.companies[0].programStageDays.assign(1, 0);
     REQUIRE(simulation.load(sim::saveGame(advanced, {}, sim::hashContent(content))));
     CHECK(simulation.view(sim::CompanyId(0)).unlockReady[kLithium.index()] == 1);
 }

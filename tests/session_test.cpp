@@ -176,6 +176,41 @@ TEST_CASE("Money and tonnage parsers are strict and exact", "[session][format]")
     CHECK(money == sim::Money::fromCents(123'456'789));
 }
 
+// A price per tonne is a threshold the player sells against (spec 008, spec
+// 010 BR-014): every dollar and cent, never abbreviated as formatMoney does.
+TEST_CASE("An exact price writes every dollar and cent", "[session][format]") {
+    SECTION("cents are always two digits") {
+        CHECK(game::exactPrice(sim::Money::fromCents(4'120)) == "$41.20");
+        CHECK(game::exactPrice(sim::Money::fromCents(5)) == "$0.05");
+        CHECK(game::exactPrice(sim::Money::fromCents(99)) == "$0.99");
+        CHECK(game::exactPrice(sim::Money::fromUnits(90)) == "$90.00");
+    }
+    SECTION("thousands are separated, from one thousand up") {
+        CHECK(game::exactPrice(sim::Money::fromCents(99'999)) == "$999.99");
+        CHECK(game::exactPrice(sim::Money::fromCents(100'000)) == "$1,000.00");
+        CHECK(game::exactPrice(sim::Money::fromUnits(1'430)) == "$1,430.00");
+        CHECK(game::exactPrice(sim::Money::fromCents(4'461'323)) == "$44,613.23");
+        CHECK(game::exactPrice(sim::Money::fromCents(14'000'000)) == "$140,000.00");
+    }
+    SECTION("a million and above keeps every group") {
+        CHECK(game::exactPrice(sim::Money::fromUnits(1'000'000)) == "$1,000,000.00");
+        CHECK(game::exactPrice(sim::Money::fromCents(123'456'789)) == "$1,234,567.89");
+        CHECK(game::exactPrice(sim::Money::fromCents(100'000'000'001LL)) == "$1,000,000,000.01");
+    }
+    SECTION("zero") {
+        CHECK(game::exactPrice(sim::Money::zero()) == "$0.00");
+    }
+    SECTION("a negative amount has its sign before the dollar sign") {
+        CHECK(game::exactPrice(sim::Money::fromCents(-5)) == "-$0.05");
+        CHECK(game::exactPrice(sim::Money::fromUnits(-1'430)) == "-$1,430.00");
+        CHECK(game::exactPrice(sim::Money::fromCents(-123'456'789)) == "-$1,234,567.89");
+    }
+    SECTION("where formatMoney abbreviates, the exact price does not") {
+        CHECK(game::formatMoney(sim::Money::fromUnits(1'430)) == "$1.4k");
+        CHECK(game::exactPrice(sim::Money::fromUnits(1'430)) == "$1,430.00");
+    }
+}
+
 TEST_CASE("Auto-pause stops the clock on a configured notice and not on others", "[session]") {
     const sim::Content content = test::makeContent();
     game::Session session(content, 1, test::setup());
@@ -1459,6 +1494,7 @@ sim::WorldState raceWorld(const sim::Content& content) {
 // goods delivered and the cash at hand.
 void putStageInReach(const sim::Content& content, sim::Company& company, std::uint32_t stage) {
     company.programStage = stage;
+    company.programStageDays.assign(stage, 0);
     for (std::uint32_t s = 0; s <= stage; ++s) {
         company.completedTechs.push_back(content.program.stages[s].research);
     }
@@ -1552,9 +1588,11 @@ TEST_CASE("The session stops on the day the rival founds the program", "[session
 
     SECTION("with the player two stages in, a lesser partner") {
         world.companies[game::Session::kPlayer.index()].programStage = 2;
+        world.companies[game::Session::kPlayer.index()].programStageDays.assign(2, 0);
     }
     SECTION("with the player behind, lost") {
         world.companies[game::Session::kPlayer.index()].programStage = 1;
+        world.companies[game::Session::kPlayer.index()].programStageDays.assign(1, 0);
     }
     const bool partner = world.companies[game::Session::kPlayer.index()].programStage == 2;
     std::ostringstream out;
@@ -1668,6 +1706,7 @@ TEST_CASE("The end record of a session's trace carries the outcome", "[session][
     sim::WorldState world = raceWorld(content);
     putStageInReach(content, world.companies[kRival.index()], 2);
     world.companies[game::Session::kPlayer.index()].programStage = 2;
+    world.companies[game::Session::kPlayer.index()].programStageDays.assign(2, 0);
     std::ostringstream out;
     game::TraceWriter trace(out);
     game::Session session(content, 7, test::setup());

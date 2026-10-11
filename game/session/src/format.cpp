@@ -201,4 +201,11 @@ std::string exactMoney(sim::Money amount) {
     return std::format("{}{}.{:02}", cents < 0 ? "-" : "", magnitude / 100, magnitude % 100);
 }
 
+std::string exactPrice(sim::Money amount) {
+    const std::int64_t cents = amount.cents();
+    const std::int64_t magnitude = cents < 0 ? -cents : cents;
+    return std::format("{}${}.{:02}", cents < 0 ? "-" : "", withThousands(magnitude / 100),
+                       magnitude % 100);
+}
+
 }  // namespace game

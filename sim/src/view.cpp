@@ -282,6 +282,16 @@ void addResearchAndEvents(const WorldState& state, CompanyId viewer, CompanyView
     }
 }
 
+// Which projects the viewer may start, money and a busy lab aside: the sim's
+// own answer, project by project, so nothing downstream restates the rule.
+void addResearchOpen(const Content& content, const WorldState& state, CompanyId viewer,
+                     CompanyView& view) {
+    view.researchOpen.assign(content.techs.size(), 0);
+    for (std::uint32_t t = 0; t < content.techs.size(); ++t) {
+        view.researchOpen[t] = researchOpenTo(content, state, viewer, TechId(t)) ? 1 : 0;
+    }
+}
+
 // How close the viewer is to each resource it cannot mine yet.
 void addUnlockProgress(const Content& content, const WorldState& state, CompanyId viewer,
                        CompanyView& view) {
@@ -300,17 +310,8 @@ void addUnlockProgress(const Content& content, const WorldState& state, CompanyI
             view.unlockDaysRemaining[r] = completes >= state.day ? completes - state.day + 1 : 1;
             continue;
         }
-        const TechDef& def = content.techs[tech.index()];
-        // As the sim's own test for starting a project, money aside: its
-        // prerequisites done and the program stages it waits for complete
-        // (spec 010, BR-004).
-        const bool ready =
-            def.requiresProgramStage <= self.programStage &&
-            std::ranges::all_of(def.prerequisites, [&](TechId p) {
-                return std::find(self.completedTechs.begin(), self.completedTechs.end(), p) !=
-                       self.completedTechs.end();
-            });
-        view.unlockReady[r] = ready ? 1 : 0;
+        // The sim's own test for starting a project, money aside.
+        view.unlockReady[r] = researchOpenTo(content, state, viewer, tech) ? 1 : 0;
     }
 }
 
@@ -368,6 +369,7 @@ void addOwnProgram(const Content& content, const WorldState& state, CompanyId vi
     const ProgramStage* stage = currentProgramStage(content, self);
     view.program.stagesCompleted = self.programStage;
     view.program.complete = stage == nullptr;
+    view.program.stageDays = self.programStageDays;
     if (stage == nullptr) {
         return;
     }
@@ -405,6 +407,7 @@ void addRace(const Content& content, const WorldState& state, CompanyView& view)
         entry.company = id;
         entry.stagesCompleted = state.companies[i].programStage;
         entry.complete = stage == nullptr;
+        entry.stageDays = state.companies[i].programStageDays;
         entry.progressPermille = programProgressPermille(content, state, id);
         entry.researchState = programResearchState(state, id, stage);
         view.programs.push_back(entry);
@@ -445,6 +448,7 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     addMarkets(content, state, view);
     addOwnLoans(state, company, view);
     addResearchAndEvents(state, company, view);
+    addResearchOpen(content, state, company, view);
     addUnlockProgress(content, state, company, view);
     view.unlistedPlotsRemaining =
         static_cast<std::uint32_t>(state.listingQueue.size()) - state.nextListing;

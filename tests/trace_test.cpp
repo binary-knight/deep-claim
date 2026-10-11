@@ -891,6 +891,7 @@ std::vector<std::uint8_t> saveWithFoundingInReach(const sim::Content& content, s
     sim::Company& player = state.companies[game::Session::kPlayer.index()];
     const std::size_t last = content.program.stages.size() - 1;
     player.programStage = static_cast<std::uint32_t>(last);
+    player.programStageDays.assign(last, 0);
     for (const sim::ProgramStage& stage : content.program.stages) {
         player.completedTechs.push_back(stage.research);
     }

@@ -3184,6 +3184,204 @@ int onItsOwnApp(const ProbeHost& host, const char* name, const sim::Content& con
     return exitCode;
 }
 
+// ---- exact prices on the Market tab (spec 010 BR-014) ----
+
+constexpr int kPricesFailure = 13;
+constexpr int kDashboardTab = 0;
+constexpr int kMarketTab = 2;
+// The widest price with five digits of dollars, "$99,999.99": lithium trades
+// in the tens of thousands, well above the price it opens at.
+constexpr std::int64_t kWidePriceCents = 9'999'999;
+constexpr std::int64_t kHeldBackTonnes = 1'000;
+
+// The shipped content with every ore at that price. A new game opens at the
+// base price, so the Market tab writes it as today's price and as the base.
+sim::Content widePriceContent(const sim::Content& shipped) {
+    sim::Content content = shipped;
+    for (sim::ResourceDef& ore : content.resources) {
+        ore.basePrice = sim::Money::fromCents(kWidePriceCents);
+    }
+    return content;
+}
+
+// What `e` reads, as wide as its own font writes it on one line.
+float lineWidth(Rml::Element* e, std::string& line) {
+    line = visibleText(e);
+    return static_cast<float>(Rml::ElementUtilities::GetStringWidth(e, line));
+}
+
+// The Market tab's Price cells, row by row: today's price and the base price
+// to the cent (game::exactPrice), as the mine's break-even price is written.
+// Returns the least room a cell has to spare beside its widest line (below
+// zero when a line does not fit), which is reported and judged by the caller.
+float checkMarketPriceCells(Rml::Context& context, game::App& app, const std::string& where,
+                            Checks& checks) {
+    const sim::Content& content = app.session().content();
+    const sim::CompanyView& view = app.session().view();
+    Rml::Element* pane = context.GetDocument(0)->GetElementById("content");
+    const std::vector<Rml::Element*> rows = visibleElements(pane, "tr", "row");
+    checks.same(std::format("{}: resource rows", where), rows.size(), view.markets.size());
+    float spare = -kNothingMeasured;
+    float room = 0.0F;
+    float widest = 0.0F;
+    std::string widestLine;
+    for (std::size_t r = 0; r < rows.size() && r < view.markets.size(); ++r) {
+        const sim::MarketView& market = view.markets[r];
+        // The row's right-aligned cells are the price and the stock.
+        const std::vector<Rml::Element*> cells = visibleElements(rows[r], "td", "n");
+        const std::vector<Rml::Element*> lines =
+            cells.empty() ? cells : visibleElements(cells.front(), "span", "num");
+        checks.same(std::format("{}: lines in the price cell of row {}", where, r), lines.size(),
+                    std::size_t{2});
+        if (lines.size() != 2) {
+            continue;
+        }
+        checks.same(std::format("{}: price of {}", where, content.resources[r].name),
+                    visibleText(lines[0]), game::exactPrice(market.price) + "/t");
+        checks.same(
+            std::format("{}: base price of {}", where, content.resources[r].name),
+            visibleText(lines[1]),
+            game::text(content, "ui.market_base",
+                       {{"price", game::exactPrice(market.basePrice)},
+                        {"ratio", game::formatRatio(market.price.ratioTo(market.basePrice))}}));
+        room = cells.front()->GetBox().GetSize(Rml::BoxArea::Content).x;
+        for (Rml::Element* line : lines) {
+            std::string text;
+            const float width = lineWidth(line, text);
+            if (width > widest) {
+                widest = width;
+                widestLine = text;
+            }
+            spare = std::min(spare, room - width);
+        }
+    }
+    std::cout << std::format(
+        "    {}: Price cell {:.1f}dp, widest line \"{}\" {:.1f}dp, {:.1f}dp to spare\n", where,
+        room, widestLine, widest, spare);
+    return spare;
+}
+
+// The floor price of a standing order is a price per tonne too: exact in
+// the row's summary and in the selected resource's panel. And nothing on
+// the tab is a price per tonne in formatMoney's short form ("$1.4k/t").
+void checkMarketFloor(Rml::Context& context, game::App& app, const std::string& where,
+                      const sim::SetSellPolicy& order, Checks& checks) {
+    const sim::Content& content = app.session().content();
+    Rml::Element* pane = context.GetDocument(0)->GetElementById("content");
+    const std::string reserve = game::formatTonnes(order.reserveTonnes);
+    const std::string floor = game::exactPrice(order.floorPrice);
+    const std::string summary =
+        game::text(content, "ui.policy_auto_keep_floor", {{"reserve", reserve}, {"price", floor}});
+    checks.same(std::format("{}: rows reading \"{}\"", where, summary),
+                visibleElements(pane, "span", "sub", summary).size(), std::size_t{1});
+    const std::string panel =
+        game::text(content, "ui.policy_summary_on",
+                   {{"resource", content.resources[order.resource.index()].name},
+                    {"reserve", reserve},
+                    {"price", floor}});
+    checks.same(std::format("{}: panels reading \"{}\"", where, panel),
+                visibleElements(pane, "p", "text2", panel).size(), std::size_t{1});
+    const std::string all = visibleText(pane);
+    for (const char* shortForm : {"k/t", "M/t", "B/t"}) {
+        checks.expect(
+            all.find(shortForm) == std::string::npos,
+            std::format("{}: a price per tonne is abbreviated (\"{}\")", where, shortForm));
+    }
+}
+
+// The Dashboard's Prices panel beside the mines' break-even prices: the same
+// exact price, with the ratio to base under it. Reports the room the price
+// leaves the resource's name, which the panel clips.
+void checkDashboardPrices(Rml::Context& context, game::App& app, const std::string& where,
+                          Checks& checks) {
+    const sim::Content& content = app.session().content();
+    const sim::CompanyView& view = app.session().view();
+    Rml::Element* pane = context.GetDocument(0)->GetElementById("content");
+    const std::vector<Rml::Element*> rows = visibleElements(pane, "div", "pr");
+    checks.same(std::format("{}: rows in the Prices panel", where), rows.size(),
+                view.markets.size());
+    float tightest = -kNothingMeasured;
+    std::string clipped;
+    for (std::size_t r = 0; r < rows.size() && r < view.markets.size(); ++r) {
+        const sim::MarketView& market = view.markets[r];
+        const std::vector<Rml::Element*> figures = visibleElements(rows[r], "span", "num");
+        const std::vector<Rml::Element*> names = visibleElements(rows[r], "span", "nm");
+        if (figures.empty() || names.empty()) {
+            checks.expect(false, std::format("{}: row {} has no name or no price", where, r));
+            continue;
+        }
+        checks.same(std::format("{}: price of {}", where, content.resources[r].name),
+                    visibleText(figures.front()),
+                    game::exactPrice(market.price) +
+                        game::formatRatio(market.price.ratioTo(market.basePrice)));
+        const float room = names.front()->GetBox().GetSize(Rml::BoxArea::Content).x;
+        const auto width = static_cast<float>(
+            Rml::ElementUtilities::GetStringWidth(names.front(), content.resources[r].name));
+        if (room - width < tightest) {
+            tightest = room - width;
+            clipped = content.resources[r].name;
+        }
+    }
+    std::cout << std::format("    {}: Prices panel, \"{}\" has {:.1f}dp to spare in its name\n",
+                             where, clipped, tightest);
+}
+
+// The Dashboard and the Market tab in both frames, with a standing order
+// waiting that holds ore back under a floor at today's price: the row's
+// longest summary, and the chip beside it. Returns 0, the layout's failure
+// or this stage's own.
+int probeExactPrices(Rml::Context& context, game::App& app, LoggingSystem& system,
+                     const char* label) {
+    Checks checks("PRICES");
+    const sim::CompanyView& view = app.session().view();
+    const int selected = app.model().selected_resource;
+    if (selected < 0 || static_cast<std::size_t>(selected) >= view.markets.size()) {
+        std::cout << "SCENARIO (prices): the Market tab has no resource selected\n";
+        return kScenarioFailure;
+    }
+    const sim::ResourceId resource(static_cast<std::uint32_t>(selected));
+    const sim::SetSellPolicy order{
+        {}, resource, 1, kHeldBackTonnes, view.markets[resource.index()].price};
+    app.session().submit(order);
+    app.refreshNow();
+    bool laidOut = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== {}, frame {}x{}{} ==\n", label, frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        const std::string size = std::format("{}x{}", frame.width, frame.height);
+        laidOut = probeTab(context, app, system, frame, kDashboardTab, Popover::None) && laidOut;
+        checkDashboardPrices(context, app, "dashboard " + size, checks);
+        laidOut = probeTab(context, app, system, frame, kMarketTab, Popover::None) && laidOut;
+        const float spare = checkMarketPriceCells(context, app, "market " + size, checks);
+        checks.expect(spare >= -kSpillTolerance,
+                      std::format("market {}: a price runs {:.1f}dp past its cell", size, -spare));
+        checkMarketFloor(context, app, "market " + size, order, checks);
+    }
+    if (!checks.ok()) {
+        return kPricesFailure;
+    }
+    return laidOut ? 0 : kLayoutFailure;
+}
+
+// Exact prices on the shipped game and on the copy with the widest ones,
+// each on an app and a context of its own.
+int probePrices(const ProbeHost& host, const sim::Content& shipped) {
+    const int opening =
+        onItsOwnApp(host, "prices", shipped, [&](Rml::Context& context, game::App& app) {
+            return probeExactPrices(context, app, *host.system, "exact prices, new game");
+        });
+    const sim::Content wide = widePriceContent(shipped);
+    const int widest =
+        onItsOwnApp(host, "wideprices", wide, [&](Rml::Context& context, game::App& app) {
+            return probeExactPrices(context, app, *host.system,
+                                    "exact prices, every ore at $99,999.99");
+        });
+    return widest != 0 ? widest : opening;
+}
+
 // ---- the endings the player does not win (spec 010) ----
 
 // The rival's race, on a copy the heuristic rival finishes within the
@@ -3473,6 +3671,10 @@ int run(std::span<char*> args) {
     Rml::RemoveContext("losing");
     const ProbeHost host{services.get(), &system, {assets, playtest}};
     if (const int code = probeProgramCopies(host, *loaded.content, dug); code != 0) {
+        exitCode = code;
+    }
+    // Exact prices on the Market tab and the Dashboard (spec 010 BR-014).
+    if (const int code = probePrices(host, *loaded.content); code != 0) {
         exitCode = code;
     }
     // The endings the player does not win (spec 010).

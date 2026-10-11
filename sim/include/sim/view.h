@@ -134,6 +134,9 @@ struct ProgramView {
     std::uint32_t stagesCompleted = 0;
     // Every stage is completed. Also true when the content has no program.
     bool complete = false;
+    // The day each completed stage was completed, oldest first
+    // (Company::programStageDays): stagesCompleted of them.
+    std::vector<Day> stageDays;
     std::optional<ProgramStageView> stage;  // the current stage; empty when complete
 };
 
@@ -143,6 +146,8 @@ struct ProgramPublicView {
     CompanyId company;
     std::uint32_t stagesCompleted = 0;
     bool complete = false;
+    // The day it completed each stage, oldest first: stagesCompleted of them.
+    std::vector<Day> stageDays;
     // Toward its current stage (sim::programProgressPermille); 1000 when
     // the program is complete.
     std::int64_t progressPermille = 0;
@@ -244,6 +249,12 @@ struct CompanyView {
     std::vector<Money> autoSoldProceeds;
     std::vector<TechId> completedTechs;  // own research only
     std::optional<ResearchView> activeResearch;
+    // Per research project, indexed by TechId: 1 when the viewer may start it,
+    // money and a busy lab aside (sim::researchOpenTo): it is not known and
+    // not in progress, its prerequisites are complete and so are the program
+    // stages it waits for. A StartResearch order for a project marked 0 is
+    // always refused.
+    std::vector<std::uint8_t> researchOpen;
     // Per resource (spec 004), for ore the viewer cannot mine yet: days until
     // the viewer's research in progress unlocks it (0 when that tech is not
     // being researched), and whether the unlocking tech could be started now

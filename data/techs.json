@@ -135,24 +135,24 @@
   },
   {
     "id": "program_stage_1",
-    "cost": 2000000,
-    "duration_days": 240,
+    "cost": 3000000,
+    "duration_days": 480,
     "requires_program_stage": 0,
     "requires": [],
     "effects": []
   },
   {
     "id": "program_stage_2",
-    "cost": 6000000,
-    "duration_days": 360,
+    "cost": 10000000,
+    "duration_days": 1680,
     "requires_program_stage": 1,
     "requires": [],
     "effects": []
   },
   {
     "id": "program_stage_3",
-    "cost": 12000000,
-    "duration_days": 480,
+    "cost": 25000000,
+    "duration_days": 2520,
     "requires_program_stage": 2,
     "requires": [],
     "effects": []

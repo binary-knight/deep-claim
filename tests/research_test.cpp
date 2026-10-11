@@ -245,6 +245,7 @@ sim::WorldState worldWithStages(const sim::Content& content, std::uint32_t stage
     sim::WorldState state = sim::Simulation(content, 1, test::setup()).state();
     state.companies[0].cash = sim::Money::fromUnits(100'000'000);
     state.companies[0].programStage = stagesDone;
+    state.companies[0].programStageDays.assign(stagesDone, 0);
     return state;
 }
 
@@ -330,4 +331,153 @@ TEST_CASE("Ordinary projects ignore the program and are not announced", "[resear
     sim::TickReport report;
     sim::applyStartResearch(bare, state, sim::StartResearch{kPlayer, kStageOneProject}, report);
     CHECK(noticesOfKind(report, sim::NoticeKind::ProgramResearchStarted).empty());
+}
+
+// Which projects a company may start, money and a busy lab aside. One rule
+// in the sim (sim::researchOpenTo): StartResearch is validated by it, the
+// view carries its answer per project, and the client and the competitor
+// read the view instead of restating it.
+
+namespace {
+
+const sim::TechId kSeismic(0);
+const sim::TechId kLithiumProcessing(1);  // needs kSeismic
+
+using Open = std::vector<std::uint8_t>;
+
+// The view's flags for `viewer`, checked on the way against the rule's own
+// function and against what a StartResearch order would be told. A project
+// marked closed is always refused; one marked open is accepted by a company
+// with an idle lab and the money.
+Open openProjects(const sim::Content& content, const sim::Simulation& simulation,
+                  sim::CompanyId viewer) {
+    const sim::WorldState& state = simulation.state();
+    const sim::CompanyView view = simulation.view(viewer);
+    REQUIRE(view.researchOpen.size() == content.techs.size());
+    sim::WorldState rich = state;
+    rich.companies[viewer.index()].cash = sim::Money::fromUnits(100'000'000);
+    const bool idle = !sim::activeResearch(state, viewer).has_value();
+    for (std::uint32_t t = 0; t < content.techs.size(); ++t) {
+        const sim::TechId tech(t);
+        const bool open = view.researchOpen[t] != 0;
+        CHECK(open == sim::researchOpenTo(content, state, viewer, tech));
+        const auto refused =
+            sim::validateStartResearch(content, rich, sim::StartResearch{viewer, tech});
+        if (!open) {
+            CHECK(refused.has_value());
+            CHECK(refused != sim::RejectReason::InsufficientFunds);
+        } else if (idle) {
+            CHECK(refused == std::nullopt);
+        } else {
+            CHECK(refused == sim::RejectReason::ResearchBusy);
+        }
+    }
+    return view.researchOpen;
+}
+
+}  // namespace
+
+TEST_CASE("The view marks a project open once its prerequisites are complete",
+          "[research][view][open]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+
+    // A new game: the project with no prerequisite and the first stage's
+    // project are open; the others wait.
+    CHECK(openProjects(content, simulation, kPlayer) == Open{1, 0, 1, 0, 0});
+    CHECK(openProjects(content, simulation, kRival) == Open{1, 0, 1, 0, 0});
+    // Money aside: a company that cannot pay for a project still has it open.
+    sim::WorldState broke = simulation.state();
+    broke.companies[0].cash = sim::Money::fromUnits(1);
+    CHECK(sim::researchOpenTo(content, broke, kPlayer, kStageOneProject));
+    CHECK(
+        sim::validateStartResearch(content, broke, sim::StartResearch{kPlayer, kStageOneProject}) ==
+        sim::RejectReason::InsufficientFunds);
+
+    // In progress: not open to start again. A busy lab aside: the other open
+    // project is still marked open. The rival's flags are its own.
+    simulation.submit(sim::StartResearch{kPlayer, kSeismic});
+    simulation.tick();
+    REQUIRE(simulation.view(kPlayer).activeResearch.has_value());
+    CHECK(openProjects(content, simulation, kPlayer) == Open{0, 0, 1, 0, 0});
+    CHECK(openProjects(content, simulation, kRival) == Open{1, 0, 1, 0, 0});
+
+    // Completed: not open, and the project that needed it now is.
+    simulation.tick(content.techs[kSeismic.index()].durationDays + 1);
+    REQUIRE_FALSE(simulation.view(kPlayer).activeResearch.has_value());
+    CHECK(openProjects(content, simulation, kPlayer) == Open{0, 1, 1, 0, 0});
+    CHECK(openProjects(content, simulation, kRival) == Open{1, 0, 1, 0, 0});
+}
+
+TEST_CASE("The view marks a stage's project open once the stage before it is complete",
+          "[research][view][open]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(2);
+    CHECK(openProjects(content, simulation, kPlayer)[kStageTwoProject.index()] == 0);
+
+    // The player completes stage 1 by order: its project done, its iron
+    // delivered, the cash at hand.
+    sim::WorldState state = simulation.state();
+    sim::Company& player = state.companies[0];
+    player.completedTechs.push_back(kStageOneProject);
+    player.programDelivered[0] = content.program.stages[0].requirements[0].tonnes;
+    player.cash = sim::Money::fromUnits(100'000'000);
+    REQUIRE(simulation.load(sim::saveGame(state, {}, sim::hashContent(content))));
+    CHECK(openProjects(content, simulation, kPlayer) == Open{1, 0, 0, 0, 0});
+    simulation.submit(sim::CompleteProgramStage{kPlayer});
+    simulation.tick();
+    REQUIRE(simulation.state().companies[0].programStage == 1);
+
+    CHECK(openProjects(content, simulation, kPlayer) == Open{1, 0, 0, 1, 0});
+    // The rival has completed nothing.
+    CHECK(openProjects(content, simulation, kRival) == Open{1, 0, 1, 0, 0});
+
+    // The stage's project in progress, then done: closed both times, and the
+    // third stage's project still waits for the second stage itself.
+    simulation.submit(sim::StartResearch{kPlayer, kStageTwoProject});
+    simulation.tick();
+    CHECK(openProjects(content, simulation, kPlayer) == Open{1, 0, 0, 0, 0});
+    simulation.tick(content.techs[kStageTwoProject.index()].durationDays + 1);
+    CHECK(openProjects(content, simulation, kPlayer) == Open{1, 0, 0, 0, 0});
+}
+
+TEST_CASE("No project is open to a bankrupt company or for an unknown id", "[research][open]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(2);
+    const sim::WorldState& fresh = simulation.state();
+    CHECK(sim::researchOpenTo(content, fresh, kPlayer, kSeismic));
+    CHECK_FALSE(sim::researchOpenTo(content, fresh, kPlayer, sim::TechId(99)));
+    CHECK_FALSE(sim::researchOpenTo(content, fresh, kPlayer, sim::TechId()));
+    CHECK_FALSE(sim::researchOpenTo(content, fresh, sim::CompanyId(9), kSeismic));
+    CHECK_FALSE(sim::researchOpenTo(content, fresh, sim::CompanyId(), kSeismic));
+
+    sim::WorldState state = fresh;
+    state.companies[0].bankrupt = 1;
+    state.companies[0].monthsInsolvent = content.balance.bankruptcyGraceMonths + 1;
+    state.companies[0].cash = sim::Money::fromUnits(-1);
+    REQUIRE(simulation.load(sim::saveGame(state, {}, sim::hashContent(content))));
+    CHECK(openProjects(content, simulation, kPlayer) == Open{0, 0, 0, 0, 0});
+    CHECK(openProjects(content, simulation, kRival) == Open{1, 0, 1, 0, 0});
+}
+
+TEST_CASE("A busy lab is still the reason given before what a project waits for",
+          "[research][open]") {
+    const sim::Content content = test::makeContent();
+    using R = sim::RejectReason;
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.submit(sim::StartResearch{kPlayer, kSeismic});
+    simulation.tick();
+    const auto start = [&](sim::TechId tech) {
+        return sim::validateStartResearch(content, simulation.state(),
+                                          sim::StartResearch{kPlayer, tech});
+    };
+    CHECK(start(kSeismic) == R::ResearchBusy);
+    CHECK(start(kLithiumProcessing) == R::ResearchBusy);
+    CHECK(start(kStageTwoProject) == R::ResearchBusy);
+    CHECK(start(sim::TechId(99)) == R::UnknownTech);
+    simulation.tick(content.techs[kSeismic.index()].durationDays + 1);
+    CHECK(start(kSeismic) == R::TechAlreadyKnown);
+    CHECK(start(kStageTwoProject) == R::TechNeedsProgramStage);
 }

@@ -342,25 +342,6 @@ std::string signedMoney(sim::Money amount) {
     return (amount >= sim::Money::zero() ? "+" : "") + formatMoney(amount);
 }
 
-}  // namespace
-
-std::string exactPrice(sim::Money amount) {
-    // exactMoney is "-1430.00": the sign, the dollars, a point and two cents.
-    std::string digits = exactMoney(amount);
-    const bool negative = digits.starts_with('-');
-    if (negative) {
-        digits.erase(0, 1);
-    }
-    constexpr std::size_t kCentsAndPoint = 3;
-    constexpr std::size_t kGroup = 3;
-    for (std::size_t at = digits.size() - kCentsAndPoint; at > kGroup; at -= kGroup) {
-        digits.insert(at - kGroup, ",");
-    }
-    return (negative ? "-$" : "$") + digits;
-}
-
-namespace {
-
 // What a mine earns a day and the price at which that is nothing (spec 008),
 // as the sim worked them out for the view: formatted here, never recomputed.
 // A mothballed mine leads with what it costs to keep, written as the loss it
@@ -1457,7 +1438,7 @@ std::string policySummary(const sim::Content& content, const sim::SellPolicy& po
     }
     return text(content, key,
                 {{"reserve", formatTonnes(policy.reserveTonnes)},
-                 {"price", formatMoney(policy.floorPrice)}});
+                 {"price", exactPrice(policy.floorPrice)}});
 }
 
 // A resource's standing order as it will stand once the waiting orders are
@@ -1487,12 +1468,14 @@ ResourceRow makeResourceRow(const sim::Content& content, const sim::CompanyView&
     ResourceRow row;
     row.index = static_cast<int>(r);
     row.name = content.resources[r].name;
-    row.price = formatMoney(market.price);
+    // Prices per tonne are exact wherever they are shown (spec 010 BR-014):
+    // the player compares them with a mine's break-even price, which is.
+    row.price = exactPrice(market.price);
     row.price_unit = row.price + "/t";
     row.ratio = formatRatio(market.price.ratioTo(market.basePrice));
     row.ratio_warn = market.price.ratioTo(market.basePrice) < sim::Fixed::fromRatio(7, 10);
     row.base_line = text(content, "ui.market_base",
-                         {{"price", formatMoney(market.basePrice)}, {"ratio", row.ratio}});
+                         {{"price", exactPrice(market.basePrice)}, {"ratio", row.ratio}});
     row.market_sub = text(content, "ui.market_sub",
                           {{"demand", formatTonnes(market.baseDemandTonnesPerDay)},
                            {"supply", formatTonnes(market.recentSupplyTonnesPerDay)}});
@@ -1540,7 +1523,7 @@ void fillResources(const Session& session, const Orders& orders, UiModel& model)
             text(content, policy.enabled != 0 ? "ui.policy_summary_on" : "ui.policy_summary_off",
                  {{"resource", content.resources[r].name},
                   {"reserve", formatTonnes(policy.reserveTonnes)},
-                  {"price", formatMoney(policy.floorPrice)}});
+                  {"price", exactPrice(policy.floorPrice)}});
         model.standing_title = std::format("Standing order · {}", content.resources[r].name);
         model.chart_title = std::format("{} · 360 days", content.resources[r].name);
         model.chart_note = text(content, "ui.chart_note",

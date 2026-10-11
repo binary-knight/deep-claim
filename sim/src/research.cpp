@@ -33,6 +33,44 @@ std::optional<std::uint32_t> programStageOf(const Content& content, TechId tech)
     return std::nullopt;
 }
 
+bool inProgress(const WorldState& state, CompanyId company, TechId tech) {
+    return std::ranges::any_of(state.research, [&](const Research& research) {
+        return research.company == company && research.tech == tech && research.complete == 0;
+    });
+}
+
+// Why the company may not start the project, money and a busy lab aside;
+// nothing when it may. The one test of that: researchOpenTo and
+// validateStartResearch both answer from it.
+std::optional<RejectReason> closedBy(const Content& content, const WorldState& state, CompanyId id,
+                                     TechId tech) {
+    if (!id.valid() || id.index() >= state.companies.size()) {
+        return RejectReason::UnknownCompany;
+    }
+    const Company& company = state.companies[id.index()];
+    if (company.bankrupt != 0) {
+        return RejectReason::CompanyBankrupt;
+    }
+    if (!tech.valid() || tech.index() >= content.techs.size()) {
+        return RejectReason::UnknownTech;
+    }
+    if (techCompleted(company, tech)) {
+        return RejectReason::TechAlreadyKnown;
+    }
+    // One project at a time, and this one is the one.
+    if (inProgress(state, id, tech)) {
+        return RejectReason::ResearchBusy;
+    }
+    if (!prerequisitesMet(content, company, tech)) {
+        return RejectReason::PrerequisitesMissing;
+    }
+    // A stage's project waits for the stages before it (spec 010, BR-004).
+    if (content.techs[tech.index()].requiresProgramStage > company.programStage) {
+        return RejectReason::TechNeedsProgramStage;
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 bool techCompleted(const Company& company, TechId tech) {
@@ -54,30 +92,27 @@ std::optional<ResearchId> activeResearch(const WorldState& state, CompanyId comp
     return std::nullopt;
 }
 
+bool researchOpenTo(const Content& content, const WorldState& state, CompanyId company,
+                    TechId tech) {
+    return !closedBy(content, state, company, tech);
+}
+
 std::optional<RejectReason> validateStartResearch(const Content& content, const WorldState& state,
                                                   const StartResearch& command) {
-    if (!command.company.valid() || command.company.index() >= state.companies.size()) {
-        return RejectReason::UnknownCompany;
-    }
-    const Company& company = state.companies[command.company.index()];
-    if (company.bankrupt != 0) {
-        return RejectReason::CompanyBankrupt;
-    }
-    if (!command.tech.valid() || command.tech.index() >= content.techs.size()) {
-        return RejectReason::UnknownTech;
-    }
-    if (techCompleted(company, command.tech)) {
-        return RejectReason::TechAlreadyKnown;
+    const std::optional<RejectReason> closed =
+        closedBy(content, state, command.company, command.tech);
+    // A busy lab is the reason given ahead of what the project itself still
+    // waits for, so those two step aside for it.
+    const bool waiting = closed == RejectReason::PrerequisitesMissing ||
+                         closed == RejectReason::TechNeedsProgramStage;
+    if (closed && !waiting) {
+        return closed;
     }
     if (activeResearch(state, command.company)) {
         return RejectReason::ResearchBusy;
     }
-    if (!prerequisitesMet(content, company, command.tech)) {
-        return RejectReason::PrerequisitesMissing;
-    }
-    // A stage's project waits for the stages before it (spec 010, BR-004).
-    if (content.techs[command.tech.index()].requiresProgramStage > company.programStage) {
-        return RejectReason::TechNeedsProgramStage;
+    if (closed) {
+        return closed;
     }
     if (content.techs[command.tech.index()].cost > availableCash(state, command.company)) {
         return RejectReason::InsufficientFunds;

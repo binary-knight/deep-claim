@@ -181,9 +181,11 @@ struct PlotPanel {
 struct ResourceRow {
     int index = 0;
     std::string name;
+    // Prices per tonne are exact to the cent (game::exactPrice), never
+    // abbreviated: "$1,430.00", not "$1.4k" (spec 010 BR-014).
     std::string price;       // "$37.41"
     std::string price_unit;  // "$37.41/t"
-    std::string base_line;   // "base $60.00 · x0.62"
+    std::string base_line;   // "base $60.00, x0.62"
     std::string market_sub;  // "demand 1,600 t/day · supply 1,704 t/day"
     std::string stock;       // "3,633 t"
     std::string stock_sub;   // "stock 3,633 t" (prices panel)
@@ -521,12 +523,6 @@ struct UiModel {
     std::string ui_mine_mothballed;       // "Mothballed"
     std::string ui_mine_if_reopened_key;  // "If reopened"
 };
-
-// A price per tonne as the player must be able to act on it: every dollar
-// and cent, with thousands separators, never abbreviated ("$1,430.00",
-// "$41.20", "-$0.05"). formatMoney rounds $1,430 to "$1.4k", which is no
-// use as a threshold.
-[[nodiscard]] std::string exactPrice(sim::Money amount);
 
 // Rebuilds every field of `model` from the session.
 void refreshModel(const Session& session, UiModel& model);

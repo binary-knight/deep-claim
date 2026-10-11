@@ -551,14 +551,10 @@ bool techKnown(const CompanyView& view, TechId id) {
            view.completedTechs.end();
 }
 
-// A project the sim would let the company start, money aside: not done, its
-// prerequisites done, and the program stages it waits for complete (spec
-// 010, BR-004).
-bool techStartable(const Content& content, const CompanyView& view, TechId id) {
-    const TechDef& def = content.techs[id.index()];
-    return !techKnown(view, id) &&
-           std::ranges::all_of(def.prerequisites, [&](TechId p) { return techKnown(view, p); }) &&
-           def.requiresProgramStage <= view.program.stagesCompleted;
+// A project the sim would let the company start, money aside: the sim's own
+// answer, read from the view (sim::researchOpenTo).
+bool techStartable(const CompanyView& view, TechId id) {
+    return view.researchOpen[id.index()] != 0;
 }
 
 // The cheapest project that can be started now on the way to `target`: the
@@ -577,7 +573,7 @@ std::optional<TechId> nextStepToward(const Content& content, const CompanyView& 
         }
         seen[id.index()] = 1;
         const TechDef& def = content.techs[id.index()];
-        if (!techStartable(content, view, id)) {
+        if (!techStartable(view, id)) {
             open.insert(open.end(), def.prerequisites.begin(), def.prerequisites.end());
             continue;
         }
@@ -623,7 +619,7 @@ std::optional<TechId> programResearchGoal(const Content& content, const CompanyV
     }
     const bool farEnough =
         Fixed::fromRatio(stage->progressPermille, 1000) >= content.ai.programResearchProgress;
-    if (farEnough && techStartable(content, view, stage->research)) {
+    if (farEnough && techStartable(view, stage->research)) {
         return stage->research;
     }
     return stepToLockedNeed(content, view, stage->index + 1, content.program.stages.size());
@@ -640,7 +636,7 @@ std::optional<TechId> ordinaryResearch(const Content& content, const CompanyView
     }
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
         const TechId id(i);
-        if (!techStartable(content, view, id) ||
+        if (!techStartable(view, id) ||
             content.techs[i].cost + content.ai.researchFloor / 2 > netCash) {
             continue;
         }

@@ -3,32 +3,32 @@
   "stages": [
     {
       "id": "stage_1",
-      "cost": 5000000,
+      "cost": 10000000,
       "research": "program_stage_1",
       "requires": [
-        { "resource": "iron", "tonnes": 60000 },
-        { "resource": "copper", "tonnes": 8000 }
+        { "resource": "iron", "tonnes": 150000 },
+        { "resource": "copper", "tonnes": 20000 }
       ]
     },
     {
       "id": "stage_2",
-      "cost": 15000000,
+      "cost": 60000000,
       "research": "program_stage_2",
       "requires": [
-        { "resource": "iron", "tonnes": 150000 },
-        { "resource": "copper", "tonnes": 20000 },
-        { "resource": "nickel", "tonnes": 6000 }
+        { "resource": "iron", "tonnes": 600000 },
+        { "resource": "copper", "tonnes": 80000 },
+        { "resource": "nickel", "tonnes": 20000 }
       ]
     },
     {
       "id": "stage_3",
-      "cost": 30000000,
+      "cost": 150000000,
       "research": "program_stage_3",
       "requires": [
-        { "resource": "iron", "tonnes": 200000 },
-        { "resource": "copper", "tonnes": 30000 },
-        { "resource": "nickel", "tonnes": 12000 },
-        { "resource": "lithium", "tonnes": 2000 }
+        { "resource": "iron", "tonnes": 800000 },
+        { "resource": "copper", "tonnes": 120000 },
+        { "resource": "nickel", "tonnes": 36000 },
+        { "resource": "lithium", "tonnes": 8000 }
       ]
     }
   ]

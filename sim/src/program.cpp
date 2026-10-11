@@ -160,6 +160,7 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
     company.cash -= stage.cost;
     std::ranges::fill(company.programDelivered, 0);
     ++company.programStage;
+    company.programStageDays.push_back(state.day);
     Notice notice =
         makeNotice(NoticeKind::ProgramStageComplete, command.company, PlotId(), stage.cost);
     notice.tonnes = company.programStage;

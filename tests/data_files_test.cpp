@@ -1,6 +1,7 @@
 // Loads the real data/ files so that a typo in game content fails CI.
 #include "sim/content.h"
 #include "sim/fixed.h"
+#include "sim/math.h"
 #include "sim/money.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
@@ -45,7 +46,10 @@ TEST_CASE("Shipped research tree holds the three program stage projects",
     // Spec 010, step 1: each stage of the program needs its own research
     // project, and a project cannot start before the stage ahead of it is
     // complete. The projects change nothing by themselves, so they carry no
-    // effects. Costs and durations are provisional until the race is tuned.
+    // effects. Costs and durations are the ones task 016 measured: the three
+    // projects run one after another for 4,680 days, which is what makes the
+    // race last into the second half of the game however many mines a company
+    // has (median founding day about 6,300 on seeds 1 to 100).
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
     INFO(content::formatErrors(result.errors));
     REQUIRE(result.ok());
@@ -58,9 +62,9 @@ TEST_CASE("Shipped research tree holds the three program stage projects",
         sim::Day durationDays;
     };
     constexpr std::array<StageProject, 3> kProjects = {{
-        {"program_stage_1", 0, 2'000'000, 240},
-        {"program_stage_2", 1, 6'000'000, 360},
-        {"program_stage_3", 2, 12'000'000, 480},
+        {"program_stage_1", 0, 3'000'000, 480},
+        {"program_stage_2", 1, 10'000'000, 1680},
+        {"program_stage_3", 2, 25'000'000, 2520},
     }};
     for (const StageProject& project : kProjects) {
         INFO(project.id);
@@ -75,13 +79,14 @@ TEST_CASE("Shipped research tree holds the three program stage projects",
     }
 }
 
-TEST_CASE("Shipped program has the deadline and the three provisional stages",
+TEST_CASE("Shipped program has the deadline and the three measured stages",
           "[content][data][spec010]") {
     // Spec 010, step 1 (BR-001, BR-002, AC-001): the race ends on day 10,800,
     // thirty game years in. Each stage needs cash, its own research project
     // and ore the company mined itself; only the third needs lithium, the ore
-    // behind research. The costs and tonnages are provisional until the race
-    // is tuned (task 016), so this pins what ships, not what the loader allows.
+    // behind research. The costs and tonnages are the ones task 016 measured
+    // against the deeper market, so this pins what ships, not what the loader
+    // allows.
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
     INFO(content::formatErrors(result.errors));
     REQUIRE(result.ok());
@@ -101,15 +106,15 @@ TEST_CASE("Shipped program has the deadline and the three provisional stages",
         std::vector<Need> needs;
     };
     const std::array<Stage, 3> kStages = {{
-        {"stage_1", 5'000'000, "program_stage_1", {{"iron", 60'000}, {"copper", 8'000}}},
+        {"stage_1", 10'000'000, "program_stage_1", {{"iron", 150'000}, {"copper", 20'000}}},
         {"stage_2",
-         15'000'000,
+         60'000'000,
          "program_stage_2",
-         {{"iron", 150'000}, {"copper", 20'000}, {"nickel", 6'000}}},
+         {{"iron", 600'000}, {"copper", 80'000}, {"nickel", 20'000}}},
         {"stage_3",
-         30'000'000,
+         150'000'000,
          "program_stage_3",
-         {{"iron", 200'000}, {"copper", 30'000}, {"nickel", 12'000}, {"lithium", 2'000}}},
+         {{"iron", 800'000}, {"copper", 120'000}, {"nickel", 36'000}, {"lithium", 8'000}}},
     }};
     REQUIRE(c.program.stages.size() == kStages.size());
     std::size_t i = 0;  // the stage's position, counting from zero
@@ -151,6 +156,35 @@ TEST_CASE("Shipped ores break even at the chosen share of base price", "[content
         const std::int64_t lowestTenths = resource.id == "lithium" ? 4 : 5;
         CHECK(share >= sim::Fixed::fromRatio(lowestTenths, 10));
         CHECK(share <= sim::Fixed::fromRatio(lowestTenths + 2, 10));
+    }
+}
+
+TEST_CASE("One standard mine moves its own price by six percent at most",
+          "[content][data][spec010]") {
+    // Spec 010, step 1 (BR-012), after playtest 4: a mine selling its base
+    // output into steady demand must not flood its own market. By the price
+    // rule (runMarkets) the price settles at base x (D / (D + q))^e, with D
+    // the ore's base demand, q one mine's base output and e the elasticity,
+    // so the mine takes 1 - (D / (D + q))^e off its own price. The aim is 5
+    // percent; the limit here is 6 so tuning has a little room. The shipped
+    // demand is 30 mines of iron, copper and nickel (4.8 percent at e = 1.5)
+    // and 40 of lithium (4.8 percent at e = 2). Provisional: step 4 tightens
+    // it to 3 percent (BR-021).
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    REQUIRE(result.ok());
+    const sim::Content& c = *result.content;
+    const sim::Fixed limit = sim::Fixed::fromRatio(6, 100);
+    for (const sim::ResourceDef& resource : c.resources) {
+        INFO(resource.id);
+        REQUIRE(resource.baseDemandTonnesPerDay > 0);
+        REQUIRE(resource.baseOutputTonnesPerDay > 0);
+        const sim::Fixed ratio = sim::Fixed::fromRatio(
+            resource.baseDemandTonnesPerDay,
+            resource.baseDemandTonnesPerDay + resource.baseOutputTonnesPerDay);
+        const sim::Fixed impact = sim::Fixed::one() - sim::fixedPow(ratio, resource.elasticity);
+        INFO("own-price impact of one mine " << sim::toString(impact));
+        CHECK(impact > sim::Fixed::zero());
+        CHECK(impact <= limit);
     }
 }
 

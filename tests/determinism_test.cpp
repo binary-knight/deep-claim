@@ -78,7 +78,11 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // Moved once for spec 010 step 1: every company gains its program stage
     // and deliveries, and the world gains an outcome. The mine field added
     // later in that step (lossClearDays) did not move it, as with spec 008.
-    constexpr std::uint64_t kGolden = 0x01906a0707315707ULL;
+    // Moved again in the same step, from 0x01906a0707315707: every company
+    // gains the list of days it completed its stages on (programStageDays).
+    // Nobody completes a stage here, so the list is hashed empty, by its
+    // length alone.
+    constexpr std::uint64_t kGolden = 0x059a7c79213dd307ULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
     simulation.tick(sim::kDaysPerYear);
@@ -112,7 +116,14 @@ TEST_CASE("Golden state hash of a played game is stable across platforms", "[det
     // the program and completes stages, so the game it plays here is a
     // different one. No saved field changed; kGolden above, where nobody
     // gives an order, did not move.
-    constexpr std::uint64_t kGoldenPlayed = 0x1d4743bc9b26a84fULL;
+    // Moved a fourth time in the same step, from 0x1d4743bc9b26a84f: every
+    // company gains the list of days it completed its stages on
+    // (programStageDays). With that field left out of the saved form the old
+    // value still held, so the fixture's game plays out as before. The same
+    // change gave the view a flag per research project (researchOpen) that
+    // the competitor reads in place of its own copy of the rule; that did
+    // not move the value.
+    constexpr std::uint64_t kGoldenPlayed = 0x41192679894c4afcULL;
     constexpr sim::Day kDays = sim::kDaysPerYear * 3;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());

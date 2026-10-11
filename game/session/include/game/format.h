@@ -36,6 +36,11 @@ std::string formatRatio(sim::Fixed ratio);
 [[nodiscard]] bool parseTonnes(std::string_view text, std::int64_t& out);
 // Exact text for an amount the player can submit unchanged: "1234567.89".
 [[nodiscard]] std::string exactMoney(sim::Money amount);
+// A price per tonne as the player must be able to act on it: every dollar
+// and cent, with thousands separators, never abbreviated ("$1,430.00",
+// "$41.20", "-$0.05"). formatMoney rounds $1,430 to "$1.4k", which is no
+// use as a threshold to sell against.
+[[nodiscard]] std::string exactPrice(sim::Money amount);
 
 // ---- the prose catalogue (spec 002) ----
 // Named substitution into a template from data/strings.json: every

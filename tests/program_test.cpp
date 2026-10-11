@@ -53,6 +53,13 @@ std::optional<R> complete(const sim::Content& content, const sim::WorldState& st
     return sim::validateCompleteProgramStage(content, state, {company});
 }
 
+// The company with `stages` stages complete, each on day 0: a save holds one
+// completion day per stage.
+void atStage(sim::Company& company, std::uint32_t stages) {
+    company.programStage = stages;
+    company.programStageDays.assign(stages, 0);
+}
+
 // Everything the company's current stage asks for, in place: research done,
 // goods delivered, and more cash than the cost.
 void makeStageReady(const sim::Content& content, sim::WorldState& state,
@@ -87,8 +94,8 @@ sim::WorldState racingState(const sim::Content& content, sim::Day days = kRaceDa
 // The company on its last stage with everything that stage asks for.
 void makeFinalStageReady(const sim::Content& content, sim::WorldState& state,
                          sim::CompanyId id = kPlayer) {
-    state.companies[id.index()].programStage =
-        static_cast<std::uint32_t>(content.program.stages.size() - 1);
+    atStage(state.companies[id.index()],
+            static_cast<std::uint32_t>(content.program.stages.size() - 1));
     makeStageReady(content, state, id);
 }
 
@@ -217,7 +224,7 @@ TEST_CASE("A delivery is rejected for each reason the rules give", "[program]") 
         CHECK(deliver(content, state, kIron, 2'000) == R::InsufficientInventory);
     }
     SECTION("a program that is complete") {
-        state.companies[0].programStage = 3;
+        atStage(state.companies[0], 3);
         CHECK(deliver(content, state, kIron, 100) == R::ProgramComplete);
         // Said before anything about the good or the quantity.
         CHECK(deliver(content, state, kCopper, 0) == R::ProgramComplete);
@@ -234,7 +241,7 @@ TEST_CASE("What the program needs changes with the stage", "[program]") {
     sim::WorldState state = freshState(content);
     state.companies[0].inventoryTonnes[kCopper.index()] = 300;
     CHECK(deliver(content, state, kCopper, 200) == R::ProgramNotNeeded);
-    state.companies[0].programStage = 1;
+    atStage(state.companies[0], 1);
     CHECK_FALSE(deliver(content, state, kCopper, 200));
     CHECK(deliver(content, state, kCopper, 201) == R::ProgramNotNeeded);
     // The rival is still on stage 1.
@@ -286,7 +293,7 @@ TEST_CASE("Completing a stage charges the cost once, clears deliveries and advan
 TEST_CASE("A stage cannot be completed without research, deliveries and cash", "[program]") {
     const sim::Content content = test::makeContent();
     sim::WorldState state = freshState(content);
-    state.companies[0].programStage = 1;  // 2,000 t iron, 200 t copper, 2M, tech 3
+    atStage(state.companies[0], 1);  // 2,000 t iron, 200 t copper, 2M, tech 3
     makeStageReady(content, state);
     REQUIRE_FALSE(complete(content, state));
     REQUIRE(sim::programStageReady(content, state, kPlayer));
@@ -340,7 +347,7 @@ TEST_CASE("A stage cannot be completed without research, deliveries and cash", "
         CHECK_FALSE(sim::programStageReady(content, state, kRival));
     }
     SECTION("a program that is complete") {
-        state.companies[0].programStage = 3;
+        atStage(state.companies[0], 3);
         state.companies[0].programDelivered.assign(content.resources.size(), 0);
         CHECK(complete(content, state) == R::ProgramComplete);
         CHECK_FALSE(sim::programStageReady(content, state, kPlayer));
@@ -392,7 +399,7 @@ TEST_CASE("Progress is the mean share of each requirement delivered", "[program]
 
     // Stage 2: each requirement counts by its own need, so 200 t of copper
     // is worth as much as 2,000 t of iron.
-    company.programStage = 1;
+    atStage(company, 1);
     company.programDelivered.assign(content.resources.size(), 0);
     company.programDelivered[kIron.index()] = 1'000;
     CHECK(sim::programProgressPermille(content, state, kPlayer) == 250);
@@ -406,7 +413,7 @@ TEST_CASE("Progress is the mean share of each requirement delivered", "[program]
     // Progress is about goods only: research and cash do not move it.
     CHECK_FALSE(sim::programStageReady(content, state, kPlayer));
 
-    company.programStage = 3;
+    atStage(company, 3);
     company.programDelivered.assign(content.resources.size(), 0);
     CHECK(sim::programProgressPermille(content, state, kPlayer) == 1'000);
     CHECK(sim::programProgressPermille(content, state, sim::CompanyId()) == 0);
@@ -490,17 +497,17 @@ TEST_CASE("When the rival founds the program the player is a lesser partner or h
     makeFinalStageReady(content, state, kRival);
     Result expected = Result::Lost;
     SECTION("two stages completed: a lesser partner") {
-        state.companies[0].programStage = 2;
+        atStage(state.companies[0], 2);
         expected = Result::LesserPartner;
     }
     SECTION("one stage completed: lost") {
-        state.companies[0].programStage = 1;
+        atStage(state.companies[0], 1);
     }
     SECTION("no stage completed: lost") {
-        state.companies[0].programStage = 0;
+        atStage(state.companies[0], 0);
     }
     SECTION("two stages completed but bankrupt: lost") {
-        state.companies[0].programStage = 2;
+        atStage(state.companies[0], 2);
         makeBankrupt(content, state, kPlayer);
     }
     sim::Simulation simulation(content, 1, test::setup());
@@ -526,8 +533,8 @@ TEST_CASE("The deadline ends the game with everyone lost when nobody has founded
     content.program.deadlineDay = kRaceDay + 5;
     sim::WorldState state = racingState(content);
     // Two stages count for nothing when nobody founds the program.
-    state.companies[0].programStage = 2;
-    state.companies[1].programStage = 2;
+    atStage(state.companies[0], 2);
+    atStage(state.companies[1], 2);
     sim::Simulation simulation(content, 1, test::setup());
     play(simulation, content, state);
 
@@ -586,7 +593,7 @@ TEST_CASE("A bankrupt rival does not end the game for the player", "[program][en
     sim::Content content = test::makeContent();
     content.program.deadlineDay = kRaceDay + 5;
     sim::WorldState state = racingState(content);
-    state.companies[1].programStage = 2;
+    atStage(state.companies[1], 2);
     makeBankrupt(content, state, kRival);
 
     SECTION("the survivor can still found the program") {
@@ -690,7 +697,7 @@ TEST_CASE("A last stage completed on the deadline day founds the program", "[pro
     sim::WorldState state = racingState(content);
     REQUIRE(state.day == content.program.deadlineDay);
     makeFinalStageReady(content, state);
-    state.companies[1].programStage = 2;
+    atStage(state.companies[1], 2);
     sim::Simulation simulation(content, 1, test::setup());
     play(simulation, content, state);
 
@@ -801,7 +808,7 @@ TEST_CASE("A save of an ended game loads and stays ended", "[program][ending]") 
     bool founded = false;
     SECTION("a founded program") {
         makeFinalStageReady(content, state, kRival);
-        state.companies[0].programStage = 2;
+        atStage(state.companies[0], 2);
         founded = true;
     }
     SECTION("a deadline passed") {}
@@ -904,12 +911,14 @@ void checkRaceView(const sim::Content& content, const sim::Simulation& simulatio
     CHECK(view.outcome.founder == state.outcome.founder);
     CHECK(view.outcome.results == state.outcome.results);
     checkOwnProgram(content, state, view);
+    CHECK(view.program.stageDays == state.companies[viewer.index()].programStageDays);
     REQUIRE(view.programs.size() == state.companies.size());
     for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
         const sim::CompanyId id(c);
         const sim::ProgramPublicView& entry = view.programs[c];
         CHECK(entry.company == id);
         CHECK(entry.stagesCompleted == state.companies[c].programStage);
+        CHECK(entry.stageDays == state.companies[c].programStageDays);
         CHECK(entry.complete == (state.companies[c].programStage >= content.program.stages.size()));
         CHECK(entry.progressPermille == sim::programProgressPermille(content, state, id));
         CHECK(entry.researchState == researchStateByRule(content, state, id));
@@ -1076,7 +1085,7 @@ TEST_CASE("The view shows how the game ended to both companies", "[program][view
 
     SECTION("the rival founds the program") {
         makeFinalStageReady(content, state, kRival);
-        state.companies[0].programStage = 2;
+        atStage(state.companies[0], 2);
         play(simulation, content, state);
         simulation.submit(sim::CompleteProgramStage{kRival});
         simulation.tick();
@@ -1122,4 +1131,163 @@ TEST_CASE("The view shows how the game ended to both companies", "[program][view
             CHECK(view.outcome.results == std::vector<Result>{Result::Lost, Result::Lost});
         }
     }
+}
+
+// The day each stage was completed (spec 010): the end screen shows it for
+// every company, so the sim keeps it rather than leaving the client to find
+// it in a log of notices that is capped and does not survive a load.
+
+namespace {
+
+// Gives the company what its current stage asks for and has it complete the
+// stage with an order applied on the simulation's current day, which is
+// returned. The simulation is a day further on afterwards.
+sim::Day completeStageToday(sim::Simulation& simulation, const sim::Content& content,
+                            sim::CompanyId id) {
+    sim::WorldState state = simulation.state();
+    makeStageReady(content, state, id);
+    play(simulation, content, state);
+    const sim::Day day = simulation.state().day;
+    simulation.submit(sim::CompleteProgramStage{id});
+    simulation.tick();
+    return day;
+}
+
+// A game in which the player has completed two stages and the rival one, on
+// days apart from one another.
+void playTwoStagesAndOne(sim::Simulation& simulation, const sim::Content& content) {
+    simulation.tick(kRaceDay);
+    completeStageToday(simulation, content, kPlayer);
+    simulation.tick(5);
+    completeStageToday(simulation, content, kRival);
+    simulation.tick(3);
+    completeStageToday(simulation, content, kPlayer);
+}
+
+}  // namespace
+
+TEST_CASE("A new company has completed no stage on any day", "[program][stage-days]") {
+    const sim::Content content = test::makeContent();
+    const sim::Simulation simulation(content, 1, test::setup());
+    for (const sim::Company& company : simulation.state().companies) {
+        CHECK(company.programStageDays.empty());
+    }
+    for (const sim::CompanyId viewer : {kPlayer, kRival}) {
+        const sim::CompanyView view = simulation.view(viewer);
+        CHECK(view.program.stageDays.empty());
+        CHECK(view.programs[0].stageDays.empty());
+        CHECK(view.programs[1].stageDays.empty());
+    }
+}
+
+TEST_CASE("Each company keeps the day it completed each stage", "[program][stage-days]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(kRaceDay);
+
+    // The player completes all three stages and the rival two, each on a day
+    // of its own; the player's third founds the program.
+    std::vector<sim::Day> player;
+    std::vector<sim::Day> rival;
+    player.push_back(completeStageToday(simulation, content, kPlayer));
+    simulation.tick(5);
+    rival.push_back(completeStageToday(simulation, content, kRival));
+    CHECK(simulation.state().companies[0].programStageDays == player);
+    CHECK(simulation.state().companies[1].programStageDays == rival);
+    simulation.tick(3);
+    player.push_back(completeStageToday(simulation, content, kPlayer));
+    rival.push_back(completeStageToday(simulation, content, kRival));
+    simulation.tick(7);
+    player.push_back(completeStageToday(simulation, content, kPlayer));
+
+    CHECK(player == std::vector<sim::Day>{kRaceDay, kRaceDay + 10, kRaceDay + 19});
+    CHECK(rival == std::vector<sim::Day>{kRaceDay + 6, kRaceDay + 11});
+    const sim::WorldState& state = simulation.state();
+    CHECK(state.companies[0].programStageDays == player);
+    CHECK(state.companies[1].programStageDays == rival);
+    REQUIRE(sim::gameEnded(state));
+    CHECK(state.outcome.day == player.back());
+
+    // Public, like the rest of the race: each company sees its own days and
+    // the other's.
+    checkBothRaceViews(content, simulation);
+    for (const sim::CompanyId viewer : {kPlayer, kRival}) {
+        const sim::CompanyView view = simulation.view(viewer);
+        CHECK(view.programs[0].stageDays == player);
+        CHECK(view.programs[1].stageDays == rival);
+    }
+    CHECK(simulation.view(kPlayer).program.stageDays == player);
+    CHECK(simulation.view(kRival).program.stageDays == rival);
+}
+
+TEST_CASE("Two stages completed on one day share that day", "[program][stage-days]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = racingState(content);
+    makeStageReady(content, state);
+    sim::TickReport report;
+    sim::applyCompleteProgramStage(content, state, {kPlayer}, report);
+    makeStageReady(content, state);
+    sim::applyCompleteProgramStage(content, state, {kPlayer}, report);
+    CHECK(state.companies[0].programStageDays == std::vector<sim::Day>{kRaceDay, kRaceDay});
+    CHECK(state.companies[1].programStageDays.empty());
+    CHECK(loadsBack(content, state));
+}
+
+TEST_CASE("Stage days come back from a save and are part of the hash", "[program][stage-days]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    playTwoStagesAndOne(simulation, content);
+    const std::vector<sim::Day> player{kRaceDay, kRaceDay + 10};
+    const std::vector<sim::Day> rival{kRaceDay + 6};
+    REQUIRE(simulation.state().companies[0].programStageDays == player);
+    REQUIRE(simulation.state().companies[1].programStageDays == rival);
+
+    sim::Simulation loaded(content, 2, test::setup());
+    REQUIRE(loaded.load(simulation.save()));
+    CHECK(loaded.state().companies[0].programStageDays == player);
+    CHECK(loaded.state().companies[1].programStageDays == rival);
+    CHECK(loaded.stateHash() == simulation.stateHash());
+    CHECK(loaded.view(kRival).programs[0].stageDays == player);
+    CHECK(loaded.view(kPlayer).programs[1].stageDays == rival);
+
+    // A stage completed on another day is another state.
+    sim::WorldState earlier = simulation.state();
+    earlier.companies[0].programStageDays[1] = kRaceDay + 9;
+    sim::Simulation other(content, 3, test::setup());
+    play(other, content, earlier);
+    CHECK(other.stateHash() != simulation.stateHash());
+}
+
+TEST_CASE("Saves with impossible stage days are rejected", "[program][stage-days][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    playTwoStagesAndOne(simulation, content);
+    const sim::Day today = simulation.state().day;
+    const auto loads = [&](const auto& edit) {
+        sim::WorldState edited = simulation.state();
+        edit(edited.companies[0].programStageDays);
+        return loadsBack(content, edited);
+    };
+    using Days = std::vector<sim::Day>;
+    CHECK(loads([](Days&) {}));
+
+    // One day for each stage complete: no fewer and no more.
+    CHECK_FALSE(loads([](Days& days) { days.pop_back(); }));
+    CHECK_FALSE(loads([](Days& days) { days.clear(); }));
+    CHECK_FALSE(loads([&](Days& days) { days.push_back(today); }));
+
+    // In the order the stages were completed; the same day twice is in order.
+    CHECK_FALSE(loads([](Days& days) { days = {kRaceDay + 10, kRaceDay}; }));
+    CHECK(loads([](Days& days) { days = {kRaceDay, kRaceDay}; }));
+
+    // Never on a day that has not come.
+    CHECK(loads([&](Days& days) { days.back() = today; }));
+    CHECK_FALSE(loads([&](Days& days) { days.back() = today + 1; }));
+    CHECK_FALSE(loads([&](Days& days) { days = {today + 1, today + 1}; }));
+
+    // A company with no stage complete holds no day.
+    sim::WorldState fresh = freshState(content);
+    CHECK(loadsBack(content, fresh));
+    fresh.companies[1].programStageDays.push_back(0);
+    CHECK_FALSE(loadsBack(content, fresh));
 }

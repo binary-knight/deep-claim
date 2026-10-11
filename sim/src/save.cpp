@@ -74,14 +74,23 @@ bool validateSellPolicies(const Content& content, const Company& company) {
     return policiesOk && tonnesOk && proceedsOk;
 }
 
+// Each stage complete has the day it was completed (spec 010): in the order
+// the stages were completed, and none on a day that has not come.
+bool validateProgramStageDays(const Company& company, Day today) {
+    const std::vector<Day>& days = company.programStageDays;
+    return days.size() == company.programStage && std::ranges::is_sorted(days) &&
+           std::ranges::all_of(days, [today](Day day) { return day <= today; });
+}
+
 // The program (spec 010): the stage counts stages complete, and deliveries
 // are toward the stage being worked on, so each is within what that stage
 // needs: nothing for a resource it does not need, and nothing at all once
 // the program is complete.
-bool validateProgram(const Content& content, const Company& company) {
+bool validateProgram(const Content& content, const Company& company, Day today) {
     const std::vector<ProgramStage>& stages = content.program.stages;
     if (company.programStage > stages.size() ||
-        company.programDelivered.size() != content.resources.size()) {
+        company.programDelivered.size() != content.resources.size() ||
+        !validateProgramStageDays(company, today)) {
         return false;
     }
     std::vector<std::int64_t> needed(content.resources.size(), 0);
@@ -101,7 +110,7 @@ bool validateProgram(const Content& content, const Company& company) {
     return true;
 }
 
-bool validateCompany(const Content& content, const Company& company) {
+bool validateCompany(const Content& content, const Company& company, Day today) {
     if (company.kind != CompanyKind::Player && company.kind != CompanyKind::Ai) {
         return false;
     }
@@ -125,15 +134,16 @@ bool validateCompany(const Content& content, const Company& company) {
         return tonnes >= 0 && tonnes <= kMaxStockTonnes;
     });
     return stocksOk && validateCompletedTechs(content, company) &&
-           validateSellPolicies(content, company) && validateProgram(content, company);
+           validateSellPolicies(content, company) && validateProgram(content, company, today);
 }
 
 bool validateCompanies(const Content& content, const WorldState& state) {
     if (state.companies.empty() || state.companies[0].kind != CompanyKind::Player) {
         return false;
     }
-    return std::ranges::all_of(
-        state.companies, [&](const Company& company) { return validateCompany(content, company); });
+    return std::ranges::all_of(state.companies, [&](const Company& company) {
+        return validateCompany(content, company, state.day);
+    });
 }
 
 // Unsold rounds only accumulate while listed and never reach the withdrawal

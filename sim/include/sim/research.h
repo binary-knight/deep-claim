@@ -16,6 +16,16 @@ namespace sim {
 // The company's in-progress project, if any.
 [[nodiscard]] std::optional<ResearchId> activeResearch(const WorldState& state, CompanyId company);
 
+// Whether the company may start the project, money and a busy lab aside: the
+// company is in business, the project is not known and not in progress, its
+// prerequisites are complete and so are the program stages it waits for
+// (spec 010, BR-004). The one statement of that rule: validateStartResearch
+// refuses by it, and the view reports it per project
+// (CompanyView::researchOpen) for the client and the competitor to read.
+// False for a company or a project that does not exist.
+[[nodiscard]] bool researchOpenTo(const Content& content, const WorldState& state,
+                                  CompanyId company, TechId tech);
+
 [[nodiscard]] std::optional<RejectReason> validateStartResearch(const Content& content,
                                                                 const WorldState& state,
                                                                 const StartResearch& command);
