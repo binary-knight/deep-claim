@@ -1,6 +1,11 @@
 #include "sim/ai_controller.h"
+#include "sim/commands.h"
 #include "sim/content.h"
 #include "sim/ids.h"
+#include "sim/money.h"
+#include "sim/program.h"
+#include "sim/research.h"
+#include "sim/save.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
 #include "sim/world_state.h"
@@ -12,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
+#include <vector>
 
 namespace {
 
@@ -30,6 +36,81 @@ void playWithAi(sim::Simulation& simulation, sim::HeuristicController& ai, sim::
 std::int64_t tonnesExtracted(const sim::Mine& mine) {
     return std::accumulate(mine.extractedTonnes.begin(), mine.extractedTonnes.end(),
                            std::int64_t{0});
+}
+
+const sim::CompanyId kPlayer(0);
+const sim::CompanyId kRival(1);
+
+// A new world in which both companies already hold what the race asks of
+// them, put into `simulation` the way a save would: the player the goods and
+// cash for all three stages of the fixture's program, the rival the goods for
+// two stages and half the iron of the third, with no lithium. Nothing is
+// handed over once the game is under way.
+void loadRaceWorld(sim::Simulation& simulation, const sim::Content& content) {
+    sim::WorldState state = simulation.state();
+    state.companies[kPlayer.index()].cash = sim::Money::fromUnits(30'000'000);
+    state.companies[kPlayer.index()].inventoryTonnes = {6'000, 200, 50};
+    state.companies[kRival.index()].cash = sim::Money::fromUnits(30'000'000);
+    state.companies[kRival.index()].inventoryTonnes = {4'500, 200, 0};
+    REQUIRE(simulation.load(sim::saveGame(state, {}, sim::hashContent(content))));
+}
+
+// One day's orders of a company racing by rote: complete the stage it is on
+// when that can be done; until then deliver what the stage still needs from
+// stock and start the stage's research once the lab will take it. Every
+// order is one the sim would accept today, so a rejection is a fault.
+void giveRaceOrders(sim::Simulation& simulation, const sim::Content& content, sim::CompanyId id) {
+    const sim::WorldState& state = simulation.state();
+    const sim::Company& company = state.companies[id.index()];
+    if (company.programStage >= content.program.stages.size()) {
+        return;
+    }
+    if (sim::programStageReady(content, state, id)) {
+        simulation.submit(sim::CompleteProgramStage{id});
+        return;
+    }
+    const sim::ProgramStage& stage = content.program.stages[company.programStage];
+    for (const sim::ProgramRequirement& need : stage.requirements) {
+        const std::size_t r = need.resource.index();
+        const std::int64_t tonnes =
+            std::min(need.tonnes - company.programDelivered[r], company.inventoryTonnes[r]);
+        if (tonnes > 0) {
+            simulation.submit(sim::DeliverToProgram{id, need.resource, tonnes});
+        }
+    }
+    const sim::StartResearch research{id, stage.research};
+    if (!sim::validateStartResearch(content, state, research)) {
+        simulation.submit(research);
+    }
+}
+
+// What one company was told about the other's race.
+struct RaceNotices {
+    int researchStarted = 0;
+    int stagesComplete = 0;
+    int founded = 0;
+};
+
+// Adds the day's notices about `about` as `viewer` was shown them, so a
+// notice counted here is one the other company could see.
+void countRaceNotices(const sim::Simulation& simulation, sim::CompanyId viewer,
+                      sim::CompanyId about, RaceNotices& seen) {
+    for (const sim::Notice& notice : simulation.reportFor(viewer)) {
+        if (notice.company != about) {
+            continue;
+        }
+        seen.researchStarted += notice.kind == sim::NoticeKind::ProgramResearchStarted ? 1 : 0;
+        seen.stagesComplete += notice.kind == sim::NoticeKind::ProgramStageComplete ? 1 : 0;
+        seen.founded += notice.kind == sim::NoticeKind::ProgramFounded ? 1 : 0;
+    }
+}
+
+// The orders the last tick refused, from either company.
+std::ptrdiff_t ordersRejected(const sim::Simulation& simulation) {
+    const std::vector<sim::Notice>& notices = simulation.lastReport().notices;
+    return std::count_if(notices.begin(), notices.end(), [](const sim::Notice& notice) {
+        return notice.kind == sim::NoticeKind::CommandRejected;
+    });
 }
 
 }  // namespace
@@ -149,4 +230,91 @@ TEST_CASE("Golden state hash of a played game is stable across platforms", "[det
     sim::Simulation restored(content, 7, test::setup());
     REQUIRE(restored.load(simulation.save()));
     CHECK(restored.stateHash() == kGoldenPlayed);
+}
+
+TEST_CASE("Golden state hash of a played race is stable across platforms", "[determinism]") {
+    // Neither run above is certain to reach the program's rules: the first
+    // gives no orders and the competitor in the second races only as far as
+    // its mines carry it in three years. Here both companies start with
+    // stock and cash and race by rote on the fixture's small program, with
+    // real orders applied by ticks (DeliverToProgram, StartResearch for the
+    // stage projects, CompleteProgramStage). The player completes all three
+    // stages and founds the program; the rival, starting later, completes
+    // two and is part-way through the third when the game ends. That leaves
+    // stage days, deliveries toward an unfinished stage, a stage project
+    // still running and an outcome with a founder and a lesser partner in
+    // the state. A change to how any of that is stored, hashed or computed
+    // moves this value.
+    // Added for spec 010 step 1. Recorded on Linux/GCC on 2026-10-11; it is
+    // confirmed for Windows/MSVC only when CI runs. It uses the in-code
+    // content fixture, so tuning data/*.json does not move it. A deliberate
+    // change to sim state or rules moves it once: update the constant in the
+    // same commit and record the reason in docs/DESIGN.md.
+    constexpr std::uint64_t kGoldenRace = 0x588363dbb9c693f3ULL;
+    constexpr sim::Day kRivalStartsDay = 45;
+    constexpr sim::Day kLongestRace = sim::kDaysPerYear * 2;
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 42, test::setup());
+    loadRaceWorld(simulation, content);
+
+    RaceNotices aboutPlayer;
+    RaceNotices aboutRival;
+    std::ptrdiff_t rejected = 0;
+    while (!sim::gameEnded(simulation.state()) && simulation.state().day < kLongestRace) {
+        giveRaceOrders(simulation, content, kPlayer);
+        if (simulation.state().day >= kRivalStartsDay) {
+            giveRaceOrders(simulation, content, kRival);
+        }
+        simulation.tick();
+        countRaceNotices(simulation, kRival, kPlayer, aboutPlayer);
+        countRaceNotices(simulation, kPlayer, kRival, aboutRival);
+        rejected += ordersRejected(simulation);
+    }
+
+    // What makes the value worth pinning. If the race stops short, this
+    // fails here instead of quietly pinning a game nobody finished.
+    const sim::WorldState& world = simulation.state();
+    REQUIRE(sim::gameEnded(world));
+    const sim::Company& player = world.companies[kPlayer.index()];
+    const sim::Company& rival = world.companies[kRival.index()];
+    REQUIRE(player.programStage == 3);
+    REQUIRE(player.programStageDays.size() == 3);
+    CHECK(player.programStageDays[0] < player.programStageDays[1]);
+    CHECK(player.programStageDays[1] < player.programStageDays[2]);
+    CHECK(rival.programStage == 2);
+    REQUIRE(rival.programStageDays.size() == 2);
+    CHECK(rival.programStageDays[0] < rival.programStageDays[1]);
+    // The rival was stopped part-way: iron in for a third stage it cannot
+    // complete, and that stage's project still in the lab.
+    CHECK(rival.programDelivered[0] == 1'500);
+    CHECK(std::any_of(world.research.begin(), world.research.end(),
+                      [](const sim::Research& project) { return project.complete == 0; }));
+    CHECK(world.outcome.ended != 0);
+    CHECK(world.outcome.day == player.programStageDays[2]);
+    CHECK(world.outcome.founder == kPlayer);
+    REQUIRE(world.outcome.results.size() == 2);
+    CHECK(world.outcome.results[kPlayer.index()] == sim::ProgramResult::Founded);
+    CHECK(world.outcome.results[kRival.index()] == sim::ProgramResult::LesserPartner);
+    // The public notices of the race, each as the other company saw it.
+    CHECK(aboutPlayer.researchStarted == 3);
+    CHECK(aboutPlayer.stagesComplete == 3);
+    CHECK(aboutPlayer.founded == 1);
+    CHECK(aboutRival.researchStarted == 3);
+    CHECK(aboutRival.stagesComplete == 2);
+    CHECK(aboutRival.founded == 0);
+    CHECK(rejected == 0);
+    CHECK(simulation.pendingCommands().empty());
+
+    CHECK(simulation.stateHash() == kGoldenRace);
+
+    // The same state must come back from a save of the ended game.
+    sim::Simulation restored(content, 7, test::setup());
+    REQUIRE(restored.load(simulation.save()));
+    CHECK(restored.stateHash() == kGoldenRace);
+
+    // A finished world does not change: one more day moves nothing.
+    simulation.tick();
+    CHECK(simulation.stateHash() == kGoldenRace);
+    restored.tick();
+    CHECK(restored.stateHash() == kGoldenRace);
 }

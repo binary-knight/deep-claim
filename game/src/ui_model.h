@@ -329,12 +329,9 @@ struct EndStageLine {
 };
 
 // One company's race on the end screen: the stages it completed and the day
-// of each. The count is the sim's (sim::ProgramPublicView). The days are
-// read from the session's log (the public ProgramStageComplete notices): the
-// view does not carry them. When the log no longer holds a notice for every
-// stage the company completed (it keeps the last Session::kMaxLogEntries
-// lines, and a loaded game starts it again), `lines` is empty and the count
-// stands alone rather than a stage being shown as not reached.
+// of each. Both are the sim's (sim::ProgramPublicView: stagesCompleted and
+// stageDays), so they stand in a long game and in a loaded one: `lines` has
+// one line a stage, always.
 struct EndCompany {
     std::string name;    // "You" for the player, else the company's name
     std::string stages;  // "2 of 3 stages complete"

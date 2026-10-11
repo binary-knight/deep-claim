@@ -2296,6 +2296,65 @@ bool probeProgramFrames(Rml::Context& context, game::App& app, LoggingSystem& sy
     return ok;
 }
 
+// ---- which projects can start (spec 010) ----
+
+constexpr int kResearchTab = 3;
+
+// Every project on the Research tab, against the sim: Start is offered
+// exactly for the projects the view marks open (sim::CompanyView::
+// researchOpen) while the lab is idle and the money left covers the cost.
+// A project with its order already waiting shows its chip instead.
+void checkResearchStartable(Rml::Context& context, game::App& app, const std::string& where,
+                            Checks& checks) {
+    const game::Session& session = app.session();
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    app.setTab(kResearchTab);
+    app.refreshNow();
+    settle(context);
+    const std::vector<game::TechRow>& techs = app.model().techs;
+    const std::vector<Rml::Element*> rows =
+        visibleElements(context.GetDocument(0)->GetElementById("content"), "tr", "row");
+    checks.same(where + ": projects in the model", techs.size(), content.techs.size());
+    checks.same(where + ": projects on the Research tab", rows.size(), content.techs.size());
+    checks.same(where + ": projects the view answers for", view.researchOpen.size(),
+                content.techs.size());
+    if (!checks.ok()) {
+        return;
+    }
+    const sim::Money available =
+        view.cash - view.reservedCash - session.committed() + session.pendingBorrowed();
+    std::size_t open = 0;
+    std::size_t startable = 0;
+    std::size_t buttons = 0;
+    for (std::size_t i = 0; i < content.techs.size(); ++i) {
+        const sim::TechId tech(static_cast<std::uint32_t>(i));
+        const bool waiting = orderWaiting<sim::StartResearch>(
+            session, [&](const sim::StartResearch& order) { return order.tech == tech; });
+        const bool isOpen = view.researchOpen[i] != 0;
+        const bool expected = isOpen && !view.activeResearch.has_value() &&
+                              content.techs[i].cost <= available && !waiting;
+        const auto shown = std::ranges::count_if(
+            visibleElements(rows[i], "button", ""),
+            [](Rml::Element* button) { return visibleText(button) == "Start"; });
+        const std::string project = where + ": " + content.techs[i].name;
+        checks.same(project + ": can start", techs[i].can_start, expected);
+        checks.same(project + ": Start buttons", static_cast<std::size_t>(shown),
+                    std::size_t{expected ? 1U : 0U});
+        checks.expect(visibleText(rows[i]).find(content.techs[i].name) != std::string::npos,
+                      project + ": its row does not name it");
+        open += isOpen ? 1 : 0;
+        startable += expected ? 1 : 0;
+        buttons += static_cast<std::size_t>(shown);
+    }
+    std::cout << std::format(
+        "\n  research, {} ({}): {} projects, {} open to the sim, the lab {}, {} "
+        "available; {} can start, {} Start buttons on the tab\n",
+        where, app.model().day, content.techs.size(), open,
+        view.activeResearch.has_value() ? "busy" : "idle", game::formatMoney(available), startable,
+        buttons);
+}
+
 int programResult(const Checks& checks, bool laidOut) {
     if (!checks.ok()) {
         return kProgramFailure;
@@ -2322,12 +2381,12 @@ int probeProgramFresh(Rml::Context& context, game::App& app, LoggingSystem& syst
                   "a new game has research or deliveries behind it");
     checks.expect(!expected.ready && expected.researchOpen, "a new game's stage is ready");
     // The one place Start research is held to the sim's own figures rather
-    // than to the Research tab's row: an idle lab, a project with nothing
-    // before it, and the cash for it.
+    // than to the Research tab's row: an idle lab, a project the sim marks
+    // open, and the cash for it.
     const sim::CompanyView& view = app.session().view();
     const sim::TechDef& project = content.techs[stage->research.index()];
-    if (view.activeResearch || !project.prerequisites.empty() ||
-        project.requiresProgramStage > view.program.stagesCompleted ||
+    if (view.activeResearch || stage->research.index() >= view.researchOpen.size() ||
+        view.researchOpen[stage->research.index()] == 0 ||
         project.cost > view.cash - view.reservedCash) {
         std::cout << "SCENARIO (program): a new company cannot start the first stage's project\n";
         return kScenarioFailure;
@@ -2339,6 +2398,7 @@ int probeProgramFresh(Rml::Context& context, game::App& app, LoggingSystem& syst
                       expected.blocked.find(game::text(content, "ui.program_blocked_deliveries")) !=
                           std::string::npos,
                   "a new game is not missing both its research and its deliveries");
+    checkResearchStartable(context, app, "new game", checks);
     const bool laidOut = probeProgramFrames(context, app, system, "program, new game", checks);
     return programResult(checks, laidOut);
 }
@@ -2447,6 +2507,7 @@ int probeProgramResearch(Rml::Context& context, game::App& app, LoggingSystem& s
     checks.same("Committed with the research waiting", app.model().committed,
                 game::text(content, "ui.committed",
                            {{"amount", game::formatMoney(content.techs[project.index()].cost)}}));
+    checkResearchStartable(context, app, "order waiting", checks);
     laidOut =
         probeProgramFrames(context, app, system, "program, research waiting", checks) && laidOut;
     session.stepOneDay();
@@ -2455,6 +2516,7 @@ int probeProgramResearch(Rml::Context& context, game::App& app, LoggingSystem& s
     checks.expect(after && after->researchState == sim::ProgramResearchState::InProgress &&
                       after->activeResearch.has_value(),
                   "the stage's research is not under way a day after it was ordered");
+    checkResearchStartable(context, app, "lab busy", checks);
     laidOut =
         probeProgramFrames(context, app, system, "program, research under way", checks) && laidOut;
     return 0;
@@ -2679,7 +2741,8 @@ struct EndExpected {
 };
 
 // The day the session's log has for a notice of this kind about this
-// company; `number` picks a stage's completion (0 for any notice).
+// company; `number` picks a stage's completion (0 for any notice). The end
+// screen's stage days are not read from here: they are the view's.
 std::optional<sim::Day> loggedDay(const game::Session& session, sim::NoticeKind kind,
                                   sim::CompanyId company, std::int64_t number) {
     std::optional<sim::Day> day;
@@ -2709,14 +2772,14 @@ EndColumn simEndColumn(const game::Session& session, const sim::ProgramPublicVie
                 game::text(content, "ui.end_stage_never", {{"number", std::to_string(stage)}}));
             continue;
         }
-        const std::optional<sim::Day> day =
-            loggedDay(session, sim::NoticeKind::ProgramStageComplete, program.company,
-                      static_cast<std::int64_t>(stage));
-        checks.expect(day.has_value(), std::format("the log has no completion of stage {} by {}",
-                                                   stage, column.name));
+        // The sim's own record of the day (sim::ProgramPublicView::stageDays).
+        const bool recorded = stage <= program.stageDays.size();
+        checks.expect(recorded, std::format("the view has no day for stage {} completed by {}",
+                                            stage, column.name));
         column.lines.push_back(game::text(
             content, "ui.end_stage_days",
-            {{"number", std::to_string(stage)}, {"day", std::to_string(day.value_or(0))}}));
+            {{"number", std::to_string(stage)},
+             {"day", std::to_string(recorded ? program.stageDays[stage - 1] : sim::Day{0})}}));
     }
     return column;
 }
@@ -2741,6 +2804,8 @@ EndExpected simEnd(const game::Session& session, const std::string& result, Chec
     checks.expect(!bankrupt || fell.has_value(), "the log has no bankruptcy of the player");
     expected.day = game::text(content, "ui.end_day",
                               {{"day", std::to_string(bankrupt ? fell.value_or(0) : outcome.day)}});
+    checks.expect(view.program.stageDays == view.programs[player].stageDays,
+                  "the player's own stage days and its public ones differ");
     expected.columns.push_back(simEndColumn(session, view.programs[player], checks));
     for (const sim::ProgramPublicView& program : view.programs) {
         if (program.company != game::Session::kPlayer) {
@@ -2889,6 +2954,79 @@ void checkNothingMoves(Rml::Context& context, game::App& app, const std::string&
         where, clicked, session.day(), session.pendingOrders().size());
 }
 
+// The finished game saved and loaded again: the log starts again, with no
+// stage's completion in it, and the end screen still shows every stage's day,
+// because the days are the sim's and are saved with the game. The model's
+// rows are held to what stood before the save in every ending; the screen is
+// read again in the race's endings (a bankruptcy's own day is the log's,
+// which a loaded game does not have).
+//
+// A load cuts the log to one line, and RmlUi warns once for each row of the
+// Dashboard's Recent list it is about to remove ("Data array index out of
+// bounds", for `recent[n].warning`). The rows do go. Those warnings, and only
+// those, are set aside here and counted in the line printed, so that the next
+// tab probed is not failed for them.
+void checkLoadedEnd(Rml::Context& context, game::App& app, LoggingSystem& system,
+                    const std::string& result, const EndExpected& expected, Checks& checks) {
+    game::Session& session = app.session();
+    const std::vector<std::uint8_t> bytes = session.save();
+    const auto before = static_cast<std::ptrdiff_t>(system.problems.size());
+    if (!session.load(bytes)) {
+        checks.expect(false, "the finished game did not load from its own save");
+        return;
+    }
+    app.refreshNow();
+    settle(context);
+    checks.expect(session.gameOver(), "the loaded game is not over");
+    checks.expect(std::ranges::none_of(session.log(),
+                                       [](const game::LogEntry& entry) {
+                                           return entry.notice.kind ==
+                                                  sim::NoticeKind::ProgramStageComplete;
+                                       }),
+                  "the loaded game's log still holds a stage's completion");
+    const std::vector<game::EndCompany>& shown = app.model().end.companies;
+    checks.same("loaded: companies on the end screen", shown.size(), expected.columns.size());
+    std::string days;
+    for (std::size_t i = 0; i < shown.size() && i < expected.columns.size(); ++i) {
+        std::string lines;
+        for (const game::EndStageLine& line : shown[i].lines) {
+            lines += (lines.empty() ? "" : " | ") + line.text;
+        }
+        std::string saved;
+        for (const std::string& line : expected.columns[i].lines) {
+            saved += (saved.empty() ? "" : " | ") + line;
+        }
+        checks.same("loaded: " + expected.columns[i].name + ": stage days", lines, saved);
+        days += std::format("\n      {}: {}", shown[i].name, lines);
+    }
+    std::cout << std::format(
+        "\n  end screen, {}, saved and loaded on day {} ({} log lines, none "
+        "a stage's completion):{}\n",
+        result, session.day(), session.log().size(), days);
+    for (const Frame& frame : kFrames) {
+        if (result == "bankrupt") {
+            break;
+        }
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(static_cast<float>(frame.width) < kDeckWidth);
+        app.setTab(0);
+        app.refreshNow();
+        settle(context);
+        checkEndScreen(context, frame, simEnd(session, result, checks), checks);
+    }
+    const auto shrinking = [](const std::string& problem) {
+        return problem == "Data array index out of bounds." ||
+               (problem.starts_with("Could not get value from data variable 'recent[") &&
+                problem.ends_with("].warning'."));
+    };
+    const std::size_t setAside =
+        std::erase_if(system.problems, [&, at = std::ptrdiff_t{0}](const std::string& p) mutable {
+            return at++ >= before && shrinking(p);
+        });
+    std::cout << std::format(
+        "    loaded: {} RmlUi warnings for the shorter Recent list set aside\n", setAside);
+}
+
 // A finished game in both frames: every tab laid out under the end screen,
 // the screen checked against the session, every control tried. `result` is
 // the ending the stage played for; the session must report the same.
@@ -2920,6 +3058,7 @@ int probeEndScreen(Rml::Context& context, game::App& app, LoggingSystem& system,
                               checks);
         }
     }
+    checkLoadedEnd(context, app, system, result, expected, checks);
     // The one button starts a new game, and play is back.
     Rml::Element* overlay = context.GetDocument(0)->GetElementById("overlay");
     const std::vector<Rml::Element*> buttons = visibleElements(overlay, "button", "");
@@ -3123,6 +3262,7 @@ int probeProgramToTheEnd(Rml::Context& context, game::App& app, LoggingSystem& s
     checks.expect(session.view().cash <= cashBefore - cost,
                   "completing the stage did not take its cost");
     checks.expect(!app.model().has_committed, "money is still committed after the completion");
+    checkResearchStartable(context, app, "one stage complete", checks);
     laidOut = probeProgramFrames(context, app, system, "program, second stage current", checks) &&
               laidOut;
     // The rest of the race by orders, as the buttons give them.
@@ -3419,9 +3559,15 @@ void stepWatched(game::Session& session, StageWatch& watch) {
     }
 }
 
-// The log's day for every stage the probe saw completed is the day it saw.
+// The day the probe saw each stage completed is the day the view records for
+// it (what the end screen shows) and the day the log has.
 void checkWatchedDays(const game::Session& session, const StageWatch& watch, Checks& checks) {
+    const std::vector<sim::ProgramPublicView>& programs = session.view().programs;
     for (std::size_t c = 0; c < watch.days.size(); ++c) {
+        checks.expect(c < programs.size() && programs[c].stageDays == watch.days[c],
+                      std::format("the view's stage days for company {} are not the days the "
+                                  "probe saw its stages completed",
+                                  c));
         for (std::size_t s = 0; s < watch.days[c].size(); ++s) {
             const std::optional<sim::Day> logged = loggedDay(
                 session, sim::NoticeKind::ProgramStageComplete,

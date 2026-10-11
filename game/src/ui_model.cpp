@@ -805,23 +805,27 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
     }
 }
 
-// Presentation of the sim's two gates on a project (sim/src/research.cpp):
-// its prerequisites are complete, and so are the program stages it waits for
-// (spec 010: a stage's project opens when the stage before it is complete).
-bool techOpen(const sim::CompanyView& view, const sim::TechDef& tech) {
-    return tech.requiresProgramStage <= view.program.stagesCompleted &&
-           std::ranges::all_of(tech.prerequisites,
-                               [&](sim::TechId p) { return knowsTech(view, p); });
+// Whether the sim would let the player start the project, money and a busy
+// lab aside (sim::CompanyView::researchOpen). The rule is the sim's; the
+// client only reads the answer.
+bool projectOpen(const sim::CompanyView& view, std::uint32_t i) {
+    return i < view.researchOpen.size() && view.researchOpen[i] != 0;
 }
 
-// A tech the player could start this minute: not known, prerequisites done,
-// affordable with the money available. The Research tab's Start button uses
-// the same test.
-bool techStartable(const sim::Content& content, const sim::CompanyView& view, sim::Money available,
-                   std::uint32_t i) {
-    const sim::TechDef& tech = content.techs[i];
-    return !view.bankrupt && !view.activeResearch && !knowsTech(view, sim::TechId(i)) &&
-           techOpen(view, tech) && tech.cost <= available;
+// What keeps a project's Start button off. Closed is the sim's answer. The
+// other two are no rule of the game: another project in the lab, or too
+// little money left. None when the project can start this minute.
+enum class StartBlock : std::uint8_t { None, Closed, LabBusy, Unaffordable };
+
+StartBlock startBlock(const sim::Content& content, const sim::CompanyView& view,
+                      sim::Money available, std::uint32_t i) {
+    if (!projectOpen(view, i)) {
+        return StartBlock::Closed;
+    }
+    if (view.activeResearch) {
+        return StartBlock::LabBusy;
+    }
+    return content.techs[i].cost <= available ? StartBlock::None : StartBlock::Unaffordable;
 }
 
 constexpr sim::Day kSurveyNewsDays = 15;
@@ -833,7 +837,7 @@ void addDecisionNeeds(const sim::Content& content, const sim::CompanyView& view,
                       sim::Money available, std::vector<PendingNeed>& pending) {
     int startable = 0;
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
-        startable += techStartable(content, view, available, i) ? 1 : 0;
+        startable += startBlock(content, view, available, i) == StartBlock::None ? 1 : 0;
     }
     if (startable > 0) {
         NeedRow row;
@@ -1549,7 +1553,7 @@ TechRow makeTechRow(const sim::Content& content, const sim::CompanyView& view, c
         needs += (needs.empty() ? "" : ", ") + content.techs[p.index()].name;
     }
     row.needs = needs.empty() ? "" : text(content, "ui.needs_tech", {{"tech", needs}});
-    const bool ready = techOpen(view, tech);
+    const StartBlock block = startBlock(content, view, orders.available, i);
     const bool researching = view.activeResearch && view.activeResearch->tech == sim::TechId(i);
     if (knowsTech(view, sim::TechId(i))) {
         row.chip = "done";
@@ -1559,17 +1563,17 @@ TechRow makeTechRow(const sim::Content& content, const sim::CompanyView& view, c
         row.chip_class = "accent";
         row.researching = true;
         row.until = text(content, "ui.tech_until", {{"day", busyUntil}});
-    } else if (!ready) {
+    } else if (block == StartBlock::Closed) {
+        // Closed to a bankrupt company too: the sim opens nothing to it.
         row.chip = "locked";
         row.chip_class = "muted";
+        row.blocked = view.bankrupt ? text(content, "ui.tech_bankrupt") : "";
     } else {
         row.chip = "available";
         row.chip_class = "muted";
-        if (view.activeResearch) {
+        if (block == StartBlock::LabBusy) {
             row.blocked = text(content, "ui.tech_busy", {{"day", busyUntil}});
-        } else if (view.bankrupt) {
-            row.blocked = text(content, "ui.tech_bankrupt");
-        } else if (tech.cost > orders.available) {
+        } else if (block == StartBlock::Unaffordable) {
             row.blocked = text(content, "ui.tech_unaffordable", {{"amount", row.cost}});
         } else {
             row.can_start = true;
@@ -1952,21 +1956,9 @@ sim::Day endDay(const Session& session) {
     return view.day;
 }
 
-// The day each of a company's stages was completed, as the log has them:
-// entry n-1 is stage n's day, or nothing when its notice is not in the log.
-// ProgramStageComplete carries the stage's number in `tonnes`.
-std::vector<std::optional<sim::Day>> stageDays(const Session& session, sim::CompanyId company) {
-    std::vector<std::optional<sim::Day>> days(session.content().program.stages.size());
-    for (const LogEntry& entry : session.log()) {
-        const sim::Notice& notice = entry.notice;
-        if (notice.kind == sim::NoticeKind::ProgramStageComplete && notice.company == company &&
-            notice.tonnes >= 1 && static_cast<std::size_t>(notice.tonnes) <= days.size()) {
-            days[static_cast<std::size_t>(notice.tonnes) - 1] = entry.day;
-        }
-    }
-    return days;
-}
-
+// One company's column: a line a stage, with the day the sim recorded for
+// each stage it completed (sim::ProgramPublicView::stageDays, saved with the
+// game) and "not reached" for the rest.
 EndCompany endCompany(const Session& session, const sim::ProgramPublicView& program) {
     const sim::Content& content = session.content();
     const sim::CompanyView& view = session.view();
@@ -1978,21 +1970,15 @@ EndCompany endCompany(const Session& session, const sim::ProgramPublicView& prog
     row.stages =
         text(content, "ui.race_stage",
              {{"done", std::to_string(program.stagesCompleted)}, {"total", std::to_string(total)}});
-    const std::vector<std::optional<sim::Day>> days = stageDays(session, program.company);
+    const std::vector<sim::Day>& days = program.stageDays;
     for (std::size_t stage = 0; stage < total; ++stage) {
         const std::string number = std::to_string(stage + 1);
-        const std::optional<sim::Day> day = days[stage];
-        if (stage >= program.stagesCompleted) {
-            row.lines.push_back({text(content, "ui.end_stage_never", {{"number", number}}), false});
-        } else if (day.has_value()) {
+        if (stage < days.size()) {
             row.lines.push_back({text(content, "ui.end_stage_days",
-                                      {{"number", number}, {"day", std::to_string(*day)}}),
+                                      {{"number", number}, {"day", std::to_string(days[stage])}}),
                                  true});
         } else {
-            // The log has lost a stage the company completed: the count
-            // stands alone.
-            row.lines.clear();
-            break;
+            row.lines.push_back({text(content, "ui.end_stage_never", {{"number", number}}), false});
         }
     }
     return row;
