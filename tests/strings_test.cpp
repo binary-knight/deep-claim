@@ -333,6 +333,79 @@ TEST_CASE("Rejections read as one sentence and every notice starts with a capita
     CHECK(game::describeNotice(content, view, listed).starts_with("Plot #28 is up for auction."));
 }
 
+TEST_CASE("Program notices name the stage and the mine notices name the new state",
+          "[strings][data]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& content = *result.content;
+    sim::CompanyView view;
+    sim::CompanyPublicView rival;
+    rival.id = sim::CompanyId(0);
+    rival.name = "Northern Ore";
+    view.companies.push_back(rival);
+
+    // Both notices carry the stage, counting from 1, in `tonnes` (spec 010).
+    for (const sim::NoticeKind kind :
+         {sim::NoticeKind::ProgramStageComplete, sim::NoticeKind::ProgramResearchStarted}) {
+        sim::Notice notice;
+        notice.kind = kind;
+        notice.company = sim::CompanyId(0);
+        notice.tech = content.findTech("program_stage_2");
+        notice.amount = sim::Money::fromUnits(15'000'000);
+        notice.tonnes = 2;
+        const std::string text = game::describeNotice(content, view, notice);
+        INFO(text);
+        CHECK(text.find("Northern Ore") != std::string::npos);
+        CHECK(text.find("stage 2") != std::string::npos);
+        CHECK(text.find('{') == std::string::npos);
+    }
+
+    // The two keys that will replace the vague "changed operating status".
+    const std::string mothballed =
+        game::text(content, "notice.mine_mothballed", {{"plot", "plot #4"}});
+    const std::string reopened = game::text(content, "notice.mine_reopened", {{"plot", "plot #4"}});
+    CHECK(mothballed.find("plot #4") != std::string::npos);
+    CHECK(mothballed.find("mothballed") != std::string::npos);
+    CHECK(reopened.find("plot #4") != std::string::npos);
+    CHECK(mothballed != reopened);
+    CHECK(mothballed.front() != '[');
+    CHECK(reopened.front() != '[');
+}
+
+TEST_CASE("The race strip, the Program tab and the end screen have their text", "[strings][data]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& content = *result.content;
+
+    CHECK(game::text(content, "ui.race_deadline", {{"years", "29"}, {"days", "359"}})
+              .find("29 y 359 d") != std::string::npos);
+    CHECK(game::text(content, "ui.race_stage", {{"done", "1"}, {"total", "3"}})
+              .starts_with("1 of 3"));
+    CHECK(game::text(content, "ui.program_stage_heading",
+                     {{"number", "3"}, {"name", game::text(content, "ui.program_stage_3_name")}}) ==
+          "Stage 3: Deep space payload");
+    // The stage project's name shares a 260dp table cell (spec 010).
+    for (const char* id : {"program_stage_1", "program_stage_2", "program_stage_3"}) {
+        const sim::TechDef& tech = content.techs[content.findTech(id).index()];
+        INFO(tech.name);
+        CHECK(tech.name.size() <= 39);
+        CHECK(tech.description.find("deep-space") == std::string::npos);
+    }
+    // Every screen step 1 adds has its text in the catalogue.
+    for (const char* key :
+         {"ui.pause_on.rival_program", "ui.race_ahead", "ui.race_behind", "ui.race_level",
+          "ui.program_deliver", "ui.program_complete", "ui.program_cover_costs_warning",
+          "ui.end_founded_title", "ui.end_founded_body", "ui.end_partner_title",
+          "ui.end_partner_body", "ui.end_lost_title", "ui.end_lost_body", "ui.end_deadline_title",
+          "ui.end_deadline_body", "ui.end_bankrupt_title", "ui.end_bankrupt_body",
+          "ui.end_new_game"}) {
+        INFO(key);
+        CHECK(game::text(content, key).front() != '[');
+    }
+}
+
 TEST_CASE("A prose edit keeps the content fingerprint; a name edit moves it", "[strings][data]") {
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
     REQUIRE(result.ok());

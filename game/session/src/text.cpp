@@ -176,6 +176,7 @@ std::string describeNotice(const sim::Content& content, const sim::CompanyView& 
                              {"amount", formatMoney(n.amount)},
                              {"tonnes", formatTonnes(n.tonnes)},
                              {"months", std::to_string(n.tonnes)},
+                             {"stage", std::to_string(n.tonnes)},
                              {"days", std::to_string(n.tonnes)}}));
 }
 
