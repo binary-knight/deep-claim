@@ -739,3 +739,233 @@ TEST_CASE("The program's orders are priced, applied by a tick and replayed", "[t
     CHECK(result.session->stateHash() == live.stateHash());
     CHECK(playerOf(content, *result.session).programStage == 1);
 }
+
+// ---- spec 010: the end record carries the outcome; a replay stops at the end ----
+
+namespace {
+
+// The view of a two-company game as the trace's end record reads it.
+sim::CompanyView endedView(sim::CompanyId founder, sim::ProgramResult playerResult) {
+    sim::CompanyView view;
+    view.me = game::Session::kPlayer;
+    view.day = 412;
+    view.outcome.ended = true;
+    view.outcome.day = 411;
+    view.outcome.founder = founder;
+    view.outcome.results = {playerResult, sim::ProgramResult::Lost};
+    return view;
+}
+
+game::TraceRecord endRecordFor(const sim::CompanyView& view) {
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    trace.end(view.day, view);
+    game::TraceRecord record;
+    std::string error;
+    REQUIRE(game::parseTraceLine(out.str(), record, error));
+    REQUIRE(record.type == "end");
+    REQUIRE(record.day == view.day);
+    return record;
+}
+
+}  // namespace
+
+TEST_CASE("The end record says how the game ended for the player", "[trace][spec010]") {
+    SECTION("the player founded the program") {
+        const game::TraceRecord record =
+            endRecordFor(endedView(game::Session::kPlayer, sim::ProgramResult::Founded));
+        REQUIRE(record.outcome.has_value());
+        CHECK(record.outcome->ended);
+        CHECK(record.outcome->day == 411);
+        CHECK(record.outcome->founder == game::Session::kPlayer);
+        CHECK(record.outcome->result == "founded");
+    }
+    SECTION("the rival founded it and the player joins as a lesser partner") {
+        const game::TraceRecord record =
+            endRecordFor(endedView(sim::CompanyId(1), sim::ProgramResult::LesserPartner));
+        REQUIRE(record.outcome.has_value());
+        CHECK(record.outcome->founder == sim::CompanyId(1));
+        CHECK(record.outcome->result == "lesser_partner");
+    }
+    SECTION("the rival founded it and the player lost") {
+        const game::TraceRecord record =
+            endRecordFor(endedView(sim::CompanyId(1), sim::ProgramResult::Lost));
+        REQUIRE(record.outcome.has_value());
+        CHECK(record.outcome->result == "lost");
+    }
+    SECTION("the deadline passed: nobody founded it") {
+        const game::TraceRecord record =
+            endRecordFor(endedView(sim::CompanyId(), sim::ProgramResult::Lost));
+        REQUIRE(record.outcome.has_value());
+        CHECK(record.outcome->ended);
+        CHECK_FALSE(record.outcome->founder.valid());
+        CHECK(record.outcome->result == "lost");
+    }
+    SECTION("the player went bankrupt with the race still open") {
+        sim::CompanyView view;
+        view.me = game::Session::kPlayer;
+        view.day = 95;
+        view.bankrupt = true;
+        view.outcome.results = {sim::ProgramResult::None, sim::ProgramResult::None};
+        const game::TraceRecord record = endRecordFor(view);
+        REQUIRE(record.outcome.has_value());
+        CHECK(record.outcome->ended);  // over for the player, though nobody won
+        CHECK(record.outcome->day == 95);
+        CHECK_FALSE(record.outcome->founder.valid());
+        CHECK(record.outcome->result == "bankrupt");
+    }
+    SECTION("a bankrupt player is bankrupt even when the race ends the same day") {
+        sim::CompanyView view = endedView(sim::CompanyId(1), sim::ProgramResult::Lost);
+        view.bankrupt = true;
+        const game::TraceRecord record = endRecordFor(view);
+        REQUIRE(record.outcome.has_value());
+        CHECK(record.outcome->day == 411);
+        CHECK(record.outcome->founder == sim::CompanyId(1));
+        CHECK(record.outcome->result == "bankrupt");
+    }
+    SECTION("a game closed while still being played has no outcome") {
+        sim::CompanyView view;
+        view.me = game::Session::kPlayer;
+        view.day = 30;
+        view.outcome.results = {sim::ProgramResult::None, sim::ProgramResult::None};
+        CHECK_FALSE(endRecordFor(view).outcome.has_value());
+    }
+}
+
+TEST_CASE("End records read back with and without an outcome", "[trace][spec010]") {
+    game::TraceRecord record;
+    std::string error;
+
+    // As every build before spec 010 wrote it, and as TraceWriter::end(day) still does.
+    REQUIRE(game::parseTraceLine(R"({"t":"end","day":5})", record, error));
+    CHECK(record.type == "end");
+    CHECK(record.day == 5);
+    CHECK_FALSE(record.outcome.has_value());
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    trace.end(9);
+    REQUIRE(game::parseTraceLine(out.str(), record, error));
+    CHECK(record.day == 9);
+    CHECK_FALSE(record.outcome.has_value());
+
+    REQUIRE(game::parseTraceLine(
+        R"({"t":"end","day":8,"outcome":{"ended":true,"day":7,"founder":1,"result":"lost"}})",
+        record, error));
+    REQUIRE(record.outcome.has_value());
+    CHECK(record.outcome->day == 7);
+    CHECK(record.outcome->founder == sim::CompanyId(1));
+    CHECK(record.outcome->result == "lost");
+    REQUIRE(game::parseTraceLine(
+        R"({"t":"end","day":8,"outcome":{"ended":true,"day":7,"founder":null,"result":"lost"}})",
+        record, error));
+    REQUIRE(record.outcome.has_value());
+    CHECK_FALSE(record.outcome->founder.valid());
+
+    // An outcome that is there must be whole.
+    for (
+        const char* bad : {
+            R"({"t":"end","day":8,"outcome":7})",
+            R"({"t":"end","day":8,"outcome":{"day":7,"founder":1,"result":"lost"}})",
+            R"({"t":"end","day":8,"outcome":{"ended":1,"day":7,"founder":1,"result":"lost"}})",
+            R"({"t":"end","day":8,"outcome":{"ended":true,"founder":1,"result":"lost"}})",
+            R"({"t":"end","day":8,"outcome":{"ended":true,"day":-1,"founder":1,"result":"lost"}})",
+            R"({"t":"end","day":8,"outcome":{"ended":true,"day":7,"result":"lost"}})",
+            R"({"t":"end","day":8,"outcome":{"ended":true,"day":7,"founder":"x","result":"lost"}})",
+            R"({"t":"end","day":8,"outcome":{"ended":true,"day":7,"founder":1}})",
+            R"({"t":"end","day":8,"outcome":{"ended":true,"day":7,"founder":1,"result":"won"}})",
+        }) {
+        CAPTURE(bad);
+        CHECK_FALSE(game::parseTraceLine(bad, record, error));
+        CHECK(error == "bad outcome");
+    }
+}
+
+namespace {
+
+// A save, two days in, in which the player's last program stage is one order
+// from done: completing it founds the program and ends the game.
+std::vector<std::uint8_t> saveWithFoundingInReach(const sim::Content& content, sim::Seed seed) {
+    sim::Simulation simulation(content, seed, test::setup());
+    simulation.tick(2);
+    sim::WorldState state = simulation.state();
+    sim::Company& player = state.companies[game::Session::kPlayer.index()];
+    const std::size_t last = content.program.stages.size() - 1;
+    player.programStage = static_cast<std::uint32_t>(last);
+    for (const sim::ProgramStage& stage : content.program.stages) {
+        player.completedTechs.push_back(stage.research);
+    }
+    for (const sim::ProgramRequirement& need : content.program.stages[last].requirements) {
+        player.programDelivered[need.resource.index()] = need.tonnes;
+    }
+    player.cash = sim::Money::fromUnits(20'000'000);
+    return sim::saveGame(state, {}, sim::hashContent(content));
+}
+
+}  // namespace
+
+TEST_CASE("A trace of a game played to its end replays to the same end", "[trace][replay]") {
+    const sim::Content content = test::makeContent();
+    const sim::Seed seed = 31;
+    const std::vector<std::uint8_t> saveBytes = saveWithFoundingInReach(content, seed);
+
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    trace.newGame(seed, test::setup(), sim::hashContent(content), "test");
+    game::Session live(content, seed, test::setup());
+    live.setTrace(&trace);
+    game::AutoPause never;
+    never.enabled.fill(false);
+    live.setAutoPause(never);
+    REQUIRE(live.load(saveBytes));
+    trace.loaded(live.day(), "last.dcsave", live.stateHash());
+    live.stepOneDay();
+    live.submit(sim::CompleteProgramStage{});
+    live.stepOneDay();
+    REQUIRE(live.gameOver());
+    // The player keeps pressing after the end: nothing more is recorded.
+    live.stepOneDay();
+    live.setSpeed(game::Speed::Fastest);
+    CHECK(live.advance(2.0) == 0);
+    trace.end(live.day(), live.view());
+    CHECK(linesWith(out.str(), R"("t":"day")").size() == 2);
+
+    game::ReplayOptions options;
+    options.readSave = [&saveBytes](const std::string& file) {
+        return file == "last.dcsave" ? saveBytes : std::vector<std::uint8_t>{};
+    };
+    SECTION("as recorded") {
+        std::istringstream in(out.str());
+        const game::ReplayResult result = game::replayTrace(content, in, options);
+        REQUIRE(result.ok());
+        REQUIRE(result.session != nullptr);
+        CHECK_FALSE(result.firstDivergence.has_value());
+        CHECK(result.daysTicked == 2);
+        CHECK(result.session->stateHash() == live.stateHash());
+        CHECK(result.session->gameOver());
+        CHECK(result.session->outcome().founder == game::Session::kPlayer);
+        CHECK(result.session->outcome().day == live.outcome().day);
+    }
+    SECTION("with day records after the end, as a build before the fix wrote them") {
+        // The same day and hash again and again: the session used to tick a
+        // finished world and record it each time.
+        const std::vector<std::string> days = linesWith(out.str(), R"("t":"day")");
+        std::string padded;
+        std::istringstream lines(out.str());
+        std::string line;
+        while (std::getline(lines, line)) {
+            if (line.find(R"("t":"end")") != std::string::npos) {
+                padded += days.back() + "\n" + days.back() + "\n";
+            }
+            padded += line + "\n";
+        }
+        std::istringstream in(padded);
+        const game::ReplayResult result = game::replayTrace(content, in, options);
+        REQUIRE(result.ok());
+        REQUIRE(result.session != nullptr);
+        CHECK_FALSE(result.firstDivergence.has_value());
+        CHECK(result.daysTicked == 2);  // the days that were played, no more
+        CHECK(result.session->day() == live.day());
+        CHECK(result.session->stateHash() == live.stateHash());
+        CHECK(result.session->gameOver());
+    }
+}

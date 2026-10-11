@@ -432,6 +432,14 @@ void App::bindModel() {
         h.RegisterMember("text", &LogRow::text);
         h.RegisterMember("warning", &LogRow::warning);
     }
+    if (auto h = ctor.RegisterStruct<RaceRow>()) {
+        h.RegisterMember("name", &RaceRow::name);
+        h.RegisterMember("stage", &RaceRow::stage);
+        h.RegisterMember("progress", &RaceRow::progress);
+        h.RegisterMember("bar_width", &RaceRow::bar_width);
+        h.RegisterMember("research", &RaceRow::research);
+        h.RegisterMember("you", &RaceRow::you);
+    }
     if (auto h = ctor.RegisterStruct<PauseRow>()) {
         h.RegisterMember("index", &PauseRow::index);
         h.RegisterMember("label", &PauseRow::label);
@@ -446,6 +454,7 @@ void App::bindModel() {
     ctor.RegisterArray<std::vector<LoanRow>>();
     ctor.RegisterArray<std::vector<LogRow>>();
     ctor.RegisterArray<std::vector<PauseRow>>();
+    ctor.RegisterArray<std::vector<RaceRow>>();
     ctor.RegisterArray<std::vector<PendingRow>>();
 
     // Header and strip
@@ -490,6 +499,13 @@ void App::bindModel() {
     ctor.Bind("world_event", &model_.world_event);
     ctor.Bind("world_sub", &model_.world_sub);
     ctor.Bind("has_world", &model_.has_world);
+    // The race for the program (spec 010)
+    ctor.Bind("has_race", &model_.has_race);
+    ctor.Bind("race_deadline", &model_.race_deadline);
+    ctor.Bind("race_founded", &model_.race_founded);
+    ctor.Bind("race_verdict", &model_.race_verdict);
+    ctor.Bind("race_verdict_class", &model_.race_verdict_class);
+    ctor.Bind("race_rows", &model_.race_rows);
     // Dashboard
     ctor.Bind("needs", &model_.needs);
     ctor.Bind("needs_none", &model_.needs_none);

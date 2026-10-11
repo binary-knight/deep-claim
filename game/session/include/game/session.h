@@ -57,13 +57,18 @@ public:
     Session(const sim::Content& content, sim::Seed seed, const sim::GameSetup& setup);
 
     // ---- time ----
+    // Once the game is over the clock stays stopped: any other speed is
+    // ignored (spec 010, edge case 11).
     void setSpeed(Speed speed);
     [[nodiscard]] Speed speed() const { return speed_; }
     void togglePause();
     // Advances real time; ticks whole in-game days as they accrue. Returns
-    // how many days were ticked. Stops ticking once the player is bankrupt,
-    // and pauses the moment a notice in the auto-pause rule set reaches the
-    // player (that notice is then available from takePausedBy).
+    // how many days were ticked. Pauses the moment a notice in the
+    // auto-pause rule set reaches the player (that notice is then available
+    // from takePausedBy). Once the game is over (gameOver) no further day is
+    // ticked and nothing more is added to the log, the histories or the
+    // trace; the day it ends on stops the clock whatever the rules say, and
+    // takePausedBy then hands over the notice that ended it.
     int advance(double seconds);
     // One day forward regardless of speed (used by a "step" button).
     void stepOneDay();
@@ -96,7 +101,13 @@ public:
     [[nodiscard]] sim::Money orderCost(const sim::Command& command) const;
     [[nodiscard]] const sim::CompanyView& view() const { return view_; }
     [[nodiscard]] const std::vector<LogEntry>& log() const { return log_; }
-    [[nodiscard]] bool gameOver() const { return view_.bankrupt; }
+    // The player is bankrupt, or the race has ended (spec 010): the program
+    // was founded or the deadline passed. The sim decides both; this reads
+    // them from the view.
+    [[nodiscard]] bool gameOver() const { return view_.bankrupt || view_.outcome.ended; }
+    // How the race ended, or that it has not. A bankrupt player's game is
+    // over with the outcome still open.
+    [[nodiscard]] const sim::OutcomeView& outcome() const { return view_.outcome; }
     [[nodiscard]] sim::Day day() const { return view_.day; }
     // Daily prices since the start of the game, for charts.
     [[nodiscard]] const std::vector<sim::Money>& priceHistory(sim::ResourceId resource) const {
@@ -132,7 +143,8 @@ private:
     // each in the trace as a command.
     void giveOrders();
     void traceOrder(std::string_view kind, const PendingOrder& order);
-    // Pauses the clock when the last tick raised a pausing notice.
+    // Pauses the clock when the last tick raised a pausing notice or ended
+    // the game.
     bool stopIfPaused();
     void refreshView();
     void appendLog(sim::Day day, const sim::Notice& notice);

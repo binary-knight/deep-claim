@@ -57,6 +57,10 @@
         <span class="item"><span class="k">Mines</span><span class="chip good" data-if="mines_operating != ''">{{mines_operating}}</span><span class="chip warn" data-if="mines_building != ''">{{mines_building}}</span><span class="chip muted" data-if="mines_mothballed != ''">{{mines_mothballed}}</span><span class="chip muted" data-if="mines_depleted != ''">{{mines_depleted}}</span><span class="muted" data-if="mines_operating == '' && mines_building == '' && mines_mothballed == '' && mines_depleted == ''">none</span></span>
         <span class="item" data-if="has_committed"><span class="num">{{committed}}</span><span class="chip warn" data-if="pending_shortfall">{{ui_not_covered}}</span></span>
         <span class="brk"></span>
+        <!-- The race (spec 010), on every tab: the time left and whether the
+             player leads, in words. The header has no width for it once the
+             company name and the figures are long ones. -->
+        <span class="item race" data-if="has_race"><span class="num deadline" data-if="race_deadline != ''">{{race_deadline}}</span><span class="founded" data-if="race_founded != ''">{{race_founded}}</span><span class="chip verdict" data-if="race_verdict != ''" data-class-good="race_verdict_class == 'good'" data-class-warn="race_verdict_class == 'warn'">{{race_verdict}}</span></span>
         <span class="item"><span class="k">Research</span><span class="num">{{research_strip}}</span></span>
         <span class="item" data-if="has_world"><span class="k">World</span><span class="chip warn">{{world_event}}</span> <span class="num">{{world_sub}}</span></span>
     </div>
@@ -75,6 +79,25 @@
             <!-- Dashboard (H4): what needs you, then what you own, then the money -->
             <div data-if="tab == 0">
                 <h1>Dashboard</h1>
+                <!-- The race for the program (spec 010): the deadline, then a
+                     line a company. Progress is a bar with its figure beside
+                     it, and who leads is a word, so neither rests on colour. -->
+                <div id="race" data-if="has_race">
+                    <div class="when">
+                        <span class="deadline" data-if="race_deadline != ''">{{race_deadline}}</span>
+                        <span class="founded" data-if="race_founded != ''">{{race_founded}}</span>
+                        <span class="verdictline" data-if="race_verdict != ''"><span class="chip verdict" data-class-good="race_verdict_class == 'good'" data-class-warn="race_verdict_class == 'warn'">{{race_verdict}}</span></span>
+                    </div>
+                    <div class="rows">
+                        <div data-for="r : race_rows" class="rrow">
+                            <span class="who">{{r.name}}</span>
+                            <span class="stage num">{{r.stage}}</span>
+                            <div class="bar"><div class="fill" data-style-width="r.bar_width"></div></div>
+                            <span class="pct num">{{r.progress}}</span>
+                            <span class="research">{{r.research}}</span>
+                        </div>
+                    </div>
+                </div>
                 <div class="sheet">
                     <h2><span class="idx">01</span>Needs you</h2>
                     <div class="needs">

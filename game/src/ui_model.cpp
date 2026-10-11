@@ -685,6 +685,94 @@ void fillStrip(const Session& session, UiModel& model) {
     }
 }
 
+// ---- the race for the program (spec 010) ----
+
+std::string researchStateText(const sim::Content& content, sim::ProgramResearchState state) {
+    switch (state) {
+        case sim::ProgramResearchState::NotStarted:
+            return text(content, "ui.race_research_not_started");
+        case sim::ProgramResearchState::InProgress:
+            return text(content, "ui.race_research_in_progress");
+        case sim::ProgramResearchState::Done:
+            return text(content, "ui.race_research_done");
+    }
+    return "";
+}
+
+RaceRow makeRaceRow(const sim::Content& content, const sim::CompanyView& view,
+                    const sim::ProgramPublicView& program) {
+    RaceRow row;
+    row.you = program.company == Session::kPlayer;
+    row.name =
+        row.you ? text(content, "ui.race_you") : view.companies[program.company.index()].name;
+    row.stage = text(content, "ui.race_stage",
+                     {{"done", std::to_string(program.stagesCompleted)},
+                      {"total", std::to_string(content.program.stages.size())}});
+    // Thousandths, as the sim counts them: whole per cent in words, and the
+    // bar to the tenth.
+    const std::int64_t permille = std::clamp<std::int64_t>(program.progressPermille, 0, 1000);
+    row.progress = text(content, "ui.race_progress", {{"percent", std::to_string(permille / 10)}});
+    row.bar_width = std::format("{}.{}%", permille / 10, permille % 10);
+    row.research = researchStateText(content, program.researchState);
+    return row;
+}
+
+// Where a company stands: stages complete, then progress toward the next.
+std::pair<std::uint32_t, std::int64_t> raceStanding(const sim::ProgramPublicView& program) {
+    return {program.stagesCompleted, program.progressPermille};
+}
+
+// The race as the view has it. Wording and order only: which company is
+// ahead is read off the sim's own figures and decides nothing.
+void fillRace(const Session& session, UiModel& model) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const std::size_t player = Session::kPlayer.index();
+    model.race_rows.clear();
+    model.race_deadline.clear();
+    model.race_founded.clear();
+    model.race_verdict.clear();
+    model.race_verdict_class.clear();
+    model.has_race = !content.program.stages.empty() && player < view.programs.size();
+    if (!model.has_race) {
+        return;
+    }
+    if (view.outcome.ended && view.outcome.founder.valid()) {
+        model.race_founded = text(content, "ui.race_program_founded_by",
+                                  {{"company", view.companies[view.outcome.founder.index()].name}});
+    } else {
+        const sim::Day left = daysLeft(view.deadlineDay, view.day);
+        model.race_deadline = text(content, "ui.race_deadline",
+                                   {{"years", std::to_string(left / sim::kDaysPerYear)},
+                                    {"days", std::to_string(left % sim::kDaysPerYear)}});
+    }
+    const sim::ProgramPublicView& mine = view.programs[player];
+    model.race_rows.push_back(makeRaceRow(content, view, mine));
+    bool ahead = true;
+    bool behind = false;
+    for (const sim::ProgramPublicView& program : view.programs) {
+        if (program.company == Session::kPlayer ||
+            program.company.index() >= view.companies.size()) {
+            continue;
+        }
+        model.race_rows.push_back(makeRaceRow(content, view, program));
+        ahead = ahead && raceStanding(mine) > raceStanding(program);
+        behind = behind || raceStanding(mine) < raceStanding(program);
+    }
+    if (view.outcome.ended || model.race_rows.size() < 2) {
+        return;  // nobody to be ahead of, or the race is over
+    }
+    if (behind) {
+        model.race_verdict = text(content, "ui.race_behind");
+        model.race_verdict_class = "warn";
+    } else if (ahead) {
+        model.race_verdict = text(content, "ui.race_ahead");
+        model.race_verdict_class = "good";
+    } else {
+        model.race_verdict = text(content, "ui.race_level");
+    }
+}
+
 // ---- dashboard: needs you ----
 
 struct PendingNeed {
@@ -1706,6 +1794,7 @@ void refreshModel(const Session& session, UiModel& model) {
     const Orders orders = readOrders(session);
     fillPending(session, orders, model);
     fillStrip(session, model);
+    fillRace(session, model);
     fillNeeds(session, orders, model);
     fillOwned(session, orders, model);
     fillFinanceRow(session, model);

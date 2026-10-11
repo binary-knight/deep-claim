@@ -133,6 +133,36 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
 #strip .brk { display: none; }
 #strip .chip { margin-right: 4dp; }
 
+/* ---- The race (spec 010) ----
+   On the status strip, the time left and the verdict chip. On the Dashboard,
+   a well like the strip: the deadline at header-figure size with the verdict
+   under it, then a line a company. Column widths are the widest text each
+   holds in the mono face at 14dp (8.4dp a character): 22 characters of
+   "3 of 3 stages complete", 14 of "100% delivered". The bar takes the rest. */
+#strip .race .deadline, #strip .race .founded { margin-right: 8dp; }
+#race {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    background-color: #172031;
+    border: 1dp #243249;
+    border-radius: 2dp;
+    padding: 12dp 16dp;
+    margin-bottom: 16dp;
+}
+#race .when { display: block; flex: 0 0 auto; width: 272dp; margin-right: 16dp; }
+#race .when .deadline { display: block; font-family: "JetBrains Mono"; font-size: 17dp; line-height: 22dp; font-weight: 500; white-space: nowrap; }
+#race .when .founded { display: block; font-weight: 600; }
+#race .when .verdictline { display: block; height: 24dp; line-height: 24dp; margin-top: 4dp; }
+#race .rows { display: block; flex: 1 1 0; width: 100dp; }
+#race .rrow { display: flex; flex-direction: row; align-items: center; min-height: 28dp; }
+#race .who { display: block; flex: 0 0 auto; width: 168dp; margin-right: 16dp; font-weight: 600; white-space: nowrap; overflow: hidden; }
+#race .stage { display: block; flex: 0 0 auto; width: 192dp; margin-right: 16dp; color: #c9d4e6; white-space: nowrap; }
+#race .bar { display: block; flex: 1 1 0; width: 60dp; height: 8dp; box-sizing: border-box; margin-right: 16dp; background-color: #0a0f17; border: 1dp #2f4160; border-radius: 2dp; }
+#race .bar .fill { display: block; height: 6dp; background-color: #2f8cff; }
+#race .pct { display: block; flex: 0 0 auto; width: 124dp; margin-right: 16dp; white-space: nowrap; }
+#race .research { display: block; flex: 0 0 auto; width: 152dp; color: #c9d4e6; white-space: nowrap; }
+
 /* ---- Body: rail + content ---- */
 #body { display: flex; flex-direction: row; flex: 1 1 0; min-height: 0; }
 #rail {

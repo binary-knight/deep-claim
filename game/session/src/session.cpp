@@ -46,6 +46,9 @@ Session::Session(const sim::Content& content, sim::Seed seed, const sim::GameSet
 }
 
 void Session::setSpeed(Speed speed) {
+    if (gameOver()) {
+        speed = Speed::Paused;  // a finished game's clock cannot be restarted
+    }
     if (speed != speed_ && trace_ != nullptr) {
         trace_->ui(day(), "speed", std::to_string(daysPerSecond(speed)) + " days/s");
     }
@@ -87,7 +90,8 @@ void Session::stepOneDay() {
 }
 
 bool Session::stopIfPaused() {
-    if (!pausedBy_.has_value()) {
+    // The end of the game stops the clock under any rule set.
+    if (!pausedBy_.has_value() && !gameOver()) {
         return false;
     }
     // Something the player wants to see: stop here, on this day.
@@ -300,7 +304,23 @@ bool Session::load(std::span<const std::uint8_t> bytes) {
     return true;
 }
 
+namespace {
+
+// The notice that tells the player the game is over: the program founded,
+// the deadline passed, or their own bankruptcy.
+bool endsTheGame(const sim::Notice& notice, sim::CompanyId player) {
+    using K = sim::NoticeKind;
+    return notice.kind == K::ProgramFounded || notice.kind == K::DeadlinePassed ||
+           (notice.kind == K::Bankrupt && notice.company == player);
+}
+
+}  // namespace
+
 void Session::tickOnce() {
+    // A finished game does not move: no day, no history, no trace record.
+    if (gameOver()) {
+        return;
+    }
     // The player's orders go to the sim first, then the rivals decide from
     // their own views. The sim applies everything in company order.
     giveOrders();
@@ -324,7 +344,17 @@ void Session::tickOnce() {
     if (trace_ != nullptr) {
         trace_->dayTicked(view_.day, simulation_.stateHash());
     }
-    logNotices(processed, simulation_.reportFor(kPlayer), bidPlots);
+    const std::vector<sim::Notice> notices = simulation_.reportFor(kPlayer);
+    logNotices(processed, notices, bidPlots);
+    if (gameOver()) {
+        // Whatever else the day raised, the end is what stopped the clock.
+        const auto ending =
+            std::find_if(notices.begin(), notices.end(),
+                         [](const sim::Notice& notice) { return endsTheGame(notice, kPlayer); });
+        if (ending != notices.end()) {
+            pausedBy_ = *ending;
+        }
+    }
     if (trace_ != nullptr && view_.day % sim::kDaysPerMonth == 0) {
         trace_->state(*content_, view_);
     }

@@ -1220,7 +1220,7 @@ TEST_CASE("Saves with impossible losing-day fields are rejected", "[mines][spec0
     REQUIRE(simulation.state().mines[0].lossDays == 3);
     CHECK(loads(3, 0));
     CHECK(loads(3, 1));
-    CHECK(loads(0, 1));  // announced, then a day at exactly break-even
+    CHECK(loads(0, 1));  // the flag alone is not refused
     CHECK(loads(std::numeric_limits<std::uint32_t>::max(), 1));
     CHECK_FALSE(loads(3, 2));
     CHECK_FALSE(loads(3, 255));
@@ -1407,29 +1407,38 @@ TEST_CASE("A losing mine is announced once until it has recovered and lost again
 
 TEST_CASE("A break-even day between two runs of losing days does not repeat the notice",
           "[mines][spec008]") {
-    const sim::Content content = steadyLosingContent();
+    // Spec 010 (BR-014): a break-even day is a day that is not a losing day,
+    // so it counts toward the re-arm run like a profitable one. With a
+    // re-arm run of two days, one of them is not enough.
+    sim::Content content = steadyLosingContent();
+    content.balance.mineLossRearmDays = 2;
     sim::Simulation simulation(content, 1, test::setup());
     runToEveOfNotice(simulation, content, kSteadyIronTonnes);
     const sim::Day threshold = content.balance.mineLossNoticeDays;
     REQUIRE(losingNoticesOver(simulation, 1) == 1);
 
-    // One day at exactly nothing: not a losing day, and not a recovery.
+    // One day at exactly nothing: not a losing day, and not yet a recovery.
     CHECK(breakEvenDay(simulation, content) == 0);
     CHECK(simulation.state().mines[0].lossDays == 0);
     CHECK(simulation.state().mines[0].lossAnnounced == 1);
+    CHECK(simulation.state().mines[0].lossClearDays == 1);
 
     // The loss resumes and lasts the full count again: the mine never
-    // returned to a positive margin, so nothing more is said (BR-006).
+    // completed the re-arm run, so nothing more is said.
     setIronPrice(simulation, content, sim::Money::fromUnits(60));
     CHECK(losingNoticesOver(simulation, threshold) == 0);
     CHECK(simulation.state().mines[0].lossDays == threshold);
     CHECK(simulation.state().mines[0].lossAnnounced == 1);
+    CHECK(simulation.state().mines[0].lossClearDays == 0);
     CHECK(losingNoticesOver(simulation, threshold) == 0);
 
-    // A profitable day is the recovery; the run after it is announced.
+    // A break-even day and a profitable day in a row are the recovery; the
+    // run after them is announced.
+    CHECK(breakEvenDay(simulation, content) == 0);
     setIronPrice(simulation, content, sim::Money::fromUnits(300));
     CHECK(losingNoticesOver(simulation, 1) == 0);
     CHECK(simulation.state().mines[0].lossAnnounced == 0);
+    CHECK(simulation.state().mines[0].lossClearDays == 0);
     setIronPrice(simulation, content, sim::Money::fromUnits(60));
     CHECK(losingNoticesOver(simulation, threshold - 1) == 0);
     CHECK(losingNoticesOver(simulation, 1) == 1);
@@ -1448,6 +1457,270 @@ TEST_CASE("A break-even day before any notice does not hold one back", "[mines][
     setIronPrice(simulation, content, sim::Money::fromUnits(60));
     CHECK(losingNoticesOver(simulation, threshold - 1) == 0);
     CHECK(losingNoticesOver(simulation, 1) == 1);
+}
+
+// Spec 010 (BR-014, playtest 4 finding 2): a day is a losing day for the
+// notice only when the loss is at least a set share of the mine's running
+// cost, and after a notice the mine must have a set run of days that are not
+// losing days before it can be told again.
+
+namespace {
+
+// The steady mine (399 t a day at a cost of $99,750) with the two numbers
+// set. At a share of 5% the smallest loss that counts is $4,987.50: iron at
+// $237.50 loses exactly that, and at $237.51 loses $3.99 less.
+sim::Content noticeContent(sim::Fixed minShare, std::uint32_t rearmDays) {
+    sim::Content c = steadyLosingContent();
+    c.balance.mineLossNoticeMinShare = minShare;
+    c.balance.mineLossRearmDays = rearmDays;
+    return c;
+}
+
+const sim::Fixed kFivePercent = sim::Fixed::fromRatio(5, 100);
+const sim::Money kIronAtTheShare = sim::Money::fromCents(23'750);
+const sim::Money kIronUnderTheShare = sim::Money::fromCents(23'751);
+const sim::Money kLossAtTheShare = sim::Money::fromCents(498'750);
+
+// `days` days with iron at `price` each morning (the market moves it again
+// every tick). Returns the losing-mine notices they raised.
+std::size_t noticesAtIronPrice(sim::Simulation& simulation, const sim::Content& content,
+                               sim::Money price, sim::Day days) {
+    std::size_t raised = 0;
+    for (sim::Day d = 0; d < days; ++d) {
+        setIronPrice(simulation, content, price);
+        raised += losingNoticesOver(simulation, 1);
+        REQUIRE(simulation.state().mines[0].lastOutputTonnes[kIron.index()] == kSteadyIronOutput);
+    }
+    return raised;
+}
+
+// The steady mine on the day its notice is raised, at the market's price.
+void runToNotice(sim::Simulation& simulation, const sim::Content& content) {
+    runToEveOfNotice(simulation, content, kSteadyIronTonnes);
+    REQUIRE(losingNoticesOver(simulation, 1) == 1);
+    REQUIRE(simulation.state().mines[0].lossAnnounced == 1);
+    REQUIRE(simulation.state().mines[0].lossClearDays == 0);
+}
+
+}  // namespace
+
+TEST_CASE("A mine losing less than the set share of its running cost is never announced",
+          "[mines][spec010]") {
+    const sim::Content content = noticeContent(kFivePercent, 30);
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, kSteadyIronTonnes)});
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+
+    // It does lose money at this price, a little under the share.
+    setIronPrice(simulation, content, kIronUnderTheShare);
+    const std::vector<sim::Money> seen = marketPrices(simulation.state());
+    CHECK(losingNoticesOver(simulation, 1) == 0);
+    const sim::Money loss = -margin(content, simulation.state(), seen);
+    CHECK(loss > sim::Money::zero());
+    CHECK(loss == kLossAtTheShare - sim::Money::fromCents(399));
+    CHECK(simulation.state().mines[0].lossDays == 0);
+
+    // However long it goes on.
+    CHECK(noticesAtIronPrice(simulation, content, kIronUnderTheShare, 20 * threshold) == 0);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+    CHECK(simulation.state().mines[0].lossClearDays == 0);
+}
+
+TEST_CASE("A mine losing the set share of its running cost is announced once after the usual days",
+          "[mines][spec010]") {
+    const sim::Content content = noticeContent(kFivePercent, 30);
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, kSteadyIronTonnes)});
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+    REQUIRE(threshold >= 2);
+    REQUIRE(simulation.state().mines[0].lossDays == 1);  // its first day, at the market's price
+
+    // A loss of exactly the share counts.
+    CHECK(noticesAtIronPrice(simulation, content, kIronAtTheShare, threshold - 2) == 0);
+    CHECK(simulation.state().mines[0].lossDays == threshold - 1);
+    setIronPrice(simulation, content, kIronAtTheShare);
+    const std::vector<sim::Notice> raised = losingNotices(simulation.tick());
+    REQUIRE(raised.size() == 1);
+    CHECK(raised[0].amount == kLossAtTheShare);
+    CHECK(raised[0].tonnes == threshold);
+    CHECK(simulation.state().mines[0].lossAnnounced == 1);
+
+    CHECK(noticesAtIronPrice(simulation, content, kIronAtTheShare, 4 * threshold) == 0);
+    CHECK(simulation.state().mines[0].lossDays == 5 * threshold);
+}
+
+TEST_CASE("A share of nothing counts every loss as a losing day", "[mines][spec010]") {
+    const sim::Content content = noticeContent(sim::Fixed::zero(), 30);
+    sim::Simulation simulation(content, 1, test::setup());
+    openMine(simulation, content, {deposit(kIron, kSteadyIronTonnes)});
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+
+    // A cent a tonne under break-even, and exactly at it.
+    CHECK(noticesAtIronPrice(simulation, content, sim::Money::fromCents(24'999), 1) == 0);
+    CHECK(simulation.state().mines[0].lossDays == 2);
+    CHECK(noticesAtIronPrice(simulation, content, sim::Money::fromUnits(250), 1) == 0);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    CHECK(noticesAtIronPrice(simulation, content, sim::Money::fromCents(24'999), threshold) == 1);
+}
+
+TEST_CASE("One profitable day after a notice does not re-arm it", "[mines][spec010]") {
+    const sim::Content content = noticeContent(sim::Fixed::zero(), 30);
+    sim::Simulation simulation(content, 1, test::setup());
+    runToNotice(simulation, content);
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+
+    CHECK(noticesAtIronPrice(simulation, content, sim::Money::fromUnits(300), 1) == 0);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 1);
+    CHECK(simulation.state().mines[0].lossClearDays == 1);
+
+    // The loss resumes: the run of days starts again and nothing is said.
+    setIronPrice(simulation, content, sim::Money::fromUnits(60));
+    CHECK(losingNoticesOver(simulation, 1) == 0);
+    CHECK(simulation.state().mines[0].lossDays == 1);
+    CHECK(simulation.state().mines[0].lossClearDays == 0);
+    CHECK(losingNoticesOver(simulation, 4 * threshold) == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 1);
+}
+
+TEST_CASE("A re-arm run broken by a losing day starts again", "[mines][spec010]") {
+    const sim::Content content = noticeContent(sim::Fixed::zero(), 30);
+    sim::Simulation simulation(content, 1, test::setup());
+    runToNotice(simulation, content);
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+    const sim::Money profit = sim::Money::fromUnits(300);
+    const sim::Money losing = sim::Money::fromUnits(60);
+
+    // One day short of the run, a losing day, and one day short again.
+    CHECK(noticesAtIronPrice(simulation, content, profit, 29) == 0);
+    CHECK(simulation.state().mines[0].lossClearDays == 29);
+    CHECK(noticesAtIronPrice(simulation, content, losing, 1) == 0);
+    CHECK(simulation.state().mines[0].lossClearDays == 0);
+    CHECK(noticesAtIronPrice(simulation, content, profit, 29) == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 1);
+    CHECK(noticesAtIronPrice(simulation, content, losing, 2 * threshold) == 0);
+}
+
+TEST_CASE("After the full re-arm run a new run of losing days is announced", "[mines][spec010]") {
+    const sim::Content content = noticeContent(sim::Fixed::zero(), 30);
+    sim::Simulation simulation(content, 1, test::setup());
+    runToNotice(simulation, content);
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+    const sim::Money losing = sim::Money::fromUnits(60);
+
+    CHECK(noticesAtIronPrice(simulation, content, sim::Money::fromUnits(300), 29) == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 1);
+    CHECK(simulation.state().mines[0].lossClearDays == 29);
+    CHECK(noticesAtIronPrice(simulation, content, sim::Money::fromUnits(300), 1) == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+    CHECK(simulation.state().mines[0].lossClearDays == 0);
+
+    // Told again, and again only after the usual days.
+    CHECK(noticesAtIronPrice(simulation, content, losing, threshold - 1) == 0);
+    CHECK(noticesAtIronPrice(simulation, content, losing, 1) == 1);
+    CHECK(noticesAtIronPrice(simulation, content, losing, 2 * threshold) == 0);
+}
+
+TEST_CASE("Days of loss under the share count toward the re-arm run", "[mines][spec010]") {
+    const sim::Content content = noticeContent(kFivePercent, 3);
+    sim::Simulation simulation(content, 1, test::setup());
+    runToNotice(simulation, content);
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+
+    // A small loss, a break-even day and another small loss: none is a
+    // losing day, so together they are the run.
+    CHECK(noticesAtIronPrice(simulation, content, kIronUnderTheShare, 1) == 0);
+    CHECK(noticesAtIronPrice(simulation, content, sim::Money::fromUnits(250), 1) == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 1);
+    CHECK(simulation.state().mines[0].lossClearDays == 2);
+    CHECK(noticesAtIronPrice(simulation, content, kIronUnderTheShare, 1) == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+
+    CHECK(noticesAtIronPrice(simulation, content, kIronAtTheShare, threshold - 1) == 0);
+    CHECK(noticesAtIronPrice(simulation, content, kIronAtTheShare, 1) == 1);
+}
+
+TEST_CASE("A mine mothballed during its re-arm run starts afresh when reopened",
+          "[mines][spec010]") {
+    const sim::Content content = noticeContent(sim::Fixed::zero(), 30);
+    sim::Simulation simulation(content, 1, test::setup());
+    runToNotice(simulation, content);
+    const sim::Day threshold = content.balance.mineLossNoticeDays;
+    CHECK(noticesAtIronPrice(simulation, content, sim::Money::fromUnits(300), 1) == 0);
+    REQUIRE(simulation.state().mines[0].lossAnnounced == 1);
+    REQUIRE(simulation.state().mines[0].lossClearDays == 1);
+
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 0});
+    CHECK(losingNoticesOver(simulation, 1) == 0);
+    REQUIRE(simulation.state().mines[0].state == sim::MineState::Mothballed);
+    CHECK(simulation.state().mines[0].lossDays == 0);
+    CHECK(simulation.state().mines[0].lossAnnounced == 0);
+    CHECK(simulation.state().mines[0].lossClearDays == 0);
+
+    // No re-arm run was completed: stopping the mine ended the episode.
+    // (The price is set first: loading a save drops an order not yet run.)
+    setIronPrice(simulation, content, sim::Money::fromUnits(60));
+    simulation.submit(sim::SetMineState{kPlayer, sim::MineId(0), 1});
+    CHECK(losingNoticesOver(simulation, threshold - 1) == 0);
+    CHECK(losingNoticesOver(simulation, 1) == 1);
+}
+
+TEST_CASE("The re-arm count survives save and load and is part of the state hash",
+          "[mines][spec010][save]") {
+    const sim::Content content = noticeContent(sim::Fixed::zero(), 30);
+    sim::Simulation original(content, 5, test::setup());
+    runToNotice(original, content);
+    CHECK(noticesAtIronPrice(original, content, sim::Money::fromUnits(300), 3) == 0);
+    REQUIRE(original.state().mines[0].lossClearDays == 3);
+
+    sim::Simulation restored(content, 6, test::setup());
+    REQUIRE(restored.load(original.save()));
+    CHECK(restored.state().mines[0].lossClearDays == 3);
+    CHECK(restored.state().mines[0].lossAnnounced == 1);
+    CHECK(restored.stateHash() == original.stateHash());
+
+    sim::WorldState edited = original.state();
+    edited.mines[0].lossClearDays += 1;
+    CHECK(sim::hashWorld(edited) != original.stateHash());
+}
+
+TEST_CASE("Saves with an impossible re-arm count are rejected", "[mines][spec010][save]") {
+    const sim::Content content = noticeContent(sim::Fixed::zero(), 30);
+    sim::Simulation simulation(content, 1, test::setup());
+    runToNotice(simulation, content);
+    const auto loads = [&](std::uint32_t lossDays, std::uint8_t lossAnnounced,
+                           std::uint32_t lossClearDays) {
+        sim::WorldState edited = simulation.state();
+        edited.mines[0].lossDays = lossDays;
+        edited.mines[0].lossAnnounced = lossAnnounced;
+        edited.mines[0].lossClearDays = lossClearDays;
+        sim::Simulation scratch(content, 2, test::setup());
+        return scratch.load(sim::saveGame(edited, {}, sim::hashContent(content)));
+    };
+
+    CHECK(loads(0, 1, 1));
+    CHECK(loads(0, 1, 30));
+    // Never above the re-arm number.
+    CHECK_FALSE(loads(0, 1, 31));
+    CHECK_FALSE(loads(0, 1, std::numeric_limits<std::uint32_t>::max()));
+    // Counted only after a notice.
+    CHECK_FALSE(loads(0, 0, 1));
+    // A losing day ends the run, so the two counts are never both set.
+    CHECK_FALSE(loads(1, 1, 1));
+    CHECK(loads(1, 1, 0));
+}
+
+TEST_CASE("The losing-mine notice's share and re-arm days are part of the content fingerprint",
+          "[mines][spec010][content]") {
+    const sim::Content content = test::makeContent();
+    sim::Content share = content;
+    share.balance.mineLossNoticeMinShare = sim::Fixed::fromRatio(1, 100);
+    sim::Content rearm = content;
+    rearm.balance.mineLossRearmDays = 2;
+    CHECK(sim::hashContent(share) != sim::hashContent(content));
+    CHECK(sim::hashContent(rearm) != sim::hashContent(content));
+    CHECK(sim::hashContent(share) != sim::hashContent(rearm));
 }
 
 TEST_CASE("A mothballed mine is never announced as losing money", "[mines][spec008]") {

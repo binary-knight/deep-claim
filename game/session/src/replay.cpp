@@ -120,6 +120,12 @@ private:
         if (reachedStop()) {
             return false;
         }
+        // A finished game has no further day (spec 010). Builds before that
+        // was enforced recorded the last day again and again; the replay
+        // ends where the game did.
+        if (result_.session->gameOver()) {
+            return false;
+        }
         if (result_.session->day() + 1 != record.day) {
             return fail(std::format("trace is on day {} but the replay is on day {}", record.day,
                                     result_.session->day()));

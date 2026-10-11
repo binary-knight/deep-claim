@@ -1433,3 +1433,482 @@ TEST_CASE("Several mines turning to a loss on one day stop the clock once", "[se
     CHECK(session.speed() == game::Speed::Fastest);
     CHECK(countKind(session, sim::NoticeKind::MineLosingMoney) == 2);
 }
+
+// ---- spec 010: the race ends the game and the rival's progress stops the clock ----
+
+namespace {
+
+const sim::CompanyId kRival(1);
+
+sim::Content raceContent() {
+    sim::Content content = test::makeContent();
+    test::addStrings(content);
+    return content;
+}
+
+// A two-company game a couple of days in: an outcome names a day that has
+// been played, so nothing here ends on day zero.
+sim::WorldState raceWorld(const sim::Content& content) {
+    sim::Simulation simulation(content, 7, test::setup());
+    simulation.tick(2);
+    return simulation.state();
+}
+
+// Leaves the company one CompleteProgramStage order from finishing the stage
+// with this index: the stages before it done, its research finished, its
+// goods delivered and the cash at hand.
+void putStageInReach(const sim::Content& content, sim::Company& company, std::uint32_t stage) {
+    company.programStage = stage;
+    for (std::uint32_t s = 0; s <= stage; ++s) {
+        company.completedTechs.push_back(content.program.stages[s].research);
+    }
+    std::fill(company.programDelivered.begin(), company.programDelivered.end(), 0);
+    for (const sim::ProgramRequirement& need : content.program.stages[stage].requirements) {
+        company.programDelivered[need.resource.index()] = need.tonnes;
+    }
+    company.cash = sim::Money::fromUnits(20'000'000);
+}
+
+// The save's own orders are applied by the next tick, which is how a test
+// has the rival act on a chosen day.
+std::vector<std::uint8_t> raceSave(const sim::Content& content, const sim::WorldState& state,
+                                   const std::vector<sim::Command>& orders = {}) {
+    return sim::saveGame(state, orders, sim::hashContent(content));
+}
+
+const game::LogEntry* firstOfKind(const game::Session& session, sim::NoticeKind kind) {
+    const auto found = std::find_if(session.log().begin(), session.log().end(),
+                                    [&](const game::LogEntry& e) { return e.notice.kind == kind; });
+    return found == session.log().end() ? nullptr : &*found;
+}
+
+std::string textOfKind(const game::Session& session, sim::NoticeKind kind) {
+    const game::LogEntry* entry = firstOfKind(session, kind);
+    return entry == nullptr ? std::string("(no such notice)") : entry->text;
+}
+
+// An ended game does not move: whatever the player presses, the day, the
+// histories, the log and the trace stay as the end left them.
+void checkNothingMovesAfterTheEnd(game::Session& session, const std::ostringstream& trace) {
+    REQUIRE(session.gameOver());
+    const sim::Day day = session.day();
+    const std::uint64_t hash = session.stateHash();
+    const std::size_t cash = session.cashHistory().size();
+    const std::size_t log = session.log().size();
+    const std::string traced = trace.str();
+    for (int i = 0; i < 3; ++i) {
+        session.stepOneDay();
+        session.setSpeed(game::Speed::Fastest);
+        CHECK(session.advance(5.0) == 0);
+        session.togglePause();
+    }
+    CHECK(session.speed() == game::Speed::Paused);  // the clock cannot be restarted
+    CHECK(session.day() == day);
+    CHECK(session.stateHash() == hash);
+    CHECK(session.cashHistory().size() == cash);
+    CHECK(session.log().size() == log);
+    CHECK(trace.str() == traced);
+}
+
+}  // namespace
+
+TEST_CASE("The session stops on the day the player founds the program", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    putStageInReach(content, world.companies[game::Session::kPlayer.index()], 2);
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world)));
+    session.setTrace(&trace);
+    session.setAutoPause(neverPause());
+    const sim::Day eve = session.day();
+    REQUIRE_FALSE(session.gameOver());
+
+    session.submit(sim::CompleteProgramStage{});
+    session.setSpeed(game::Speed::Fastest);
+    CHECK(session.advance(1.0) == 1);  // 20 days were due; the game ended on the first
+
+    CHECK(session.gameOver());
+    CHECK(session.day() == eve + 1);
+    CHECK(session.view().outcome.ended);
+    CHECK(session.view().outcome.day == eve);
+    CHECK(session.view().outcome.founder == game::Session::kPlayer);
+    // The end stops the clock whatever the rules say, and says why.
+    CHECK(session.speed() == game::Speed::Paused);
+    const std::optional<sim::Notice> why = session.takePausedBy();
+    REQUIRE(why.has_value());
+    CHECK(why->kind == sim::NoticeKind::ProgramFounded);
+    CHECK(textOfKind(session, sim::NoticeKind::ProgramFounded) ==
+          "Player has founded the program. The race is over.");
+    CHECK(countText(out.str(), R"("t":"day")") == 1);
+    checkNothingMovesAfterTheEnd(session, out);
+}
+
+TEST_CASE("The session stops on the day the rival founds the program", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    putStageInReach(content, world.companies[kRival.index()], 2);
+
+    SECTION("with the player two stages in, a lesser partner") {
+        world.companies[game::Session::kPlayer.index()].programStage = 2;
+    }
+    SECTION("with the player behind, lost") {
+        world.companies[game::Session::kPlayer.index()].programStage = 1;
+    }
+    const bool partner = world.companies[game::Session::kPlayer.index()].programStage == 2;
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world, {sim::CompleteProgramStage{kRival}})));
+    session.setTrace(&trace);
+    session.setAutoPause(neverPause());
+    const sim::Day eve = session.day();
+
+    session.setSpeed(game::Speed::Fastest);
+    CHECK(session.advance(1.0) == 1);
+
+    CHECK(session.gameOver());
+    CHECK(session.day() == eve + 1);
+    CHECK(session.view().outcome.founder == kRival);
+    CHECK(session.view().outcome.results.at(game::Session::kPlayer.index()) ==
+          (partner ? sim::ProgramResult::LesserPartner : sim::ProgramResult::Lost));
+    CHECK_FALSE(session.view().bankrupt);
+    CHECK(session.speed() == game::Speed::Paused);
+    const std::optional<sim::Notice> why = session.takePausedBy();
+    REQUIRE(why.has_value());
+    CHECK(why->kind == sim::NoticeKind::ProgramFounded);
+    CHECK(why->company == kRival);
+    CHECK(textOfKind(session, sim::NoticeKind::ProgramFounded) ==
+          "Rival has founded the program. The race is over.");
+    checkNothingMovesAfterTheEnd(session, out);
+}
+
+TEST_CASE("The session stops when the deadline passes with nobody finished", "[session][spec010]") {
+    sim::Content content = raceContent();
+    content.program.deadlineDay = 6;
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 7, test::setup());
+    session.setTrace(&trace);
+    session.setAutoPause(neverPause());
+
+    session.setSpeed(game::Speed::Fastest);
+    const int ticked = session.advance(1.0);
+
+    CHECK(ticked < 20);  // the deadline cut the run short
+    CHECK(session.gameOver());
+    CHECK(session.view().outcome.ended);
+    CHECK_FALSE(session.view().outcome.founder.valid());
+    CHECK(session.day() == session.view().outcome.day + 1);
+    CHECK(countText(out.str(), R"("t":"day")") == static_cast<std::size_t>(ticked));
+    CHECK(session.cashHistory().size() == static_cast<std::size_t>(ticked) + 1);
+    CHECK(session.speed() == game::Speed::Paused);
+    const std::optional<sim::Notice> why = session.takePausedBy();
+    REQUIRE(why.has_value());
+    CHECK(why->kind == sim::NoticeKind::DeadlinePassed);
+    CHECK(textOfKind(session, sim::NoticeKind::DeadlinePassed) ==
+          "The deadline has passed. Nobody founded the program.");
+    checkNothingMovesAfterTheEnd(session, out);
+}
+
+TEST_CASE("A rival's stage stops the clock under the default rules", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    putStageInReach(content, world.companies[kRival.index()], 0);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world, {sim::CompleteProgramStage{kRival}})));
+    const sim::Day eve = session.day();
+
+    session.setSpeed(game::Speed::Fastest);
+    CHECK(session.advance(1.0) == 1);
+
+    CHECK(session.speed() == game::Speed::Paused);
+    CHECK(session.day() == eve + 1);
+    CHECK_FALSE(session.gameOver());
+    const std::optional<sim::Notice> why = session.takePausedBy();
+    REQUIRE(why.has_value());
+    CHECK(why->kind == sim::NoticeKind::ProgramStageComplete);
+    CHECK(why->company == kRival);
+}
+
+TEST_CASE("The session reports the outcome the sim set", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    putStageInReach(content, world.companies[game::Session::kPlayer.index()], 2);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world)));
+    session.setAutoPause(neverPause());
+    CHECK_FALSE(session.outcome().ended);
+    CHECK_FALSE(session.gameOver());
+
+    session.submit(sim::CompleteProgramStage{});
+    session.stepOneDay();
+
+    CHECK(session.gameOver());
+    CHECK(session.outcome().ended);
+    CHECK(session.outcome().founder == game::Session::kPlayer);
+    CHECK(session.outcome().day == session.view().outcome.day);
+    CHECK(session.outcome().results.at(game::Session::kPlayer.index()) ==
+          sim::ProgramResult::Founded);
+    CHECK(session.outcome().results.at(kRival.index()) == sim::ProgramResult::Lost);
+
+    // A finished game loads as finished: over at once, with the clock stopped.
+    game::Session other(content, 7, test::setup());
+    REQUIRE(other.load(session.save()));
+    CHECK(other.gameOver());
+    CHECK(other.outcome().founder == game::Session::kPlayer);
+    other.setSpeed(game::Speed::Normal);
+    CHECK(other.speed() == game::Speed::Paused);
+    CHECK(other.advance(3.0) == 0);
+}
+
+TEST_CASE("The end record of a session's trace carries the outcome", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    putStageInReach(content, world.companies[kRival.index()], 2);
+    world.companies[game::Session::kPlayer.index()].programStage = 2;
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world, {sim::CompleteProgramStage{kRival}})));
+    session.setTrace(&trace);
+    session.setAutoPause(neverPause());
+    session.stepOneDay();
+    REQUIRE(session.gameOver());
+
+    trace.end(session.day(), session.view());
+
+    std::istringstream lines(out.str());
+    std::string line;
+    std::string last;
+    while (std::getline(lines, line)) {
+        last = line;
+    }
+    game::TraceRecord record;
+    std::string error;
+    REQUIRE(game::parseTraceLine(last, record, error));
+    CHECK(record.type == "end");
+    CHECK(record.day == session.day());
+    REQUIRE(record.outcome.has_value());
+    CHECK(record.outcome->ended);
+    CHECK(record.outcome->day == session.outcome().day);
+    CHECK(record.outcome->founder == kRival);
+    CHECK(record.outcome->result == "lesser_partner");
+}
+
+TEST_CASE("The rival-program stop rule has a stable key and is on by default",
+          "[session][spec010]") {
+    CHECK(game::pauseOnKey(game::PauseOn::RivalProgram) == "rival_program");
+    const game::AutoPause defaults = game::AutoPause::defaults();
+    CHECK(defaults.isEnabled(game::PauseOn::RivalProgram));
+
+    // A rival starting a stage's research or completing a stage is the
+    // reason; the player's own progress is not, and nor is anything else
+    // the program raises.
+    for (const sim::NoticeKind kind :
+         {sim::NoticeKind::ProgramResearchStarted, sim::NoticeKind::ProgramStageComplete}) {
+        sim::Notice progress = sim::makeNotice(kind, kRival, sim::PlotId());
+        CHECK(game::AutoPause::reasonFor(progress, game::Session::kPlayer) ==
+              game::PauseOn::RivalProgram);
+        CHECK(defaults.shouldPause(progress, game::Session::kPlayer));
+        progress.company = game::Session::kPlayer;
+        CHECK_FALSE(game::AutoPause::reasonFor(progress, game::Session::kPlayer).has_value());
+        CHECK_FALSE(defaults.shouldPause(progress, game::Session::kPlayer));
+    }
+    for (const sim::NoticeKind kind :
+         {sim::NoticeKind::ProgramDelivered, sim::NoticeKind::ProgramFounded,
+          sim::NoticeKind::DeadlinePassed}) {
+        const sim::Notice other = sim::makeNotice(kind, kRival, sim::PlotId());
+        CHECK_FALSE(game::AutoPause::reasonFor(other, game::Session::kPlayer).has_value());
+    }
+
+    // The rule is written out with the others and comes back switched off.
+    game::AutoPause rules = game::AutoPause::defaults();
+    CHECK(rules.toText().find("rival_program=1\n") != std::string::npos);
+    rules.set(game::PauseOn::RivalProgram, false);
+    CHECK(rules.toText().find("rival_program=0\n") != std::string::npos);
+    game::AutoPause restored = game::AutoPause::defaults();
+    CHECK(restored.fromText(rules.toText()));
+    CHECK_FALSE(restored.isEnabled(game::PauseOn::RivalProgram));
+    CHECK(restored.enabled == rules.enabled);
+}
+
+TEST_CASE("A settings file from before the rival-program rule keeps its toggles",
+          "[session][spec010]") {
+    // As spec 008 wrote it: ten keys, no rival_program.
+    const std::string old =
+        "insolvency=1\nbankrupt=1\nauction_won=0\nauction_lost=1\n"
+        "survey_complete=0\nmine_operational=1\nmine_found_nothing=1\n"
+        "idle_mine=0\nresearch_complete=0\nmine_losing=0\n";
+    game::AutoPause migrated = game::AutoPause::defaults();
+    CHECK(migrated.fromText(old));
+    CHECK(migrated.isEnabled(game::PauseOn::RivalProgram));
+
+    game::AutoPause expected = game::AutoPause::defaults();
+    expected.set(game::PauseOn::AuctionWon, false);
+    expected.set(game::PauseOn::SurveyComplete, false);
+    expected.set(game::PauseOn::MineOperational, true);
+    expected.set(game::PauseOn::IdleMine, false);
+    expected.set(game::PauseOn::ResearchComplete, false);
+    expected.set(game::PauseOn::MineLosing, false);
+    CHECK(migrated.enabled == expected.enabled);
+}
+
+namespace {
+
+// Only the rival-program rule, so nothing else the day raises can be what
+// stopped the clock.
+game::AutoPause onlyRivalProgram(bool on) {
+    game::AutoPause rules = neverPause();
+    rules.set(game::PauseOn::RivalProgram, on);
+    return rules;
+}
+
+}  // namespace
+
+TEST_CASE("A rival starting a stage's research stops the clock that day", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    const sim::TechId project = content.program.stages[0].research;
+    sim::WorldState world = raceWorld(content);
+    world.companies[kRival.index()].cash = sim::Money::fromUnits(20'000'000);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world, {sim::StartResearch{kRival, project}})));
+    const sim::Day eve = session.day();
+    session.setSpeed(game::Speed::Fastest);
+
+    SECTION("with the rule on") {
+        session.setAutoPause(onlyRivalProgram(true));
+        CHECK(session.advance(1.0) == 1);  // 20 days were due; the first one stopped it
+        CHECK(session.speed() == game::Speed::Paused);
+        CHECK(session.day() == eve + 1);
+        const std::optional<sim::Notice> why = session.takePausedBy();
+        REQUIRE(why.has_value());
+        CHECK(why->kind == sim::NoticeKind::ProgramResearchStarted);
+        CHECK(why->company == kRival);
+        // Resuming works, and the same start is not announced twice.
+        session.setSpeed(game::Speed::Fastest);
+        CHECK(session.advance(1.0) == 20);
+    }
+    SECTION("with the rule off the log still says so and the clock runs on") {
+        session.setAutoPause(onlyRivalProgram(false));
+        CHECK(session.advance(1.0) == 20);
+        CHECK(session.speed() == game::Speed::Fastest);
+        CHECK(session.day() == eve + 20);
+        CHECK_FALSE(session.takePausedBy().has_value());
+    }
+    REQUIRE(countKind(session, sim::NoticeKind::ProgramResearchStarted) == 1);
+    const game::LogEntry* line = firstOfKind(session, sim::NoticeKind::ProgramResearchStarted);
+    CHECK(line->day == eve);  // logged on the day it was raised
+    CHECK(line->text == "Rival has started the research for stage 1 of the program.");
+}
+
+TEST_CASE("A rival completing a stage stops the clock that day", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    putStageInReach(content, world.companies[kRival.index()], 1);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world, {sim::CompleteProgramStage{kRival}})));
+    const sim::Day eve = session.day();
+    session.setSpeed(game::Speed::Fastest);
+
+    SECTION("with the rule on") {
+        session.setAutoPause(onlyRivalProgram(true));
+        CHECK(session.advance(1.0) == 1);
+        CHECK(session.speed() == game::Speed::Paused);
+        CHECK(session.day() == eve + 1);
+        const std::optional<sim::Notice> why = session.takePausedBy();
+        REQUIRE(why.has_value());
+        CHECK(why->kind == sim::NoticeKind::ProgramStageComplete);
+        CHECK(why->company == kRival);
+    }
+    SECTION("with the rule off the log still says so and the clock runs on") {
+        session.setAutoPause(onlyRivalProgram(false));
+        CHECK(session.advance(0.25) == 5);
+        CHECK(session.speed() == game::Speed::Fastest);
+        CHECK(session.day() == eve + 5);
+        CHECK_FALSE(session.takePausedBy().has_value());
+    }
+    CHECK_FALSE(session.gameOver());
+    const game::LogEntry* line = firstOfKind(session, sim::NoticeKind::ProgramStageComplete);
+    REQUIRE(line != nullptr);
+    CHECK(line->day == eve);
+    CHECK(line->text == "Rival completed stage 2 of the program for " +
+                            game::formatMoney(content.program.stages[1].cost) + ".");
+}
+
+TEST_CASE("The player's own program progress is logged and does not stop the clock",
+          "[session][spec010]") {
+    const sim::Content content = raceContent();
+    const sim::ResourceId iron(0);
+    sim::WorldState world = raceWorld(content);
+    sim::Company& player = world.companies[game::Session::kPlayer.index()];
+    player.cash = sim::Money::fromUnits(20'000'000);
+    player.inventoryTonnes[iron.index()] = 1'500;
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world)));
+    session.setAutoPause(onlyRivalProgram(true));
+    const sim::Day eve = session.day();
+
+    // The research for the first stage, and a delivery toward it.
+    session.submit(sim::StartResearch{{}, content.program.stages[0].research});
+    session.submit(sim::DeliverToProgram{{}, iron, 1'000});
+    session.setSpeed(game::Speed::Fastest);
+    CHECK(session.advance(0.25) == 5);
+    CHECK(session.speed() == game::Speed::Fastest);
+    CHECK_FALSE(session.takePausedBy().has_value());
+    const game::LogEntry* started = firstOfKind(session, sim::NoticeKind::ProgramResearchStarted);
+    REQUIRE(started != nullptr);
+    CHECK(started->notice.company == game::Session::kPlayer);
+    CHECK(started->day == eve);
+    CHECK(started->text == "Player has started the research for stage 1 of the program.");
+    CHECK(textOfKind(session, sim::NoticeKind::ProgramDelivered) ==
+          "Delivered " + game::formatTonnes(1'000) + " of Iron to the program.");
+
+    // The stage itself, once its research is in.
+    editWorld(session, content, test::setup(), [&](sim::WorldState& edited) {
+        edited.companies[game::Session::kPlayer.index()].completedTechs.push_back(
+            content.program.stages[0].research);
+        edited.research.clear();
+    });
+    session.setAutoPause(onlyRivalProgram(true));
+    const sim::Day stageEve = session.day();
+    session.submit(sim::CompleteProgramStage{});
+    session.setSpeed(game::Speed::Fastest);
+    CHECK(session.advance(0.25) == 5);
+    CHECK(session.speed() == game::Speed::Fastest);
+    CHECK_FALSE(session.takePausedBy().has_value());
+    const game::LogEntry* done = firstOfKind(session, sim::NoticeKind::ProgramStageComplete);
+    REQUIRE(done != nullptr);
+    CHECK(done->notice.company == game::Session::kPlayer);
+    CHECK(done->day == stageEve);
+    CHECK(done->text == "Player completed stage 1 of the program for " +
+                            game::formatMoney(content.program.stages[0].cost) + ".");
+}
+
+TEST_CASE("The player's bankruptcy stops the clock whatever the rules say", "[session][spec010]") {
+    const sim::Content content = raceContent();
+    sim::WorldState world = raceWorld(content);
+    world.companies[game::Session::kPlayer.index()].cash = sim::Money::fromUnits(-50'000'000);
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    game::Session session(content, 7, test::setup());
+    REQUIRE(session.load(raceSave(content, world)));
+    session.setTrace(&trace);
+    session.setAutoPause(neverPause());
+
+    session.setSpeed(game::Speed::Fastest);
+    for (int i = 0; i < 20 && !session.gameOver(); ++i) {
+        session.advance(1.0);
+    }
+
+    REQUIRE(session.gameOver());
+    CHECK(session.view().bankrupt);
+    CHECK_FALSE(session.outcome().ended);  // the race is still open; the player is out of it
+    CHECK(session.speed() == game::Speed::Paused);
+    const std::optional<sim::Notice> why = session.takePausedBy();
+    REQUIRE(why.has_value());
+    CHECK(why->kind == sim::NoticeKind::Bankrupt);
+    CHECK(why->company == game::Session::kPlayer);
+    checkNothingMovesAfterTheEnd(session, out);
+}

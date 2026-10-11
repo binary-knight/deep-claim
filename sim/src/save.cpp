@@ -442,9 +442,17 @@ bool validLowWarning(const WorldState& state, const Mine& mine) {
 // day a mine stops. A closed mine is the exception: bankruptcy is declared
 // in the finance step, after the mines step counted the day, so the count
 // stands until the next day's mines step.
-bool validLossFields(const Mine& mine) {
-    return mine.lossAnnounced <= 1 && (mine.lossDays == 0 || mine.state == MineState::Operating ||
-                                       mine.state == MineState::Closed);
+// The re-arm count (spec 010) runs only after a notice, never past the
+// re-arm number, and a losing day ends it, so it never stands beside a count
+// of losing days.
+bool validLossFields(const Content& content, const Mine& mine) {
+    const bool flag = mine.lossAnnounced <= 1;
+    const bool count =
+        mine.lossDays == 0 || mine.state == MineState::Operating || mine.state == MineState::Closed;
+    const bool clear =
+        mine.lossClearDays == 0 || (mine.lossAnnounced == 1 && mine.lossDays == 0 &&
+                                    mine.lossClearDays <= content.balance.mineLossRearmDays);
+    return flag && count && clear;
 }
 
 bool validateMines(const Content& content, const WorldState& state) {
@@ -452,7 +460,7 @@ bool validateMines(const Content& content, const WorldState& state) {
         const Mine& mine = state.mines[i];
         if (!validateMineShape(content, state, mine, MineId(i)) ||
             !validateMineAccounting(content, state, mine) || !validLowWarning(state, mine) ||
-            !validLossFields(mine)) {
+            !validLossFields(content, mine)) {
             return false;
         }
     }

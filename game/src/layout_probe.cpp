@@ -22,6 +22,11 @@
 // costs far more than ore fetches: it plays the fixed game to a mine that
 // loses money and exits non-zero when the mine's row, the plot's panel, the
 // log line or the clock are wrong, with the stop rule on and with it off.
+// Before that app, the first one plays the race (spec 010): the fixed game
+// to a mine with stock the first stage needs, delivered by orders, and it
+// exits non-zero when the deadline, the verdict, either company's stage
+// count, percentage, research state or bar differ from the sim's view, on
+// the status strip of every tab and on the Dashboard's race strip.
 // Not part of the shipped game.
 #include "sim/commands.h"
 #include "sim/view.h"
@@ -38,17 +43,21 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -1636,10 +1645,305 @@ int probeLosingMine(Rml::Context& context, game::App& app, LoggingSystem& system
     return laidOut ? 0 : kLayoutFailure;
 }
 
-}  // namespace
+// ---- the race for the program (spec 010) ----
 
-int main(int argc, char** argv) {
-    const std::span<char*> args(argv, static_cast<std::size_t>(argc));
+constexpr int kRaceFailure = 8;
+constexpr float kBarTolerance = 1.0F;  // a bar's fill against its track, in dp
+// The race scenario delivers once a fifth of what the stage needs of some
+// good is in stock, so the player's percentage is a figure well above zero.
+constexpr std::int64_t kRaceStockShare = 5;
+
+// One company's line on the race strip, as the catalogue words the sim's
+// figures for it.
+struct RaceLine {
+    std::string who;       // "You", or the rival's name
+    std::string stage;     // "0 of 3 stages complete"
+    std::string percent;   // "12% delivered"
+    std::string research;  // "research not started"
+    std::int64_t permille = 0;
+};
+
+// What the strip must read, worked out here from the sim's view and the
+// catalogue, independently of the client's model.
+struct RaceExpected {
+    std::string deadline;         // "29 y 201 d to the deadline"
+    std::string verdict;          // "Ahead", "Behind" or "Level"
+    std::vector<RaceLine> lines;  // the player first, then every rival
+};
+
+std::string researchWords(const sim::Content& content, sim::ProgramResearchState state) {
+    switch (state) {
+        case sim::ProgramResearchState::NotStarted:
+            return game::text(content, "ui.race_research_not_started");
+        case sim::ProgramResearchState::InProgress:
+            return game::text(content, "ui.race_research_in_progress");
+        case sim::ProgramResearchState::Done:
+            return game::text(content, "ui.race_research_done");
+    }
+    return {};
+}
+
+RaceExpected simRace(const game::Session& session) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    RaceExpected expected;
+    const sim::Day left = view.deadlineDay > view.day ? view.deadlineDay - view.day : 0;
+    expected.deadline = game::text(content, "ui.race_deadline",
+                                   {{"years", std::to_string(left / sim::kDaysPerYear)},
+                                    {"days", std::to_string(left % sim::kDaysPerYear)}});
+    const std::string total = std::to_string(content.program.stages.size());
+    for (const sim::ProgramPublicView& program : view.programs) {
+        RaceLine line;
+        line.who = program.company == game::Session::kPlayer
+                       ? game::text(content, "ui.race_you")
+                       : view.companies[program.company.index()].name;
+        line.stage =
+            game::text(content, "ui.race_stage",
+                       {{"done", std::to_string(program.stagesCompleted)}, {"total", total}});
+        line.percent = game::text(content, "ui.race_progress",
+                                  {{"percent", std::to_string(program.progressPermille / 10)}});
+        line.research = researchWords(content, program.researchState);
+        line.permille = program.progressPermille;
+        expected.lines.push_back(line);
+    }
+    // Stages complete first, then progress toward the current one.
+    const sim::ProgramPublicView& mine = view.programs[game::Session::kPlayer.index()];
+    bool ahead = true;
+    bool behind = false;
+    for (const sim::ProgramPublicView& program : view.programs) {
+        if (program.company == game::Session::kPlayer) {
+            continue;
+        }
+        const auto theirs = std::pair(program.stagesCompleted, program.progressPermille);
+        const auto ours = std::pair(mine.stagesCompleted, mine.progressPermille);
+        ahead = ahead && ours > theirs;
+        behind = behind || ours < theirs;
+    }
+    const char* verdict = "ui.race_level";
+    if (behind) {
+        verdict = "ui.race_behind";
+    } else if (ahead) {
+        verdict = "ui.race_ahead";
+    }
+    expected.verdict = game::text(content, verdict);
+    return expected;
+}
+
+std::string onlyText(Rml::Element* root, std::string_view tag, std::string_view cls) {
+    const std::vector<Rml::Element*> found = visibleElements(root, tag, cls);
+    return found.size() == 1 ? visibleText(found.front()) : std::format("<{} found>", found.size());
+}
+
+// The status strip under the header, on whatever tab is showing: the time
+// left and the verdict.
+void checkRaceItem(Rml::Context& context, std::string_view where, const RaceExpected& expected,
+                   Checks& checks) {
+    settle(context);
+    Rml::Element* strip = context.GetDocument(0)->GetElementById("strip");
+    checks.same(std::format("{}: the status strip's deadline", where),
+                onlyText(strip, "span", "deadline"), expected.deadline);
+    checks.same(std::format("{}: the status strip's verdict", where),
+                onlyText(strip, "span", "verdict"), expected.verdict);
+}
+
+// The Dashboard's race strip: the deadline, the verdict in words, and a line
+// a company with its stage count, a bar and the bar's figure.
+void checkRaceStrip(Rml::Context& context, std::string_view where, const RaceExpected& expected,
+                    Checks& checks) {
+    settle(context);
+    Rml::ElementDocument* doc = context.GetDocument(0);
+    Rml::Element* strip = doc->GetElementById("race");
+    checks.expect(strip != nullptr && strip->IsVisible(true),
+                  std::format("{}: no race strip on the Dashboard", where));
+    if (strip == nullptr || !strip->IsVisible(true)) {
+        return;
+    }
+    checks.same(std::format("{}: the strip's deadline", where), onlyText(strip, "span", "deadline"),
+                expected.deadline);
+    checks.same(std::format("{}: the strip's verdict", where), onlyText(strip, "span", "verdict"),
+                expected.verdict);
+    const std::vector<Rml::Element*> rows = visibleElements(strip, "div", "rrow");
+    checks.same(std::format("{}: companies on the strip", where), rows.size(),
+                expected.lines.size());
+    std::string shown;
+    for (std::size_t i = 0; i < rows.size() && i < expected.lines.size(); ++i) {
+        const RaceLine& line = expected.lines[i];
+        const std::string who = std::format("{}: {}", where, line.who);
+        checks.same(who + ": name", onlyText(rows[i], "span", "who"), line.who);
+        checks.same(who + ": stages", onlyText(rows[i], "span", "stage"), line.stage);
+        checks.same(who + ": percentage", onlyText(rows[i], "span", "pct"), line.percent);
+        checks.same(who + ": research", onlyText(rows[i], "span", "research"), line.research);
+        const std::vector<Rml::Element*> tracks = visibleElements(rows[i], "div", "bar");
+        float track = 0.0F;
+        float fill = 0.0F;
+        if (tracks.size() == 1 && tracks.front()->GetNumChildren() == 1) {
+            track = tracks.front()->GetBox().GetSize(Rml::BoxArea::Content).x;
+            fill = tracks.front()->GetChild(0)->GetBox().GetSize(Rml::BoxArea::Border).x;
+        }
+        const float want = track * static_cast<float>(line.permille) / 1000.0F;
+        checks.expect(track > 0.0F && std::abs(fill - want) <= kBarTolerance,
+                      std::format("{}: the bar is {:.1f}dp of {:.1f}dp, expected {:.1f}dp", who,
+                                  fill, track, want));
+        shown += std::format("\n      {}: {}; bar {:.1f}dp of {:.1f}dp; {}; {}", line.who,
+                             line.stage, fill, track, line.percent, line.research);
+    }
+    std::cout << std::format("    race {}: \"{}\", {}{}\n", where, expected.deadline,
+                             expected.verdict, shown);
+}
+
+// How much room the header has left: the width of the gap between its
+// figures and its buttons.
+float headerSlack(Rml::Context& context) {
+    const std::vector<Rml::Element*> gaps =
+        visibleElements(context.GetDocument(0)->GetElementById("header"), "div", "grow");
+    return gaps.empty() ? 0.0F : gaps.front()->GetBox().GetSize(Rml::BoxArea::Border).x;
+}
+
+// Every tab in both frames, with the status strip's item checked on each and
+// the race strip on the Dashboard.
+bool probeRaceFrames(Rml::Context& context, game::App& app, LoggingSystem& system,
+                     const RaceExpected& expected, const char* label, Checks& checks) {
+    bool ok = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== {}, frame {}x{}{} ==\n", label, frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        for (std::size_t tab = 0; tab < kTabs.size(); ++tab) {
+            const bool passed = probeTab(context, app, system, frame, tab, Popover::None);
+            ok = ok && passed;
+            const std::string where = std::string(kTabs.at(tab)) + ' ' +
+                                      std::to_string(frame.width) + 'x' +
+                                      std::to_string(frame.height);
+            checkRaceItem(context, where, expected, checks);
+            if (tab == 0) {
+                checkRaceStrip(context, where, expected, checks);
+                Rml::Element* strip = context.GetDocument(0)->GetElementById("strip");
+                std::cout << std::format(
+                    "    header {}: {:.0f}dp to spare; status strip {:.0f}dp tall\n", where,
+                    headerSlack(context), strip->GetBox().GetSize(Rml::BoxArea::Border).y);
+            }
+        }
+    }
+    return ok;
+}
+
+// Starts the fixed game again and plays it, with the first stage's goods
+// taken off their standing sell orders, to a mine with a fifth of what the stage needs of one of
+// them in stock. Returns false with a reason when the fixed seed no longer gets there.
+bool playToStock(game::App& app, const sim::Content& content) {
+    const auto fail = [&](std::string_view what) {
+        std::cout << std::format("SCENARIO (race): {} ({})\n", what, app.model().day);
+        return false;
+    };
+    app.startGame(kScenarioSeed);
+    game::Session& session = app.session();
+    game::AutoPause never;
+    never.enabled.fill(false);
+    session.setAutoPause(never);
+    const sim::PlotId site = cheapestListed(session.view());
+    if (!site.valid()) {
+        return fail("no plot is listed on day 0");
+    }
+    const sim::Money ask = session.view().plots[site.index()].askPrice;
+    session.submit(sim::TakeLoan{{}, content.balance.loanMinPrincipal * 4});
+    session.submit(sim::BidOnPlot{{}, site, ask + ask / 2});
+    // A new company sells its ore as it is dug (the default standing order):
+    // the stage's goods are held back, as a player racing would hold them.
+    const std::optional<sim::ProgramStageView> stage = session.view().program.stage;
+    if (!stage) {
+        return fail("the content has no program");
+    }
+    for (const sim::ProgramRequirementView& need : stage->requirements) {
+        session.submit(sim::SetSellPolicy{{}, need.resource, 0, 0, sim::Money::zero()});
+    }
+    bool building = false;
+    const auto deliverable = [&] {
+        const sim::ProgramView& program = session.view().program;
+        return program.stage &&
+               std::ranges::any_of(
+                   program.stage->requirements, [](const sim::ProgramRequirementView& need) {
+                       return need.stockTonnes * kRaceStockShare >= need.neededTonnes;
+                   });
+    };
+    for (int day = 0; day < kScenarioMaxDays && !deliverable(); ++day) {
+        session.stepOneDay();
+        if (!building && session.view().plots[site.index()].owner == game::Session::kPlayer) {
+            session.submit(sim::BuildMine{{}, site});
+            building = true;
+        }
+    }
+    app.refreshNow();
+    return deliverable() || fail("the player has no ore in stock that the first stage needs");
+}
+
+// The race pass. The fixed game is played to a mine with ore in stock; the
+// strip is checked there, with nothing delivered and the two companies level. Then everything in
+// stock that the stage still needs is delivered by DeliverToProgram orders given to the session as
+// the Program tab will give them, one day is played, and the strip is checked and laid out again:
+// the player's figures have moved that day and the rival's are its own.
+int probeRace(Rml::Context& context, game::App& app, LoggingSystem& system,
+              const sim::Content& content) {
+    Checks checks("RACE");
+    if (!playToStock(app, content)) {
+        return kScenarioFailure;
+    }
+    game::Session& session = app.session();
+    const auto place = [&](const char* when) {
+        const sim::CompanyView& view = session.view();
+        std::string line =
+            std::format("\nrace, {}: day {} of {}", when, view.day, view.deadlineDay);
+        for (const sim::ProgramPublicView& program : view.programs) {
+            line += std::format("; {} stage {} at {} permille",
+                                view.companies[program.company.index()].name,
+                                program.stagesCompleted, program.progressPermille);
+        }
+        std::cout << line << '\n';
+    };
+    place("nothing delivered");
+    const std::int64_t before =
+        session.view().programs[game::Session::kPlayer.index()].progressPermille;
+    app.setTab(0);
+    checkRaceItem(context, "nothing delivered", simRace(session), checks);
+    checkRaceStrip(context, "nothing delivered", simRace(session), checks);
+    // playToStock left the player on a stage with goods to deliver.
+    const std::optional<sim::ProgramStageView> stage = session.view().program.stage;
+    for (const sim::ProgramRequirementView& need :
+         stage ? stage->requirements : std::vector<sim::ProgramRequirementView>()) {
+        const std::int64_t tonnes =
+            std::min(need.stockTonnes, need.neededTonnes - need.deliveredTonnes);
+        if (tonnes > 0) {
+            session.submit(sim::DeliverToProgram{{}, need.resource, tonnes});
+        }
+    }
+    session.stepOneDay();
+    app.refreshNow();
+    place("delivered");
+    const sim::CompanyView& view = session.view();
+    const sim::ProgramPublicView& mine = view.programs[game::Session::kPlayer.index()];
+    // Different places on screen: a different stage count or whole percentage.
+    if (view.outcome.ended || view.programs.size() < 2 || mine.progressPermille <= before ||
+        std::ranges::all_of(view.programs, [&](const sim::ProgramPublicView& program) {
+            return program.stagesCompleted == mine.stagesCompleted &&
+                   program.progressPermille / 10 == mine.progressPermille / 10;
+        })) {
+        std::cout << "SCENARIO (race): the delivery did not put the player and the rival at "
+                     "different places in a game still running\n";
+        return kScenarioFailure;
+    }
+    const RaceExpected expected = simRace(session);
+    const bool laidOut = probeRaceFrames(context, app, system, expected, "race", checks);
+    if (!checks.ok()) {
+        return kRaceFailure;
+    }
+    return laidOut ? 0 : kLayoutFailure;
+}
+
+constexpr int kUncaught = 9;
+
+// The whole probe; main reports whatever it throws as a failure.
+int run(std::span<char*> args) {
     const std::filesystem::path assets = args.size() > 1 ? args[1] : DC_ASSETS_DIR;
     const content::LoadResult loaded = content::loadFromDirectory(DC_DATA_DIR);
     if (!loaded.content) {
@@ -1690,6 +1994,10 @@ int main(int argc, char** argv) {
             code != 0) {
             exitCode = code;
         }
+        // The race (spec 010), on a game of its own.
+        if (const int code = probeRace(*context, app, system, *loaded.content); code != 0) {
+            exitCode = code;
+        }
     }
     // The losing mine has an app of its own, made once the first is gone: an
     // app keeps the content it was made with, and this one is the probe's
@@ -1712,4 +2020,19 @@ int main(int argc, char** argv) {
     // The app, its document and data model are gone before RmlUi shuts down.
     Rml::Shutdown();
     return exitCode;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    try {
+        return run(std::span<char*>(argv, static_cast<std::size_t>(argc)));
+    } catch (const std::exception& error) {
+        std::fputs("LAYOUT FAILURE: ", stderr);
+        std::fputs(error.what(), stderr);
+        std::fputs("\n", stderr);
+    } catch (...) {
+        std::fputs("LAYOUT FAILURE: unknown exception\n", stderr);
+    }
+    return kUncaught;
 }

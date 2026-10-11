@@ -76,7 +76,8 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // so no mine is built and the mine list is hashed empty. The new fields
     // are pinned by the save and hash tests in mines_test.cpp instead.
     // Moved once for spec 010 step 1: every company gains its program stage
-    // and deliveries, and the world gains an outcome.
+    // and deliveries, and the world gains an outcome. The mine field added
+    // later in that step (lossClearDays) did not move it, as with spec 008.
     constexpr std::uint64_t kGolden = 0x01906a0707315707ULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
@@ -101,7 +102,11 @@ TEST_CASE("Golden state hash of a played game is stable across platforms", "[det
     // Moved once for spec 010 step 1 (recorded 2026-10-11): company state
     // grew by the program stage and deliveries, and the world by an outcome.
     // No rule changed; nobody delivers or completes a stage yet.
-    constexpr std::uint64_t kGoldenPlayed = 0xb6d511501247ec2dULL;
+    // Moved again in the same step, from 0xb6d511501247ec2d, for the
+    // losing-mine notice's re-arm count (BR-014): every mine gains
+    // lossClearDays. With that field left out of the saved form the old
+    // value still held, so the fixture's game plays out as before.
+    constexpr std::uint64_t kGoldenPlayed = 0x59fab58dbf9f668dULL;
     constexpr sim::Day kDays = sim::kDaysPerYear * 3;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());

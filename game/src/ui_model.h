@@ -241,6 +241,18 @@ struct PauseRow {
     bool on = false;
 };
 
+// One company's place in the race for the program (spec 010), on the
+// Dashboard's race strip. Every figure is the sim's (sim::ProgramPublicView),
+// worded by the catalogue; nothing here is worked out by the client.
+struct RaceRow {
+    std::string name;       // "You" for the player, else the company's name
+    std::string stage;      // "1 of 3 stages complete"
+    std::string progress;   // "42% delivered": the bar's figure, toward the current stage
+    std::string bar_width;  // the bar's fill as an RCSS width, "42.5%"
+    std::string research;   // "research not started", "research under way", "research done"
+    bool you = false;
+};
+
 // Grouped by screen rather than by size; the padding is a few dozen bytes.
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct UiModel {
@@ -289,6 +301,18 @@ struct UiModel {
     std::string world_event;       // event name or ""
     std::string world_sub;         // "40 days left"
     bool has_world = false;
+
+    // The race for the program (spec 010): the status strip's item on every
+    // tab, and the Dashboard's race strip.
+    bool has_race = false;      // the content has a program to race for
+    std::string race_deadline;  // "29 y 132 d to the deadline"; "" once a company has founded it
+    std::string race_founded;   // "Northfield Minerals founded the program", else ""
+    // The player against the rival furthest on, in words: "Ahead", "Behind"
+    // or "Level"; "" once the game has ended. Stages complete are compared
+    // first, then progress toward the current stage. Display only.
+    std::string race_verdict;
+    std::string race_verdict_class;  // chip class: "good" ahead, "warn" behind, "" level
+    std::vector<RaceRow> race_rows;  // the player first, then every rival
 
     // Dashboard
     std::vector<NeedRow> needs;

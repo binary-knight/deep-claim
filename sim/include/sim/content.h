@@ -140,6 +140,13 @@ struct BalanceParams {
     std::uint32_t bankruptcyGraceMonths = 0;
     // Consecutive losing days before a mine's owner is told (spec 008).
     std::uint32_t mineLossNoticeDays = 0;
+    // Spec 010 (BR-014). A day is a losing day for that notice only when the
+    // loss is at least this share of the mine's running cost that day; zero
+    // counts every loss.
+    Fixed mineLossNoticeMinShare;
+    // After a notice, the consecutive days that are not losing days a mine
+    // must have before it can be told again.
+    std::uint32_t mineLossRearmDays = 0;
     // Commodity market dynamics (see DESIGN.md, step 9).
     std::uint32_t marketSupplySmoothingDays = 0;  // EMA window for company supply
     std::uint32_t marketPriceAdjustDays = 0;      // days for price to close most of the gap

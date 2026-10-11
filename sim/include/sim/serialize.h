@@ -126,7 +126,7 @@ template <class Archive>
 void serialize(Archive& ar, Mine& mine) {
     ar(mine.plot, mine.owner, mine.builtDay, mine.operationalDay, mine.state, mine.extractedTonnes,
        mine.lastDayTonnes, mine.lastOutputTonnes, mine.lowWarnedSurvey, mine.lossDays,
-       mine.lossAnnounced);
+       mine.lossAnnounced, mine.lossClearDays);
 }
 
 template <class Archive>
@@ -338,7 +338,8 @@ void serialize(Archive& ar, BalanceParams& balance) {
        balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
        balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear,
        balance.marketRatioMin, balance.marketRatioMax, balance.demandFactorMin,
-       balance.demandFactorMax, balance.defaultSellPolicy, balance.defaultCoverCosts);
+       balance.demandFactorMax, balance.defaultSellPolicy, balance.defaultCoverCosts,
+       balance.mineLossNoticeMinShare, balance.mineLossRearmDays);
 }
 
 template <class Archive>

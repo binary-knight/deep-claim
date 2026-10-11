@@ -9,6 +9,7 @@
 #include "sim/view.h"
 #include "sim/world_state.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstddef>
@@ -509,6 +510,54 @@ void TraceWriter::end(sim::Day day) {
     line(j.dump());
 }
 
+namespace {
+
+constexpr std::array<std::string_view, 4> kResultWords = {"founded", "lesser_partner", "lost",
+                                                          "bankrupt"};
+
+// The player's result as the end record's word; nothing while the game is
+// still being played. Bankruptcy comes first: it is why the player's game
+// is over, whatever the race came to.
+std::optional<std::string_view> playerResultWord(const sim::CompanyView& view) {
+    if (view.bankrupt) {
+        return "bankrupt";
+    }
+    if (!view.outcome.ended) {
+        return std::nullopt;
+    }
+    const std::vector<sim::ProgramResult>& results = view.outcome.results;
+    const sim::ProgramResult result = view.me.valid() && view.me.index() < results.size()
+                                          ? results[view.me.index()]
+                                          : sim::ProgramResult::Lost;
+    switch (result) {
+        case sim::ProgramResult::Founded:
+            return "founded";
+        case sim::ProgramResult::LesserPartner:
+            return "lesser_partner";
+        case sim::ProgramResult::None:  // an ended game gives every company a result
+        case sim::ProgramResult::Lost:
+            return "lost";
+    }
+    return "lost";
+}
+
+}  // namespace
+
+void TraceWriter::end(sim::Day day, const sim::CompanyView& view) {
+    Json j;
+    j["t"] = "end";
+    j["day"] = day;
+    if (const std::optional<std::string_view> result = playerResultWord(view)) {
+        Json outcome;
+        outcome["ended"] = true;
+        outcome["day"] = view.outcome.ended ? view.outcome.day : day;
+        outcome["founder"] = idJson(view.outcome.founder);
+        outcome["result"] = std::string(*result);
+        j["outcome"] = outcome;
+    }
+    line(j.dump());
+}
+
 std::string encodeCommand(const sim::Command& command) {
     return commandJson(command).dump();
 }
@@ -560,6 +609,42 @@ bool parseNewGame(const Json& j, TraceRecord& out, std::string& error) {
     return true;
 }
 
+bool dayFrom(const Json& value, sim::Day& out) {
+    if (!value.is_number_unsigned() || value.get<std::uint64_t>() > sim::kMaxDeadline) {
+        return false;
+    }
+    out = static_cast<sim::Day>(value.get<std::uint64_t>());
+    return true;
+}
+
+// The outcome of an end record. Traces from before spec 010, and games
+// closed while still being played, have none; one that is there is whole.
+bool parseOutcome(const Json& j, TraceRecord& out) {
+    const auto it = j.find("outcome");
+    if (it == j.end()) {
+        return true;
+    }
+    if (!it->is_object()) {
+        return false;
+    }
+    TraceOutcome outcome;
+    const auto endedIt = it->find("ended");
+    const auto dayIt = it->find("day");
+    const auto resultIt = it->find("result");
+    if (endedIt == it->end() || !endedIt->is_boolean() || dayIt == it->end() ||
+        !dayFrom(*dayIt, outcome.day) || !idFrom(*it, "founder", outcome.founder) ||
+        resultIt == it->end() || !resultIt->is_string()) {
+        return false;
+    }
+    outcome.ended = endedIt->get<bool>();
+    outcome.result = resultIt->get<std::string>();
+    if (std::find(kResultWords.begin(), kResultWords.end(), outcome.result) == kResultWords.end()) {
+        return false;
+    }
+    out.outcome = outcome;
+    return true;
+}
+
 // Every record but new_game carries the day.
 bool parseDay(const Json& j, TraceRecord& out, std::string& error) {
     const auto dayIt = j.find("day");
@@ -570,11 +655,10 @@ bool parseDay(const Json& j, TraceRecord& out, std::string& error) {
         error = "missing day";
         return false;
     }
-    if (!dayIt->is_number_unsigned() || dayIt->get<std::uint64_t>() > sim::kMaxDeadline) {
+    if (!dayFrom(*dayIt, out.day)) {
         error = "bad day";
         return false;
     }
-    out.day = static_cast<sim::Day>(dayIt->get<std::uint64_t>());
     return true;
 }
 
@@ -631,6 +715,10 @@ bool parseTraceLine(std::string_view line, TraceRecord& out, std::string& error)
         }
     }
     parseStrings(j, out);
+    if (out.type == "end" && !parseOutcome(j, out)) {
+        error = "bad outcome";
+        return false;
+    }
     if (out.type == "load" && out.file.empty()) {
         error = "load record without a file";
         return false;

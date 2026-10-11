@@ -68,6 +68,7 @@ content::Sources goodSources() {
       "market_ratio_min": 0.2, "market_ratio_max": 5,
       "demand_factor_min": 0.01, "demand_factor_max": 1000,
       "mine_loss_notice_days": 5,
+      "mine_loss_notice_min_share": 0.05, "mine_loss_rearm_days": 30,
       "default_sell_policy": {"enabled": true, "reserve_tonnes": 0, "floor_price": 0},
       "default_cover_costs": true
     })";
@@ -693,6 +694,74 @@ TEST_CASE("The losing-mine notice threshold loads and must be at least one day",
     const auto absent = content::loadFromStrings(missing);
     CHECK_FALSE(absent.ok());
     CHECK(hasError(absent, "balance.json", "mine_loss_notice_days", "missing required key"));
+}
+
+TEST_CASE("The losing-mine notice's smallest share loads and is a fraction", "[content]") {
+    const auto good = content::loadFromStrings(goodSources());
+    REQUIRE(good.ok());
+    CHECK(good.content->balance.mineLossNoticeMinShare == sim::Fixed::fromRatio(5, 100));
+
+    const auto with = [](std::string_view value) {
+        content::Sources s = goodSources();
+        s.balance =
+            replaceOnce(s.balance, R"("mine_loss_notice_min_share": 0.05)",
+                        std::string(R"("mine_loss_notice_min_share": )") + std::string(value));
+        return content::loadFromStrings(s);
+    };
+    const auto none = with("0");
+    REQUIRE(none.ok());
+    CHECK(none.content->balance.mineLossNoticeMinShare == sim::Fixed::zero());
+    const auto whole = with("1");
+    REQUIRE(whole.ok());
+    CHECK(whole.content->balance.mineLossNoticeMinShare == sim::Fixed::one());
+
+    for (const std::string_view bad : {"-0.01", "1.01"}) {
+        INFO(bad);
+        const auto result = with(bad);
+        CHECK_FALSE(result.ok());
+        CHECK(hasError(result, "balance.json", "mine_loss_notice_min_share", "must be between"));
+    }
+
+    content::Sources missing = goodSources();
+    missing.balance = replaceOnce(missing.balance, R"("mine_loss_notice_min_share": 0.05,)", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "balance.json", "mine_loss_notice_min_share", "missing required key"));
+}
+
+TEST_CASE("The losing-mine notice's re-arm days load and are bounded", "[content]") {
+    const auto good = content::loadFromStrings(goodSources());
+    REQUIRE(good.ok());
+    CHECK(good.content->balance.mineLossRearmDays == 30);
+
+    const auto with = [](std::string_view value) {
+        content::Sources s = goodSources();
+        s.balance = replaceOnce(s.balance, R"("mine_loss_rearm_days": 30)",
+                                std::string(R"("mine_loss_rearm_days": )") + std::string(value));
+        return content::loadFromStrings(s);
+    };
+    const auto least = with("1");
+    REQUIRE(least.ok());
+    CHECK(least.content->balance.mineLossRearmDays == 1);
+    const auto most = with("3600");
+    REQUIRE(most.ok());
+    CHECK(most.content->balance.mineLossRearmDays == 3600);
+
+    for (const std::string_view bad : {"0", "3601"}) {
+        INFO(bad);
+        const auto result = with(bad);
+        CHECK_FALSE(result.ok());
+        CHECK(hasError(result, "balance.json", "mine_loss_rearm_days", "must be between 1 and"));
+    }
+    const auto notWhole = with("2.5");
+    CHECK_FALSE(notWhole.ok());
+    CHECK(hasError(notWhole, "balance.json", "mine_loss_rearm_days", "expected an integer"));
+
+    content::Sources missing = goodSources();
+    missing.balance = replaceOnce(missing.balance, R"( "mine_loss_rearm_days": 30,)", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "balance.json", "mine_loss_rearm_days", "missing required key"));
 }
 
 TEST_CASE("Large valid money values with cents are accepted", "[content]") {

@@ -161,6 +161,11 @@ inline sim::Content makeContent() {
     c.balance.demandFactorMin = sim::Fixed::fromRatio(1, 100);
     c.balance.demandFactorMax = sim::Fixed::fromInt(1000);
     c.balance.mineLossNoticeDays = 5;
+    // Spec 010 (BR-014): any loss is a losing day and one day that is not
+    // re-arms the notice, which is the rule the spec 008 tests were written
+    // to. Tests of the share and the re-arm run set their own values.
+    c.balance.mineLossNoticeMinShare = sim::Fixed::zero();
+    c.balance.mineLossRearmDays = 1;
 
     // Spec 010: a small program that obeys the loader's rules (three stages,
     // each project tied to its position, lithium in the third). The deadline

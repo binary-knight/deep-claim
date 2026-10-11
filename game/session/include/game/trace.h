@@ -18,10 +18,13 @@
 //   ui         interface events: tab, select, speed, status
 //   marker     the player pressed the "look at this" key
 //   screenshot file of a captured frame
-//   end        the session closed normally
+//   end        the session closed normally; when the game was over by then,
+//              "outcome" says how: ended, day, founder (company index or
+//              null) and the player's result as a word (spec 010)
 
 #include "sim/commands.h"
 #include "sim/content.h"
+#include "sim/ids.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
 #include "sim/view.h"
@@ -57,10 +60,26 @@ public:
     void marker(sim::Day day, std::string_view note);
     void screenshot(sim::Day day, std::string_view file);
     void end(sim::Day day);
+    // The end record with the outcome, when `view` (the player's) shows the
+    // game is over: the race has ended or the player is bankrupt. For a game
+    // closed while still being played this writes what end(day) writes.
+    void end(sim::Day day, const sim::CompanyView& view);
 
 private:
     void line(const std::string& json);
     std::ostream* out_;
+};
+
+// How the game ended, as an end record carries it (spec 010).
+struct TraceOutcome {
+    bool ended = false;  // the game was over for the player when the session closed
+    // The day the sim ended the game; for a bankrupt player in a race still
+    // open, the day the session stood on.
+    sim::Day day = 0;
+    sim::CompanyId founder;  // invalid when nobody founded the program
+    // The player's result: "founded", "lesser_partner", "lost" or "bankrupt".
+    // A bankrupt player is "bankrupt" whatever the race came to.
+    std::string result;
 };
 
 // A parsed trace line. Fields not relevant to `type` are left default.
@@ -75,6 +94,7 @@ struct TraceRecord {
     std::string file;               // load, save, screenshot
     std::string text;               // notice text, ui detail, marker note
     std::optional<sim::Command> command;
+    std::optional<TraceOutcome> outcome;  // end, when the game was over; older traces have none
 };
 
 // Command <-> JSON text, used by the writer and the parser and by tests.

@@ -863,6 +863,8 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "demand_factor_min",
                     "demand_factor_max",
                     "mine_loss_notice_days",
+                    "mine_loss_notice_min_share",
+                    "mine_loss_rearm_days",
                     "plots_listed_per_month",
                     "opening_min_mineable",
                     "opening_max_locked_region",
@@ -954,6 +956,14 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     parseMarketClamps(node, balance);
     balance.mineLossNoticeDays = static_cast<std::uint32_t>(
         valueOr(node.integer("mine_loss_notice_days", true, 1, kMaxDays), 1LL));
+    // Spec 010 (BR-014): what counts as a losing day, and how long a mine
+    // must go without one before the notice can be raised again.
+    balance.mineLossNoticeMinShare = valueOr(
+        node.fixed("mine_loss_notice_min_share", true, sim::Fixed::zero(), sim::Fixed::one()),
+        sim::Fixed::zero());
+    constexpr std::int64_t kMaxLossRearmDays = 3600;  // ten in-game years
+    balance.mineLossRearmDays = static_cast<std::uint32_t>(
+        valueOr(node.integer("mine_loss_rearm_days", true, 1, kMaxLossRearmDays), 1LL));
     // Spec 001: the standing sell order every company starts with.
     if (const std::optional<Node> policy = node.object("default_sell_policy", true)) {
         policy->allowKeys({"enabled", "reserve_tonnes", "floor_price"});

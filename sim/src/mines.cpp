@@ -415,14 +415,38 @@ bool countsTowardLosses(const WorldState& state, const Mine& mine) {
                                [](std::int64_t tonnes) { return tonnes > 0; });
 }
 
+// A losing day for the notice (spec 010, BR-014): a loss of at least the set
+// share of the day's running cost. A share of nothing counts every loss; a
+// day at exactly break-even is never one.
+bool isLosingDay(const Content& content, Money margin, Money runningCost) {
+    return margin < Money::zero() &&
+           -margin >= runningCost.scaled(content.balance.mineLossNoticeMinShare);
+}
+
+// A day that was not a losing day ends the count. After a notice it also
+// adds to the run of such days, and the full run re-arms the notice.
+void countClearDay(const Content& content, Mine& mine) {
+    mine.lossDays = 0;
+    if (mine.lossAnnounced == 0) {
+        return;
+    }
+    // A save can carry a count already at the re-arm number.
+    if (mine.lossClearDays < content.balance.mineLossRearmDays) {
+        ++mine.lossClearDays;
+    }
+    if (mine.lossClearDays >= content.balance.mineLossRearmDays) {
+        mine.lossAnnounced = 0;
+        mine.lossClearDays = 0;
+    }
+}
+
 // Advances every mine's count of consecutive losing days (spec 008), at the
 // prices as the mines step sees them: yesterday's close, before today's
-// market update. A day that is not a losing day ends the count. The
-// announcement outlasts a day at exactly nothing: it is cleared only by a
-// day of positive margin, or when the mine stops counting (see above), so a
-// mine is told again only after it has recovered or been stopped (BR-006).
-// On the day the count reaches the notice threshold the owner is told, once
-// per such episode: the notice carries the day's loss and the count.
+// market update. A mine that stops counting (see above) starts afresh. On
+// the day the count reaches the notice threshold the owner is told, once:
+// the notice carries the day's loss and the count. It is not said again
+// until the mine has had the re-arm run of days that are not losing days,
+// or has been stopped (spec 010, BR-014).
 void updateMineLosses(const Content& content, WorldState& state, TickReport& report) {
     std::vector<Money> prices;
     prices.reserve(state.markets.size());
@@ -432,16 +456,19 @@ void updateMineLosses(const Content& content, WorldState& state, TickReport& rep
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         Mine& mine = state.mines[i];
         const Company& owner = state.companies[mine.owner.index()];
-        const bool counts = countsTowardLosses(state, mine);
-        const Money margin =
-            counts ? mineDailyMargin(content, state, owner, mine, prices) : Money::zero();
-        if (margin >= Money::zero()) {
+        if (!countsTowardLosses(state, mine)) {
             mine.lossDays = 0;
-            if (!counts || margin > Money::zero()) {
-                mine.lossAnnounced = 0;
-            }
+            mine.lossAnnounced = 0;
+            mine.lossClearDays = 0;
             continue;
         }
+        const Money margin = mineDailyMargin(content, state, owner, mine, prices);
+        const Money cost = mineRunningCost(content, state, owner, mine, MineState::Operating);
+        if (!isLosingDay(content, margin, cost)) {
+            countClearDay(content, mine);
+            continue;
+        }
+        mine.lossClearDays = 0;
         // Saturates: a save can carry any count, and a wrap would read as a reset.
         if (mine.lossDays < std::numeric_limits<std::uint32_t>::max()) {
             ++mine.lossDays;
