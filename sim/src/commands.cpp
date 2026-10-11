@@ -82,6 +82,8 @@ const char* rejectReasonName(RejectReason reason) {
             return "program_complete";
         case RejectReason::GameEnded:
             return "game_ended";
+        case RejectReason::TechNeedsProgramStage:
+            return "tech_needs_program_stage";
     }
     return "unknown";
 }
@@ -158,6 +160,8 @@ const char* noticeKindName(NoticeKind kind) {
             return "program_founded";
         case NoticeKind::DeadlinePassed:
             return "deadline_passed";
+        case NoticeKind::ProgramResearchStarted:
+            return "program_research_started";
     }
     return "unknown";
 }
@@ -176,6 +180,7 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::ProgramStageComplete:
         case NoticeKind::ProgramFounded:
         case NoticeKind::DeadlinePassed:
+        case NoticeKind::ProgramResearchStarted:
             return true;
         case NoticeKind::CommandRejected:
         case NoticeKind::AuctionLost:

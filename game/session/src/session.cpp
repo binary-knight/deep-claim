@@ -239,14 +239,11 @@ sim::Money Session::orderCost(const sim::Command& command) const {
             [](const sim::SetSellPolicy&) { return sim::Money::zero(); },
             [](const sim::SetCoverCosts&) { return sim::Money::zero(); },
             [](const sim::DeliverToProgram&) { return sim::Money::zero(); },
-            // The view does not show the program yet, so the stage the
-            // player is working on is read from the sim's own state.
+            // The stage the player is working on; nothing once the program
+            // is complete.
             [this](const sim::CompleteProgramStage&) {
-                const std::uint32_t stage =
-                    simulation_.state().companies[kPlayer.index()].programStage;
-                return stage < content_->program.stages.size()
-                           ? content_->program.stages[stage].cost
-                           : sim::Money::zero();
+                return view_.program.stage.has_value() ? view_.program.stage->cost
+                                                       : sim::Money::zero();
             },
         },
         command);

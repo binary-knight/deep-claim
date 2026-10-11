@@ -12,6 +12,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <iterator>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -223,4 +227,107 @@ TEST_CASE("The view says how close each locked resource is", "[research][view]")
     CHECK(view.unlockReady[lithium] == 0);
     CHECK(std::find(view.completedTechs.begin(), view.completedTechs.end(), sim::TechId(1)) !=
           view.completedTechs.end());
+}
+
+// Spec 010, BR-004: a stage's project waits for the stages before it, and
+// starting one is news for everyone.
+
+namespace {
+
+// Fixture projects (tests/test_content.h): one per program stage.
+const sim::TechId kStageOneProject(2);
+const sim::TechId kStageTwoProject(3);
+const sim::TechId kStageThreeProject(4);
+
+// A new world whose player can afford any project and has completed
+// `stagesDone` stages of the program.
+sim::WorldState worldWithStages(const sim::Content& content, std::uint32_t stagesDone) {
+    sim::WorldState state = sim::Simulation(content, 1, test::setup()).state();
+    state.companies[0].cash = sim::Money::fromUnits(100'000'000);
+    state.companies[0].programStage = stagesDone;
+    return state;
+}
+
+std::vector<sim::Notice> noticesOfKind(const sim::TickReport& report, sim::NoticeKind kind) {
+    std::vector<sim::Notice> found;
+    std::copy_if(report.notices.begin(), report.notices.end(), std::back_inserter(found),
+                 [&](const sim::Notice& n) { return n.kind == kind; });
+    return found;
+}
+
+}  // namespace
+
+TEST_CASE("A stage's project cannot start before the stages it needs are complete",
+          "[research][program]") {
+    const sim::Content content = test::makeContent();
+    using R = sim::RejectReason;
+    const auto start = [&](std::uint32_t stagesDone, sim::TechId tech) {
+        return sim::validateStartResearch(content, worldWithStages(content, stagesDone),
+                                          sim::StartResearch{kPlayer, tech});
+    };
+    CHECK(start(0, kStageOneProject) == std::nullopt);
+    CHECK(start(0, kStageTwoProject) == R::TechNeedsProgramStage);
+    CHECK(start(0, kStageThreeProject) == R::TechNeedsProgramStage);
+    CHECK(start(1, kStageTwoProject) == std::nullopt);
+    CHECK(start(1, kStageThreeProject) == R::TechNeedsProgramStage);
+    CHECK(start(2, kStageThreeProject) == std::nullopt);
+    CHECK(std::string_view(sim::rejectReasonName(R::TechNeedsProgramStage)) ==
+          "tech_needs_program_stage");
+
+    // Through the tick: the order is refused, nothing starts, nothing is charged.
+    sim::Simulation simulation(content, 1, test::setup());
+    const sim::Money cash = simulation.state().companies[0].cash;
+    simulation.submit(sim::StartResearch{kPlayer, kStageTwoProject});
+    const sim::TickReport& report = simulation.tick();
+    CHECK(hasNotice(report.notices, sim::NoticeKind::CommandRejected, R::TechNeedsProgramStage));
+    CHECK(noticesOfKind(report, sim::NoticeKind::ProgramResearchStarted).empty());
+    CHECK(simulation.state().research.empty());
+    CHECK(simulation.state().companies[0].cash == cash);
+}
+
+TEST_CASE("Starting a stage's project is announced to everyone", "[research][program]") {
+    const sim::Content content = test::makeContent();
+    using K = sim::NoticeKind;
+    CHECK(std::string_view(sim::noticeKindName(K::ProgramResearchStarted)) ==
+          "program_research_started");
+    CHECK(sim::noticeIsPublic(K::ProgramResearchStarted));
+    CHECK_FALSE(sim::noticeIsPublic(K::ResearchStarted));
+
+    for (std::uint32_t stage = 0; stage < content.program.stages.size(); ++stage) {
+        const sim::TechId project = content.program.stages[stage].research;
+        sim::WorldState state = worldWithStages(content, stage);
+        sim::TickReport report;
+        sim::applyStartResearch(content, state, sim::StartResearch{kPlayer, project}, report);
+        // The private line the company always gets, then the public one.
+        REQUIRE(report.notices.size() == 2);
+        CHECK(report.notices[0].kind == K::ResearchStarted);
+        const sim::Notice& announced = report.notices[1];
+        CHECK(announced.kind == K::ProgramResearchStarted);
+        CHECK(announced.company == kPlayer);
+        CHECK(announced.tech == project);
+        CHECK(announced.tonnes == stage + 1);
+        CHECK(sim::noticeVisibleTo(announced, kRival));
+        CHECK_FALSE(sim::noticeVisibleTo(report.notices[0], kRival));
+    }
+}
+
+TEST_CASE("Ordinary projects ignore the program and are not announced", "[research][program]") {
+    const sim::Content content = test::makeContent();
+    REQUIRE(content.techs[0].requiresProgramStage == 0);
+    for (const std::uint32_t stagesDone : {0U, 1U, 3U}) {
+        sim::WorldState state = worldWithStages(content, stagesDone);
+        const sim::StartResearch command{kPlayer, sim::TechId(0)};
+        CHECK(sim::validateStartResearch(content, state, command) == std::nullopt);
+        sim::TickReport report;
+        sim::applyStartResearch(content, state, command, report);
+        REQUIRE(report.notices.size() == 1);
+        CHECK(report.notices[0].kind == sim::NoticeKind::ResearchStarted);
+    }
+    // A program-less content (in-code content may leave it empty) announces nothing.
+    sim::Content bare = test::makeContent();
+    bare.program.stages.clear();
+    sim::WorldState state = worldWithStages(bare, 0);
+    sim::TickReport report;
+    sim::applyStartResearch(bare, state, sim::StartResearch{kPlayer, kStageOneProject}, report);
+    CHECK(noticesOfKind(report, sim::NoticeKind::ProgramResearchStarted).empty());
 }

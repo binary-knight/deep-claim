@@ -142,10 +142,11 @@ enum class RejectReason : std::uint8_t {
     TechAlreadyKnown,
     ResearchBusy,
     PrerequisitesMissing,
-    ProgramNotNeeded,      // the current stage does not need that good, or not that much more
-    ProgramStageNotReady,  // the stage's research or a delivery is outstanding
-    ProgramComplete,       // the company has completed every stage
-    GameEnded,             // the game has ended: no order is taken any more
+    ProgramNotNeeded,       // the current stage does not need that good, or not that much more
+    ProgramStageNotReady,   // the stage's research or a delivery is outstanding
+    ProgramComplete,        // the company has completed every stage
+    GameEnded,              // the game has ended: no order is taken any more
+    TechNeedsProgramStage,  // the project waits for a program stage the company has not completed
 };
 
 // Private notices are visible only to `company`; public ones to everyone.
@@ -181,14 +182,16 @@ enum class NoticeKind : std::uint8_t {
                         // end of the owner's survey at the current output (month end, once,
                         // when 30 days or fewer remain)
     PlotWithdrawn,      // public: plot, amount = the ask it left with (unsold too many times)
-    RivalUnlockedResource,  // public: company, tech, resource (research unlocked a resource)
-    MineLosingMoney,        // private: company, plot, mine, amount = the day's loss (positive),
-                            // tonnes = consecutive losing days (once per run of losing days)
-    ProgramDelivered,       // private: company, resource, tonnes moved from stock to the program
-    ProgramStageComplete,   // public: company, amount = the stage's cost, tonnes = the stage
-                            // just completed (1 for the first), tech = that stage's research
-    ProgramFounded,         // public: company = the founder; the game has ended
-    DeadlinePassed,         // public: no company; the game has ended with no program founded
+    RivalUnlockedResource,   // public: company, tech, resource (research unlocked a resource)
+    MineLosingMoney,         // private: company, plot, mine, amount = the day's loss (positive),
+                             // tonnes = consecutive losing days (once per run of losing days)
+    ProgramDelivered,        // private: company, resource, tonnes moved from stock to the program
+    ProgramStageComplete,    // public: company, amount = the stage's cost, tonnes = the stage
+                             // just completed (1 for the first), tech = that stage's research
+    ProgramFounded,          // public: company = the founder; the game has ended
+    DeadlinePassed,          // public: no company; the game has ended with no program founded
+    ProgramResearchStarted,  // public: company, tech = a program stage's research just started,
+                             // tonnes = that stage (1 for the first)
 };
 
 struct Notice {

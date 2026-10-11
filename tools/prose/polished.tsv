@@ -350,3 +350,5 @@ notice.program_stage_complete	{company} completed a stage of the program for {am
 reject.game_ended	The game is over.
 notice.program_founded	{company} has founded the program.
 notice.deadline_passed	The deadline has passed. No program was founded.
+reject.tech_needs_program_stage	That project needs an earlier stage of the program completed first.
+notice.program_research_started	{company} has begun research for a stage of the program.

@@ -833,3 +833,293 @@ TEST_CASE("A save of an ended game loads and stays ended", "[program][ending]") 
     CHECK(report.notices[0].reason == R::GameEnded);
     CHECK(loaded.stateHash() == simulation.stateHash());
 }
+
+// The race in the view (spec 010, BR-007). Everything about it is public, so
+// each figure is checked for both companies against the rules themselves.
+
+namespace {
+
+using StageResearch = sim::ProgramResearchState;
+
+// What the rules say of a company's research into the stage it is on.
+StageResearch researchStateByRule(const sim::Content& content, const sim::WorldState& state,
+                                  sim::CompanyId id) {
+    const sim::Company& company = state.companies[id.index()];
+    if (company.programStage >= content.program.stages.size()) {
+        return StageResearch::Done;
+    }
+    const sim::TechId tech = content.program.stages[company.programStage].research;
+    for (const sim::TechId done : company.completedTechs) {
+        if (done == tech) {
+            return StageResearch::Done;
+        }
+    }
+    for (const sim::Research& research : state.research) {
+        if (research.company == id && research.tech == tech && research.complete == 0) {
+            return StageResearch::InProgress;
+        }
+    }
+    return StageResearch::NotStarted;
+}
+
+// The viewer's own program, figure by figure, against the rules and the state.
+void checkOwnProgram(const sim::Content& content, const sim::WorldState& state,
+                     const sim::CompanyView& view) {
+    const sim::Company& company = state.companies[view.me.index()];
+    const sim::ProgramView& program = view.program;
+    CHECK(program.stagesCompleted == company.programStage);
+    const bool complete = company.programStage >= content.program.stages.size();
+    CHECK(program.complete == complete);
+    REQUIRE(program.stage.has_value() == !complete);
+    if (complete) {
+        return;
+    }
+    const sim::ProgramStage& rule = content.program.stages[company.programStage];
+    const sim::ProgramStageView& stage = *program.stage;
+    CHECK(stage.index == company.programStage);
+    CHECK(stage.cost == rule.cost);
+    CHECK(stage.research == rule.research);
+    CHECK(stage.researchState == researchStateByRule(content, state, view.me));
+    CHECK(stage.activeResearch.has_value() == (stage.researchState == StageResearch::InProgress));
+    CHECK(stage.progressPermille == sim::programProgressPermille(content, state, view.me));
+    CHECK(stage.ready == sim::programStageReady(content, state, view.me));
+    REQUIRE(stage.requirements.size() == rule.requirements.size());
+    for (std::size_t i = 0; i < rule.requirements.size(); ++i) {
+        const std::size_t r = rule.requirements[i].resource.index();
+        CHECK(stage.requirements[i].resource == rule.requirements[i].resource);
+        CHECK(stage.requirements[i].neededTonnes == rule.requirements[i].tonnes);
+        CHECK(stage.requirements[i].deliveredTonnes == company.programDelivered[r]);
+        CHECK(stage.requirements[i].stockTonnes == company.inventoryTonnes[r]);
+    }
+}
+
+// Everything one company's view says about the race, against the rules.
+void checkRaceView(const sim::Content& content, const sim::Simulation& simulation,
+                   sim::CompanyId viewer) {
+    const sim::WorldState& state = simulation.state();
+    const sim::CompanyView view = simulation.view(viewer);
+    CHECK(view.deadlineDay == content.program.deadlineDay);
+    CHECK(view.outcome.ended == sim::gameEnded(state));
+    CHECK(view.outcome.day == state.outcome.day);
+    CHECK(view.outcome.founder == state.outcome.founder);
+    CHECK(view.outcome.results == state.outcome.results);
+    checkOwnProgram(content, state, view);
+    REQUIRE(view.programs.size() == state.companies.size());
+    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
+        const sim::CompanyId id(c);
+        const sim::ProgramPublicView& entry = view.programs[c];
+        CHECK(entry.company == id);
+        CHECK(entry.stagesCompleted == state.companies[c].programStage);
+        CHECK(entry.complete == (state.companies[c].programStage >= content.program.stages.size()));
+        CHECK(entry.progressPermille == sim::programProgressPermille(content, state, id));
+        CHECK(entry.researchState == researchStateByRule(content, state, id));
+    }
+}
+
+void checkBothRaceViews(const sim::Content& content, const sim::Simulation& simulation) {
+    checkRaceView(content, simulation, kPlayer);
+    checkRaceView(content, simulation, kRival);
+}
+
+// A research record as StartResearch would have left it the day before.
+void startStageResearch(const sim::Content& content, sim::WorldState& state, sim::CompanyId id) {
+    const sim::TechId tech =
+        content.program.stages[state.companies[id.index()].programStage].research;
+    sim::Research research;
+    research.company = id;
+    research.tech = tech;
+    research.startedDay = state.day - 1;
+    research.completesDay = research.startedDay + content.techs[tech.index()].durationDays;
+    state.research.push_back(research);
+}
+
+}  // namespace
+
+TEST_CASE("A new game's view shows the deadline, no outcome and both programs unstarted",
+          "[program][view]") {
+    const sim::Content content = test::makeContent();
+    const sim::Simulation simulation(content, 1, test::setup());
+    checkBothRaceViews(content, simulation);
+
+    for (const sim::CompanyId viewer : {kPlayer, kRival}) {
+        const sim::CompanyView view = simulation.view(viewer);
+        CHECK(view.deadlineDay == 10'800);
+        CHECK_FALSE(view.outcome.ended);
+        CHECK_FALSE(view.outcome.founder.valid());
+        CHECK(view.program.stagesCompleted == 0);
+        CHECK_FALSE(view.program.complete);
+        REQUIRE(view.program.stage.has_value());
+        const sim::ProgramStageView& stage = *view.program.stage;
+        CHECK(stage.index == 0);
+        CHECK(stage.cost == sim::Money::fromUnits(1'000'000));
+        CHECK(stage.research == sim::TechId(2));
+        CHECK(stage.researchState == StageResearch::NotStarted);
+        CHECK_FALSE(stage.activeResearch.has_value());
+        CHECK(stage.progressPermille == 0);
+        CHECK_FALSE(stage.ready);
+        REQUIRE(stage.requirements.size() == 1);
+        CHECK(stage.requirements[0].resource == kIron);
+        CHECK(stage.requirements[0].neededTonnes == 1'000);
+        CHECK(stage.requirements[0].deliveredTonnes == 0);
+        REQUIRE(view.programs.size() == 2);
+        CHECK(view.programs[0].company == kPlayer);
+        CHECK(view.programs[1].company == kRival);
+        CHECK(view.programs[1].stagesCompleted == 0);
+        CHECK(view.programs[1].progressPermille == 0);
+        CHECK(view.programs[1].researchState == StageResearch::NotStarted);
+    }
+}
+
+TEST_CASE("The view shows a delivery in the company's stage and in the rival's view of it",
+          "[program][view]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = racingState(content);
+    state.companies[0].inventoryTonnes[kIron.index()] = 5'000;
+    state.companies[1].inventoryTonnes[kIron.index()] = 700;
+    sim::Simulation simulation(content, 1, test::setup());
+    play(simulation, content, state);
+
+    checkBothRaceViews(content, simulation);
+    CHECK(simulation.view(kPlayer).program.stage->requirements[0].stockTonnes == 5'000);
+    CHECK(simulation.view(kRival).program.stage->requirements[0].stockTonnes == 700);
+    CHECK(simulation.view(kPlayer).programs[1].progressPermille == 0);
+
+    simulation.submit(sim::DeliverToProgram{kPlayer, kIron, 400});
+    simulation.submit(sim::DeliverToProgram{kRival, kIron, 250});
+    simulation.tick();
+
+    checkBothRaceViews(content, simulation);
+    const sim::CompanyView player = simulation.view(kPlayer);
+    const sim::CompanyView rival = simulation.view(kRival);
+    CHECK(player.program.stage->requirements[0].deliveredTonnes == 400);
+    CHECK(player.program.stage->requirements[0].stockTonnes == 4'600);
+    CHECK(player.program.stage->progressPermille == 400);
+    CHECK_FALSE(player.program.stage->ready);
+    CHECK(rival.program.stage->requirements[0].deliveredTonnes == 250);
+    CHECK(rival.program.stage->requirements[0].stockTonnes == 450);
+    CHECK(rival.program.stage->progressPermille == 250);
+    // Each sees the other's progress.
+    CHECK(player.programs[0].progressPermille == 400);
+    CHECK(player.programs[1].progressPermille == 250);
+    CHECK(rival.programs[0].progressPermille == 400);
+    CHECK(rival.programs[1].progressPermille == 250);
+}
+
+TEST_CASE("The view follows a stage's research from started to done, then the stage completing",
+          "[program][view]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = racingState(content);
+    state.companies[0].programDelivered[kIron.index()] = 1'000;
+    state.companies[0].cash = sim::Money::fromUnits(50'000'000);
+    startStageResearch(content, state, kPlayer);
+    const sim::Day finishDay = state.research.back().completesDay;
+    sim::Simulation simulation(content, 1, test::setup());
+    play(simulation, content, state);
+
+    // In progress: the player sees the finish day, the rival sees the state.
+    checkBothRaceViews(content, simulation);
+    sim::CompanyView player = simulation.view(kPlayer);
+    CHECK(player.program.stage->researchState == StageResearch::InProgress);
+    REQUIRE(player.program.stage->activeResearch.has_value());
+    CHECK(player.program.stage->activeResearch->tech == sim::TechId(2));
+    CHECK(player.program.stage->activeResearch->startedDay == kRaceDay - 1);
+    CHECK(player.program.stage->activeResearch->completesDay == finishDay);
+    CHECK(player.program.stage->progressPermille == 1'000);
+    CHECK_FALSE(player.program.stage->ready);
+    CHECK(player.programs[1].researchState == StageResearch::NotStarted);
+    sim::CompanyView rival = simulation.view(kRival);
+    CHECK(rival.programs[0].researchState == StageResearch::InProgress);
+    CHECK(rival.programs[0].progressPermille == 1'000);
+    CHECK(rival.program.stage->researchState == StageResearch::NotStarted);
+
+    // Done: the stage is ready, as the rule says.
+    while (simulation.state().day <= finishDay) {
+        simulation.tick();
+    }
+    checkBothRaceViews(content, simulation);
+    player = simulation.view(kPlayer);
+    CHECK(player.program.stage->researchState == StageResearch::Done);
+    CHECK_FALSE(player.program.stage->activeResearch.has_value());
+    CHECK(player.program.stage->ready);
+    CHECK(simulation.view(kRival).programs[0].researchState == StageResearch::Done);
+    CHECK_FALSE(simulation.view(kRival).program.stage->ready);
+
+    // Completed: the next stage, with nothing delivered or researched.
+    simulation.submit(sim::CompleteProgramStage{kPlayer});
+    simulation.tick();
+    checkBothRaceViews(content, simulation);
+    player = simulation.view(kPlayer);
+    CHECK(player.program.stagesCompleted == 1);
+    REQUIRE(player.program.stage.has_value());
+    CHECK(player.program.stage->index == 1);
+    CHECK(player.program.stage->cost == sim::Money::fromUnits(2'000'000));
+    CHECK(player.program.stage->research == sim::TechId(3));
+    CHECK(player.program.stage->researchState == StageResearch::NotStarted);
+    REQUIRE(player.program.stage->requirements.size() == 2);
+    CHECK(player.program.stage->requirements[0].neededTonnes == 2'000);
+    CHECK(player.program.stage->requirements[0].deliveredTonnes == 0);
+    CHECK(player.program.stage->requirements[1].resource == kCopper);
+    CHECK(player.program.stage->requirements[1].neededTonnes == 200);
+    CHECK(player.program.stage->progressPermille == 0);
+    CHECK_FALSE(player.program.stage->ready);
+    rival = simulation.view(kRival);
+    CHECK(rival.programs[0].stagesCompleted == 1);
+    CHECK(rival.programs[0].progressPermille == 0);
+    CHECK(rival.programs[0].researchState == StageResearch::NotStarted);
+    CHECK(rival.programs[1].stagesCompleted == 0);
+}
+
+TEST_CASE("The view shows how the game ended to both companies", "[program][view][ending]") {
+    sim::Content content = test::makeContent();
+    sim::WorldState state = racingState(content);
+    sim::Simulation simulation(content, 1, test::setup());
+
+    SECTION("the rival founds the program") {
+        makeFinalStageReady(content, state, kRival);
+        state.companies[0].programStage = 2;
+        play(simulation, content, state);
+        simulation.submit(sim::CompleteProgramStage{kRival});
+        simulation.tick();
+
+        checkBothRaceViews(content, simulation);
+        for (const sim::CompanyId viewer : {kPlayer, kRival}) {
+            const sim::CompanyView view = simulation.view(viewer);
+            CHECK(view.outcome.ended);
+            CHECK(view.outcome.day == kRaceDay);
+            CHECK(view.outcome.founder == kRival);
+            CHECK(view.outcome.results ==
+                  std::vector<Result>{Result::LesserPartner, Result::Founded});
+            CHECK(view.programs[0].stagesCompleted == 2);
+            CHECK_FALSE(view.programs[0].complete);
+            CHECK(view.programs[1].stagesCompleted == 3);
+            CHECK(view.programs[1].complete);
+            CHECK(view.programs[1].progressPermille == 1'000);
+            CHECK(view.programs[1].researchState == StageResearch::Done);
+        }
+        const sim::CompanyView founder = simulation.view(kRival);
+        CHECK(founder.program.complete);
+        CHECK(founder.program.stagesCompleted == 3);
+        CHECK_FALSE(founder.program.stage.has_value());
+        const sim::CompanyView partner = simulation.view(kPlayer);
+        CHECK_FALSE(partner.program.complete);
+        REQUIRE(partner.program.stage.has_value());
+        CHECK(partner.program.stage->index == 2);
+        CHECK_FALSE(partner.program.stage->ready);
+    }
+    SECTION("the deadline passes") {
+        content.program.deadlineDay = kRaceDay + 2;
+        sim::Simulation shortGame(content, 1, test::setup());
+        play(shortGame, content, state);
+        while (!sim::gameEnded(shortGame.state())) {
+            shortGame.tick();
+        }
+        checkBothRaceViews(content, shortGame);
+        for (const sim::CompanyId viewer : {kPlayer, kRival}) {
+            const sim::CompanyView view = shortGame.view(viewer);
+            CHECK(view.deadlineDay == kRaceDay + 2);
+            CHECK(view.outcome.ended);
+            CHECK_FALSE(view.outcome.founder.valid());
+            CHECK(view.outcome.results == std::vector<Result>{Result::Lost, Result::Lost});
+        }
+    }
+}

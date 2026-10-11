@@ -8,6 +8,8 @@
 #include "sim/mines.h"
 #include "sim/money.h"
 #include "sim/plot_market.h"
+#include "sim/program.h"
+#include "sim/research.h"
 #include "sim/surveys.h"
 #include "sim/tech.h"
 #include "sim/types.h"
@@ -16,6 +18,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -323,6 +326,86 @@ void addCompanies(const WorldState& state, CompanyView& view) {
     }
 }
 
+// The stage a company is working on; nothing once it has completed them all.
+const ProgramStage* currentProgramStage(const Content& content, const Company& company) {
+    const std::size_t stage = company.programStage;
+    return stage < content.program.stages.size() ? &content.program.stages[stage] : nullptr;
+}
+
+// A company's project for `tech` while it is in progress. Only ever asked
+// about a program stage's project, which is public; a company's other
+// research stays its own.
+std::optional<ResearchView> researchInProgress(const WorldState& state, CompanyId company,
+                                               TechId tech) {
+    for (const Research& research : state.research) {
+        if (research.company == company && research.tech == tech && research.complete == 0) {
+            return ResearchView{research.tech, research.startedDay, research.completesDay};
+        }
+    }
+    return std::nullopt;
+}
+
+ProgramResearchState programResearchState(const WorldState& state, CompanyId id,
+                                          const ProgramStage* stage) {
+    if (stage == nullptr || techCompleted(state.companies[id.index()], stage->research)) {
+        return ProgramResearchState::Done;
+    }
+    return researchInProgress(state, id, stage->research).has_value()
+               ? ProgramResearchState::InProgress
+               : ProgramResearchState::NotStarted;
+}
+
+// The viewer's own program: what its current stage asks for and how far
+// each part has got. The figures are the sim's own (R-001).
+void addOwnProgram(const Content& content, const WorldState& state, CompanyId viewer,
+                   CompanyView& view) {
+    const Company& self = state.companies[viewer.index()];
+    const ProgramStage* stage = currentProgramStage(content, self);
+    view.program.stagesCompleted = self.programStage;
+    view.program.complete = stage == nullptr;
+    if (stage == nullptr) {
+        return;
+    }
+    ProgramStageView stageView;
+    stageView.index = self.programStage;
+    stageView.cost = stage->cost;
+    stageView.research = stage->research;
+    stageView.researchState = programResearchState(state, viewer, stage);
+    if (stageView.researchState == ProgramResearchState::InProgress) {
+        stageView.activeResearch = researchInProgress(state, viewer, stage->research);
+    }
+    for (const ProgramRequirement& requirement : stage->requirements) {
+        const std::size_t r = requirement.resource.index();
+        stageView.requirements.push_back({requirement.resource, requirement.tonnes,
+                                          self.programDelivered[r], self.inventoryTonnes[r]});
+    }
+    stageView.progressPermille = programProgressPermille(content, state, viewer);
+    stageView.ready = programStageReady(content, state, viewer);
+    view.program.stage = stageView;
+}
+
+// The deadline, the outcome and every company's place in the race, the
+// viewer's included: all public (spec 010, BR-007).
+void addRace(const Content& content, const WorldState& state, CompanyView& view) {
+    view.deadlineDay = content.program.deadlineDay;
+    view.outcome.ended = gameEnded(state);
+    view.outcome.day = state.outcome.day;
+    view.outcome.founder = state.outcome.founder;
+    view.outcome.results = state.outcome.results;
+    view.programs.reserve(state.companies.size());
+    for (std::uint32_t i = 0; i < state.companies.size(); ++i) {
+        const CompanyId id(i);
+        const ProgramStage* stage = currentProgramStage(content, state.companies[i]);
+        ProgramPublicView entry;
+        entry.company = id;
+        entry.stagesCompleted = state.companies[i].programStage;
+        entry.complete = stage == nullptr;
+        entry.progressPermille = programProgressPermille(content, state, id);
+        entry.researchState = programResearchState(state, id, stage);
+        view.programs.push_back(entry);
+    }
+}
+
 }  // namespace
 
 CompanyView makeCompanyView(const Content& content, const WorldState& state, CompanyId company) {
@@ -362,6 +445,8 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
         static_cast<std::uint32_t>(state.listingQueue.size()) - state.nextListing;
     view.withdrawnPlots = static_cast<std::uint32_t>(state.withdrawnQueue.size());
     addCompanies(state, view);
+    addOwnProgram(content, state, company, view);
+    addRace(content, state, view);
     return view;
 }
 

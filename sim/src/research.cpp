@@ -22,6 +22,17 @@ Notice researchNotice(NoticeKind kind, CompanyId company, TechId tech,
     return notice;
 }
 
+// The program stage `tech` is the research for, counting from 1 (spec 010);
+// nothing for an ordinary project.
+std::optional<std::uint32_t> programStageOf(const Content& content, TechId tech) {
+    for (std::uint32_t i = 0; i < content.program.stages.size(); ++i) {
+        if (content.program.stages[i].research == tech) {
+            return i + 1;
+        }
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 bool techCompleted(const Company& company, TechId tech) {
@@ -64,6 +75,10 @@ std::optional<RejectReason> validateStartResearch(const Content& content, const 
     if (!prerequisitesMet(content, company, command.tech)) {
         return RejectReason::PrerequisitesMissing;
     }
+    // A stage's project waits for the stages before it (spec 010, BR-004).
+    if (content.techs[command.tech.index()].requiresProgramStage > company.programStage) {
+        return RejectReason::TechNeedsProgramStage;
+    }
     if (content.techs[command.tech.index()].cost > availableCash(state, command.company)) {
         return RejectReason::InsufficientFunds;
     }
@@ -82,6 +97,13 @@ void applyStartResearch(const Content& content, WorldState& state, const StartRe
     state.research.push_back(research);
     report.notices.push_back(
         researchNotice(NoticeKind::ResearchStarted, command.company, command.tech, tech.cost));
+    // Work on a stage of the program is news for everyone (spec 010, BR-004).
+    if (const std::optional<std::uint32_t> stage = programStageOf(content, command.tech)) {
+        Notice announced =
+            researchNotice(NoticeKind::ProgramResearchStarted, command.company, command.tech);
+        announced.tonnes = *stage;
+        report.notices.push_back(announced);
+    }
 }
 
 void runResearch(const Content& content, WorldState& state, TickReport& report) {

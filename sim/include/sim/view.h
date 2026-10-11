@@ -98,6 +98,66 @@ struct ResearchView {
     Day completesDay = 0;
 };
 
+// How far a company's research into its current program stage has got.
+enum class ProgramResearchState : std::uint8_t {
+    NotStarted,
+    InProgress,
+    Done,
+};
+
+// One good the viewer's current stage asks for (spec 010).
+struct ProgramRequirementView {
+    ResourceId resource;
+    std::int64_t neededTonnes = 0;     // what the stage asks for
+    std::int64_t deliveredTonnes = 0;  // delivered to the program so far
+    std::int64_t stockTonnes = 0;      // in the viewer's stock, deliverable today
+};
+
+// The stage of the program the viewer is working on.
+struct ProgramStageView {
+    std::uint32_t index = 0;  // position in Content::program.stages, from zero
+    Money cost;
+    TechId research;  // the project the stage needs
+    ProgramResearchState researchState = ProgramResearchState::NotStarted;
+    // The project while it is in progress, with its finish day; empty when
+    // it has not started or is done.
+    std::optional<ResearchView> activeResearch;
+    std::vector<ProgramRequirementView> requirements;  // in the stage's own order
+    std::int64_t progressPermille = 0;                 // sim::programProgressPermille
+    // A CompleteProgramStage order would be accepted today
+    // (sim::programStageReady): research, deliveries and cash are in place.
+    bool ready = false;
+};
+
+// The viewer's own program.
+struct ProgramView {
+    std::uint32_t stagesCompleted = 0;
+    // Every stage is completed. Also true when the content has no program.
+    bool complete = false;
+    std::optional<ProgramStageView> stage;  // the current stage; empty when complete
+};
+
+// Any company's place in the race. Public (spec 010, BR-007): a rival's
+// entry is as full as the viewer's own.
+struct ProgramPublicView {
+    CompanyId company;
+    std::uint32_t stagesCompleted = 0;
+    bool complete = false;
+    // Toward its current stage (sim::programProgressPermille); 1000 when
+    // the program is complete.
+    std::int64_t progressPermille = 0;
+    // Of its current stage's project; Done when the program is complete.
+    ProgramResearchState researchState = ProgramResearchState::NotStarted;
+};
+
+// How the game ended, or that it has not: the world's Outcome, public.
+struct OutcomeView {
+    bool ended = false;
+    Day day = 0;                         // the day the game ended; zero until it has
+    CompanyId founder;                   // invalid when nobody founded the program
+    std::vector<ProgramResult> results;  // indexed by CompanyId; None until the game has ended
+};
+
 struct ActiveEventView {
     ActiveEventId id;
     EventId event;
@@ -204,6 +264,11 @@ struct CompanyView {
     std::vector<LoanView> loans;          // own loans only
     std::vector<ActiveEventView> events;  // public, active only
     std::vector<CompanyPublicView> companies;
+    // The race for the program (spec 010). All of it is public.
+    Day deadlineDay = 0;  // the game ends this day if nobody has founded the program
+    OutcomeView outcome;
+    ProgramView program;                      // the viewer's own
+    std::vector<ProgramPublicView> programs;  // every company, indexed by CompanyId
 };
 
 [[nodiscard]] CompanyView makeCompanyView(const Content& content, const WorldState& state,

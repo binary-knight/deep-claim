@@ -391,7 +391,11 @@ void decideResearch(const Content& content, const CompanyView& view, bool produc
     std::optional<TechId> best;
     for (std::uint32_t i = 0; i < content.techs.size(); ++i) {
         const TechId id(i);
-        const bool ready = !known(id) && std::ranges::all_of(content.techs[i].prerequisites, known);
+        // A stage's project is not ready until the stages before it are
+        // complete (spec 010, BR-004): the sim would refuse the order.
+        const bool ready = !known(id) &&
+                           std::ranges::all_of(content.techs[i].prerequisites, known) &&
+                           content.techs[i].requiresProgramStage <= view.program.stagesCompleted;
         if (!ready || content.techs[i].cost + content.ai.researchFloor / 2 > netCash) {
             continue;
         }
