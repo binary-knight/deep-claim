@@ -70,6 +70,13 @@ struct Company {
     std::uint8_t coverCosts = 0;  // sell at month end to keep cash at zero or above
     std::vector<std::int64_t> autoSoldTonnes;
     std::vector<Money> autoSoldProceeds;
+    // The race for the program (spec 010): how many of Content::program's
+    // stages the company has completed, and the tonnes of each resource it
+    // has delivered toward the stage it is working on (indexed by ResourceId;
+    // zero for a resource that stage does not need, and all zero once the
+    // program is complete).
+    std::uint32_t programStage = 0;
+    std::vector<std::int64_t> programDelivered;
 };
 
 // One commodity market per resource. Everything here is public.
@@ -182,6 +189,23 @@ struct ActiveEvent {
     std::uint8_t active = 1;
 };
 
+// How the race ended for one company (spec 010).
+enum class ProgramResult : std::uint8_t {
+    None,           // the game has not ended
+    Founded,        // completed the last stage first
+    LesserPartner,  // another company founded the program; this one was close enough to join
+    Lost,
+};
+
+// How the game ended, or that it has not. Public. The sim sets it once and
+// nothing changes afterwards (decision record 001 of spec 010).
+struct Outcome {
+    std::uint8_t ended = 0;
+    Day day = 0;                         // the day the game ended; zero until it has
+    CompanyId founder;                   // invalid when nobody founded the program
+    std::vector<ProgramResult> results;  // indexed by CompanyId; None until the game has ended
+};
+
 // The complete dynamic state of a game. Everything that affects the future
 // of the simulation lives here so that save, load, hashing and replay all
 // operate on one struct. Entities are stored in vectors indexed by StrongId
@@ -205,6 +229,7 @@ struct WorldState {
     std::vector<PlotId> withdrawnQueue;
     std::uint32_t bidCounter = 0;  // monotonic order stamp for tie-breaks
     HiddenState hidden;
+    Outcome outcome;
 };
 
 }  // namespace sim

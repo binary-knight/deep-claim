@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -297,4 +298,197 @@ TEST_CASE("Loan state survives save and load and is validated", "[finance][save]
         sim::Money::fromCents(9'000'000'000'000'000'000LL);
     CHECK_FALSE(simulation.load(saveOf(broken)));  // forged balance must not overflow validation
     CHECK(simulation.load(saveOf(simulation.state())));
+}
+
+TEST_CASE("Program state and the outcome survive save and load and are part of the state hash",
+          "[finance][spec010][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation fresh(content, 3, test::setup());
+
+    // A new game: nobody has started the program and nothing has ended.
+    const sim::WorldState& start = fresh.state();
+    REQUIRE(start.companies.size() == 2);
+    for (const sim::Company& company : start.companies) {
+        CHECK(company.programStage == 0);
+        CHECK(company.programDelivered == std::vector<std::int64_t>(content.resources.size(), 0));
+    }
+    CHECK(start.outcome.ended == 0);
+    CHECK(start.outcome.day == 0);
+    CHECK_FALSE(start.outcome.founder.valid());
+    CHECK(start.outcome.results ==
+          std::vector<sim::ProgramResult>(start.companies.size(), sim::ProgramResult::None));
+
+    // The rival has founded the program; the player was one stage short and
+    // part-way through its deliveries (stage 3 of the fixture needs 3,000
+    // tonnes of resource 0 and 50 of resource 2).
+    fresh.tick(10);
+    sim::WorldState edited = fresh.state();
+    edited.companies[0].programStage = 2;
+    edited.companies[0].programDelivered[0] = 1'234;
+    edited.companies[0].programDelivered[2] = 50;
+    edited.companies[1].programStage = 3;
+    edited.outcome.ended = 1;
+    edited.outcome.day = 9;
+    edited.outcome.founder = kRival;
+    edited.outcome.results = {sim::ProgramResult::LesserPartner, sim::ProgramResult::Founded};
+    sim::Simulation original(content, 4, test::setup());
+    REQUIRE(original.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+
+    sim::Simulation restored(content, 5, test::setup());
+    REQUIRE(restored.load(original.save()));
+    const sim::WorldState& loaded = restored.state();
+    CHECK(loaded.companies[0].programStage == 2);
+    CHECK(loaded.companies[0].programDelivered == edited.companies[0].programDelivered);
+    CHECK(loaded.companies[1].programStage == 3);
+    CHECK(loaded.companies[1].programDelivered == edited.companies[1].programDelivered);
+    CHECK(loaded.outcome.ended == 1);
+    CHECK(loaded.outcome.day == 9);
+    CHECK(loaded.outcome.founder == kRival);
+    CHECK(loaded.outcome.results == edited.outcome.results);
+    CHECK(restored.stateHash() == original.stateHash());
+
+    // Each field alone moves the hash.
+    const std::uint64_t hash = original.stateHash();
+    const auto hashWith = [&](const auto& edit) {
+        sim::WorldState changed = original.state();
+        edit(changed);
+        return sim::hashWorld(changed);
+    };
+    CHECK(hashWith([](sim::WorldState&) {}) == hash);
+    CHECK(hashWith([](sim::WorldState& s) { s.companies[0].programStage = 1; }) != hash);
+    CHECK(hashWith([](sim::WorldState& s) { s.companies[0].programDelivered[0] += 1; }) != hash);
+    CHECK(hashWith([](sim::WorldState& s) { s.outcome.ended = 0; }) != hash);
+    CHECK(hashWith([](sim::WorldState& s) { s.outcome.day += 1; }) != hash);
+    CHECK(hashWith([](sim::WorldState& s) { s.outcome.founder = kPlayer; }) != hash);
+    CHECK(hashWith([](sim::WorldState& s) { s.outcome.results[0] = sim::ProgramResult::Lost; }) !=
+          hash);
+}
+
+TEST_CASE("Saves with impossible program state are rejected", "[finance][spec010][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(3);
+    const auto loads = [&](const auto& edit) {
+        sim::WorldState edited = simulation.state();
+        edit(edited.companies[0]);
+        sim::Simulation scratch(content, 2, test::setup());
+        return scratch.load(sim::saveGame(edited, {}, sim::hashContent(content)));
+    };
+    const auto stages = static_cast<std::uint32_t>(content.program.stages.size());
+    REQUIRE(stages == 3);
+    CHECK(loads([](sim::Company&) {}));
+
+    // The stage counts stages complete: none to all of them, never more.
+    CHECK(loads([&](sim::Company& c) { c.programStage = stages; }));
+    CHECK_FALSE(loads([&](sim::Company& c) { c.programStage = stages + 1; }));
+
+    // One delivery figure per resource.
+    CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered.push_back(0); }));
+    CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered.pop_back(); }));
+    CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered.clear(); }));
+
+    // Stage 1 of the fixture needs 1,000 tonnes of resource 0 and nothing else.
+    CHECK(loads([](sim::Company& c) { c.programDelivered[0] = 1'000; }));
+    CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered[0] = 1'001; }));
+    CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered[0] = -1; }));
+    CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered[1] = 1; }));
+    CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered[2] = -1; }));
+
+    // The need is the current stage's: stage 2 wants 2,000 and 200 of
+    // resource 1, and resource 2 not at all.
+    const auto atStageTwo = [](std::int64_t first, std::int64_t second, std::int64_t third) {
+        return [=](sim::Company& c) {
+            c.programStage = 1;
+            c.programDelivered[0] = first;
+            c.programDelivered[1] = second;
+            c.programDelivered[2] = third;
+        };
+    };
+    CHECK(loads(atStageTwo(2'000, 200, 0)));
+    CHECK_FALSE(loads(atStageTwo(2'001, 0, 0)));
+    CHECK_FALSE(loads(atStageTwo(0, 201, 0)));
+    CHECK_FALSE(loads(atStageTwo(0, 0, 1)));
+
+    // A finished program holds no deliveries.
+    CHECK_FALSE(loads([&](sim::Company& c) {
+        c.programStage = stages;
+        c.programDelivered[0] = 1;
+    }));
+}
+
+TEST_CASE("A program with no stages accepts only an untouched company",
+          "[finance][spec010][save]") {
+    sim::Content content = test::makeContent();
+    content.program.stages.clear();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(3);
+    const auto loads = [&](const auto& edit) {
+        sim::WorldState edited = simulation.state();
+        edit(edited.companies[0]);
+        sim::Simulation scratch(content, 2, test::setup());
+        return scratch.load(sim::saveGame(edited, {}, sim::hashContent(content)));
+    };
+    CHECK(loads([](sim::Company&) {}));
+    CHECK_FALSE(loads([](sim::Company& c) { c.programStage = 1; }));
+    CHECK_FALSE(loads([](sim::Company& c) { c.programDelivered[0] = 1; }));
+}
+
+TEST_CASE("Saves with an impossible outcome are rejected", "[finance][spec010][save]") {
+    using Result = sim::ProgramResult;
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(20);
+    const auto loads = [&](std::uint8_t ended, sim::Day day, sim::CompanyId founder,
+                           std::vector<Result> results) {
+        sim::WorldState edited = simulation.state();
+        edited.outcome.ended = ended;
+        edited.outcome.day = day;
+        edited.outcome.founder = founder;
+        edited.outcome.results = std::move(results);
+        sim::Simulation scratch(content, 2, test::setup());
+        return scratch.load(sim::saveGame(edited, {}, sim::hashContent(content)));
+    };
+    const sim::CompanyId nobody;
+    const sim::Day today = simulation.state().day;
+
+    // A game in progress: no day, no founder, no results.
+    CHECK(loads(0, 0, nobody, {Result::None, Result::None}));
+    CHECK_FALSE(loads(0, 5, nobody, {Result::None, Result::None}));
+    CHECK_FALSE(loads(0, 0, kPlayer, {Result::None, Result::None}));
+    CHECK_FALSE(loads(0, 0, kPlayer, {Result::Founded, Result::None}));
+    CHECK_FALSE(loads(0, 0, nobody, {Result::None, Result::Lost}));
+    CHECK_FALSE(loads(0, 0, nobody, {Result::LesserPartner, Result::None}));
+
+    // Every ending the rules allow.
+    CHECK(loads(1, 5, kPlayer, {Result::Founded, Result::Lost}));
+    CHECK(loads(1, 5, kRival, {Result::LesserPartner, Result::Founded}));
+    CHECK(loads(1, 5, kRival, {Result::Lost, Result::Founded}));
+    CHECK(loads(1, today, nobody, {Result::Lost, Result::Lost}));
+
+    // The flag is 0 or 1, and an ended game says when: a day that has been
+    // played, never day 0 and never one still to come.
+    CHECK_FALSE(loads(2, 5, kPlayer, {Result::Founded, Result::Lost}));
+    CHECK_FALSE(loads(1, 0, kPlayer, {Result::Founded, Result::Lost}));
+    CHECK_FALSE(loads(1, today + 1, kPlayer, {Result::Founded, Result::Lost}));
+
+    // One result per company, each a result that exists.
+    CHECK_FALSE(loads(1, 5, nobody, {Result::Lost}));
+    CHECK_FALSE(loads(1, 5, nobody, {Result::Lost, Result::Lost, Result::Lost}));
+    CHECK_FALSE(loads(1, 5, nobody, {}));
+    CHECK_FALSE(loads(0, 0, nobody, {Result::None}));
+    // A result past the last one is what a corrupt save would carry.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+    CHECK_FALSE(loads(1, 5, nobody, {Result::Lost, static_cast<Result>(4)}));
+
+    // Once the game has ended every company has a result.
+    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Founded, Result::None}));
+    CHECK_FALSE(loads(1, 5, nobody, {Result::None, Result::Lost}));
+
+    // The founder is a company, the one whose result is "founded", and the
+    // only one.
+    CHECK_FALSE(loads(1, 5, sim::CompanyId(2), {Result::Lost, Result::Lost}));
+    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Lost, Result::Founded}));
+    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Lost, Result::Lost}));
+    CHECK_FALSE(loads(1, 5, kPlayer, {Result::Founded, Result::Founded}));
+    CHECK_FALSE(loads(1, 5, nobody, {Result::Founded, Result::Lost}));
 }

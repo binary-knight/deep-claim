@@ -188,6 +188,9 @@ void generateWorld(const Content& content, WorldState& state) {
     state.listingQueue.clear();
     state.nextListing = 0;
     state.withdrawnQueue.clear();
+    // A new world has not ended (spec 010). Whoever adds the companies sizes
+    // the outcome's results to match them.
+    state.outcome = Outcome{};
 
     for (std::uint32_t regionIndex = 0; regionIndex < content.regions.size(); ++regionIndex) {
         const RegionDef& region = content.regions[regionIndex];

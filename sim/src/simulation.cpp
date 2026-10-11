@@ -36,6 +36,7 @@ Company makeCompany(const Content& content, std::string name, CompanyKind kind) 
     company.coverCosts = usesDefaults && content.balance.defaultCoverCosts ? 1 : 0;
     company.autoSoldTonnes.assign(content.resources.size(), 0);
     company.autoSoldProceeds.assign(content.resources.size(), Money::zero());
+    company.programDelivered.assign(content.resources.size(), 0);
     return company;
 }
 
@@ -50,6 +51,8 @@ Simulation::Simulation(const Content& content, Seed seed, const GameSetup& setup
     for (const std::string& name : setup.aiNames) {
         state_.companies.push_back(makeCompany(content, name, CompanyKind::Ai));
     }
+    // Spec 010: one result per company, none until the game has ended.
+    state_.outcome.results.assign(state_.companies.size(), ProgramResult::None);
     report_.day = 0;
     listPlots(content, state_, content.balance.plotsListedAtStart, report_);
 }

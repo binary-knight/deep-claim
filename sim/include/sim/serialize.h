@@ -84,7 +84,8 @@ template <class Archive>
 void serialize(Archive& ar, Company& company) {
     ar(company.name, company.kind, company.cash, company.inventoryTonnes, company.completedTechs,
        company.monthsInsolvent, company.bankrupt, company.sellPolicies, company.coverCosts,
-       company.autoSoldTonnes, company.autoSoldProceeds);
+       company.autoSoldTonnes, company.autoSoldProceeds, company.programStage,
+       company.programDelivered);
 }
 
 template <class Archive>
@@ -155,10 +156,15 @@ void serialize(Archive& ar, HiddenState& hidden) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, Outcome& outcome) {
+    ar(outcome.ended, outcome.day, outcome.founder, outcome.results);
+}
+
+template <class Archive>
 void serialize(Archive& ar, WorldState& state) {
     ar(state.day, state.rng, state.companies, state.plots, state.auctions, state.surveys,
        state.mines, state.markets, state.loans, state.research, state.events, state.listingQueue,
-       state.nextListing, state.withdrawnQueue, state.bidCounter, state.hidden);
+       state.nextListing, state.withdrawnQueue, state.bidCounter, state.hidden, state.outcome);
 }
 
 // ---- commands (queued commands travel with saves) ----

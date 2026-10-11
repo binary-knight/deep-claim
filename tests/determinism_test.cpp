@@ -75,7 +75,9 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // lossAnnounced) and did not move it: nobody gives an order in this run,
     // so no mine is built and the mine list is hashed empty. The new fields
     // are pinned by the save and hash tests in mines_test.cpp instead.
-    constexpr std::uint64_t kGolden = 0x2a5da3177ab7c69dULL;
+    // Moved once for spec 010 step 1: every company gains its program stage
+    // and deliveries, and the world gains an outcome.
+    constexpr std::uint64_t kGolden = 0x01906a0707315707ULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
     simulation.tick(sim::kDaysPerYear);
@@ -96,7 +98,10 @@ TEST_CASE("Golden state hash of a played game is stable across platforms", "[det
     // move it. A deliberate change to sim state or rules moves it once:
     // update the constant in the same commit and record the reason in
     // docs/DESIGN.md.
-    constexpr std::uint64_t kGoldenPlayed = 0xc0980b717725177fULL;
+    // Moved once for spec 010 step 1 (recorded 2026-10-11): company state
+    // grew by the program stage and deliveries, and the world by an outcome.
+    // No rule changed; nobody delivers or completes a stage yet.
+    constexpr std::uint64_t kGoldenPlayed = 0xb6d511501247ec2dULL;
     constexpr sim::Day kDays = sim::kDaysPerYear * 3;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());

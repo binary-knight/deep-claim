@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <new>
@@ -73,6 +74,33 @@ bool validateSellPolicies(const Content& content, const Company& company) {
     return policiesOk && tonnesOk && proceedsOk;
 }
 
+// The program (spec 010): the stage counts stages complete, and deliveries
+// are toward the stage being worked on, so each is within what that stage
+// needs: nothing for a resource it does not need, and nothing at all once
+// the program is complete.
+bool validateProgram(const Content& content, const Company& company) {
+    const std::vector<ProgramStage>& stages = content.program.stages;
+    if (company.programStage > stages.size() ||
+        company.programDelivered.size() != content.resources.size()) {
+        return false;
+    }
+    std::vector<std::int64_t> needed(content.resources.size(), 0);
+    if (company.programStage < stages.size()) {
+        for (const ProgramRequirement& requirement : stages[company.programStage].requirements) {
+            if (requirement.resource.valid() && requirement.resource.index() < needed.size()) {
+                std::int64_t& need = needed[requirement.resource.index()];
+                need = std::max(need, requirement.tonnes);
+            }
+        }
+    }
+    for (std::size_t r = 0; r < needed.size(); ++r) {
+        if (company.programDelivered[r] < 0 || company.programDelivered[r] > needed[r]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool validateCompany(const Content& content, const Company& company) {
     if (company.kind != CompanyKind::Player && company.kind != CompanyKind::Ai) {
         return false;
@@ -97,7 +125,7 @@ bool validateCompany(const Content& content, const Company& company) {
         return tonnes >= 0 && tonnes <= kMaxStockTonnes;
     });
     return stocksOk && validateCompletedTechs(content, company) &&
-           validateSellPolicies(content, company);
+           validateSellPolicies(content, company) && validateProgram(content, company);
 }
 
 bool validateCompanies(const Content& content, const WorldState& state) {
@@ -592,13 +620,47 @@ bool validateEvents(const Content& content, const WorldState& state) {
     return true;
 }
 
+// The outcome (spec 010): one result per company. A game in progress carries
+// no day, founder or result. An ended one names a day that has been played,
+// gives every company a result and, when the program was founded, names the
+// one company whose result says so.
+bool validateOutcome(const WorldState& state) {
+    const Outcome& outcome = state.outcome;
+    if (outcome.ended > 1 || outcome.results.size() != state.companies.size()) {
+        return false;
+    }
+    const auto is = [](ProgramResult wanted) {
+        return [wanted](ProgramResult result) { return result == wanted; };
+    };
+    if (outcome.ended == 0) {
+        return outcome.day == 0 && !outcome.founder.valid() &&
+               std::ranges::all_of(outcome.results, is(ProgramResult::None));
+    }
+    if (outcome.day == 0 || outcome.day > state.day) {
+        return false;
+    }
+    const bool resultsKnown = std::ranges::all_of(outcome.results, [](ProgramResult result) {
+        return result == ProgramResult::Founded || result == ProgramResult::LesserPartner ||
+               result == ProgramResult::Lost;
+    });
+    const auto founded = std::ranges::count_if(outcome.results, is(ProgramResult::Founded));
+    if (!resultsKnown) {
+        return false;
+    }
+    if (!outcome.founder.valid()) {
+        return founded == 0;
+    }
+    return founded == 1 && outcome.founder.index() < outcome.results.size() &&
+           outcome.results[outcome.founder.index()] == ProgramResult::Founded;
+}
+
 bool validateWorldImpl(const Content& content, const WorldState& state) {
     if (state.day > kMaxDay || state.plots.size() != state.hidden.plotDeposits.size()) {
         return false;
     }
     // Deposits first: later checks index by resource and assume valid ids.
     return validateDeposits(content, state) && validateCompanies(content, state) &&
-           validatePlots(content, state) && validateAuctions(state) &&
+           validateOutcome(state) && validatePlots(content, state) && validateAuctions(state) &&
            validateListingQueue(state) && validateSurveys(content, state) &&
            validateMines(content, state) && validateMarkets(content, state) &&
            validateLoans(content, state) && validateResearch(content, state) &&
