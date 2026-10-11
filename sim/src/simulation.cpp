@@ -7,6 +7,7 @@
 #include "sim/markets.h"
 #include "sim/mines.h"
 #include "sim/plot_market.h"
+#include "sim/program.h"
 #include "sim/research.h"
 #include "sim/save.h"
 #include "sim/surveys.h"
@@ -180,6 +181,26 @@ void Simulation::handle(const SetCoverCosts& c) {
         reject(c.company, PlotId(), Money::zero(), *reason);
     } else {
         applySetCoverCosts(state_, c);
+    }
+}
+
+void Simulation::handle(const DeliverToProgram& c) {
+    if (const auto reason = validateDeliverToProgram(*content_, state_, c)) {
+        Notice notice =
+            makeNotice(NoticeKind::CommandRejected, c.company, PlotId(), Money::zero(), *reason);
+        notice.resource = c.resource;
+        notice.tonnes = c.tonnes;
+        report_.notices.push_back(notice);
+    } else {
+        applyDeliverToProgram(state_, c, report_);
+    }
+}
+
+void Simulation::handle(const CompleteProgramStage& c) {
+    if (const auto reason = validateCompleteProgramStage(*content_, state_, c)) {
+        reject(c.company, PlotId(), Money::zero(), *reason);
+    } else {
+        applyCompleteProgramStage(*content_, state_, c, report_);
     }
 }
 

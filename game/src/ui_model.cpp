@@ -469,6 +469,10 @@ std::string pendingText(const sim::Content& content, const sim::Command& command
                 return text(content,
                             cover.enabled != 0 ? "ui.pending_cover_on" : "ui.pending_cover_off");
             },
+            [&](const sim::DeliverToProgram&) { return text(content, "ui.pending_deliver"); },
+            [&](const sim::CompleteProgramStage&) {
+                return text(content, "ui.pending_complete_stage");
+            },
         },
         command);
 }

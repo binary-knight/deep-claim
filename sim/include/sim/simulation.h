@@ -73,6 +73,8 @@ private:
     void handle(const StartResearch& c);
     void handle(const SetSellPolicy& c);
     void handle(const SetCoverCosts& c);
+    void handle(const DeliverToProgram& c);
+    void handle(const CompleteProgramStage& c);
     void reject(CompanyId company, PlotId plot, Money amount, RejectReason reason);
 
     const Content* content_;

@@ -1393,6 +1393,8 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.pending_policy_off", "resource"},
     {"ui.pending_cover_on", ""},
     {"ui.pending_cover_off", ""},
+    {"ui.pending_deliver", ""},
+    {"ui.pending_complete_stage", ""},
     {"ui.cancel", ""},
     {"ui.cancel_all", ""},
     {"ui.committed", "amount"},

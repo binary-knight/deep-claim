@@ -327,6 +327,8 @@ ui.pending_policy_on	Auto-sell on: {resource}
 ui.pending_policy_off	Auto-sell off: {resource}
 ui.pending_cover_on	Cover costs on
 ui.pending_cover_off	Cover costs off
+ui.pending_deliver	Delivery to the program
+ui.pending_complete_stage	Program stage
 ui.survey_unaffordable	A survey costs {amount}. The ledger won't cover it.
 notice.mine_losing_money	The mine on {plot} has run at a loss for {days} days and is now losing {amount} a day. Mothball it or wait for the price to recover.
 ui.pause_on.mine_losing	Mine losing money

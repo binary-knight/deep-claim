@@ -145,10 +145,16 @@ Json commandJson(const sim::Command& command) {
                 j["enabled"] = c.enabled != 0;
                 j["reserve"] = c.reserveTonnes;
                 j["floor_cents"] = c.floorPrice.cents();
-            } else {
-                static_assert(std::is_same_v<T, sim::SetCoverCosts>);
+            } else if constexpr (std::is_same_v<T, sim::SetCoverCosts>) {
                 j["cmd"] = "SetCoverCosts";
                 j["enabled"] = c.enabled != 0;
+            } else if constexpr (std::is_same_v<T, sim::DeliverToProgram>) {
+                j["cmd"] = "DeliverToProgram";
+                j["resource"] = idJson(c.resource);
+                j["tonnes"] = c.tonnes;
+            } else {
+                static_assert(std::is_same_v<T, sim::CompleteProgramStage>);
+                j["cmd"] = "CompleteProgramStage";
             }
         },
         command);
@@ -267,6 +273,22 @@ bool decodeCoverCosts(const Json& j, sim::CompanyId company, sim::Command& out) 
     return true;
 }
 
+bool decodeDeliver(const Json& j, sim::CompanyId company, sim::Command& out) {
+    sim::DeliverToProgram c;
+    c.company = company;
+    if (!idFrom(j, "resource", c.resource) || !int64From(j, "tonnes", c.tonnes)) {
+        return false;
+    }
+    out = c;
+    return true;
+}
+
+// A stage completion names nothing but the company.
+bool decodeCompleteStage(const Json& /*j*/, sim::CompanyId company, sim::Command& out) {
+    out = sim::CompleteProgramStage{company};
+    return true;
+}
+
 using Decoder = bool (*)(const Json&, sim::CompanyId, sim::Command&);
 
 struct NamedDecoder {
@@ -274,7 +296,7 @@ struct NamedDecoder {
     Decoder decode;
 };
 
-constexpr std::array<NamedDecoder, 10> kDecoders = {{
+constexpr std::array<NamedDecoder, 12> kDecoders = {{
     {"BidOnPlot", &decodeBid},
     {"CommissionSurvey", &decodeSurvey},
     {"BuildMine", &decodeBuild},
@@ -285,6 +307,8 @@ constexpr std::array<NamedDecoder, 10> kDecoders = {{
     {"StartResearch", &decodeResearch},
     {"SetSellPolicy", &decodeSellPolicy},
     {"SetCoverCosts", &decodeCoverCosts},
+    {"DeliverToProgram", &decodeDeliver},
+    {"CompleteProgramStage", &decodeCompleteStage},
 }};
 
 bool commandFrom(const Json& j, sim::Command& out) {

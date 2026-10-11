@@ -101,10 +101,11 @@ struct CompleteProgramStage {
     CompanyId company;
 };
 
-// DeliverToProgram and CompleteProgramStage are not orders yet: they join the
-// variant, and the tick, in the next task of spec 010.
+// Saves write a command as its position here, so new orders go at the end
+// and nothing already listed moves.
 using Command = std::variant<BidOnPlot, CommissionSurvey, BuildMine, SetMineState, SellOre,
-                             TakeLoan, RepayLoan, StartResearch, SetSellPolicy, SetCoverCosts>;
+                             TakeLoan, RepayLoan, StartResearch, SetSellPolicy, SetCoverCosts,
+                             DeliverToProgram, CompleteProgramStage>;
 
 [[nodiscard]] CompanyId commandCompany(const Command& command);
 void setCommandCompany(Command& command, CompanyId company);

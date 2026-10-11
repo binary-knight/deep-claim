@@ -76,6 +76,8 @@ std::vector<sim::Command> queuedCommandOfEveryKind() {
         sim::StartResearch{player, sim::TechId(0)},
         sim::SetSellPolicy{player, sim::ResourceId(0), 1, 100, sim::Money::fromUnits(55)},
         sim::SetCoverCosts{player, 1},
+        sim::DeliverToProgram{player, sim::ResourceId(0), 75},
+        sim::CompleteProgramStage{player},
     };
 }
 
@@ -216,23 +218,23 @@ TEST_CASE("A save with one queued command of any kind loads", "[archive][save]")
 }
 
 TEST_CASE("Command vectors are bounded by the smallest command", "[archive][save]") {
-    // The smallest command is SetCoverCosts: a one-byte tag, a four-byte
-    // company id and a one-byte flag.
-    const std::vector<sim::Command> smallest{sim::SetCoverCosts{sim::CompanyId(0), 1}};
+    // The smallest command is CompleteProgramStage: a one-byte tag and a
+    // four-byte company id.
+    const std::vector<sim::Command> smallest{sim::CompleteProgramStage{sim::CompanyId(0)}};
     const std::vector<std::uint8_t> one = sim::toBytes(smallest);
-    REQUIRE(one.size() == 4 + 6);
+    REQUIRE(one.size() == 4 + 5);
 
     // A prefix of 2 with room for one smallest command and one byte short of a
     // second must fail before anything is decoded or allocated.
     std::vector<std::uint8_t> bytes{2, 0, 0, 0};
-    bytes.resize(4 + 11, 0);
+    bytes.resize(4 + 9, 0);
     std::vector<sim::Command> commands;
     CHECK_FALSE(sim::fromBytes(bytes, commands));
     CHECK(commands.empty());
 
     // Two of the smallest fit exactly and decode.
-    const std::vector<sim::Command> pair{sim::SetCoverCosts{sim::CompanyId(0), 1},
-                                         sim::SetCoverCosts{sim::CompanyId(1), 0}};
+    const std::vector<sim::Command> pair{sim::CompleteProgramStage{sim::CompanyId(0)},
+                                         sim::CompleteProgramStage{sim::CompanyId(1)}};
     std::vector<sim::Command> decoded;
     REQUIRE(sim::fromBytes(sim::toBytes(pair), decoded));
     CHECK(sim::toBytes(decoded) == sim::toBytes(pair));

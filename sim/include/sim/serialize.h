@@ -221,6 +221,16 @@ void serialize(Archive& ar, SetCoverCosts& command) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, DeliverToProgram& command) {
+    ar(command.company, command.resource, command.tonnes);
+}
+
+template <class Archive>
+void serialize(Archive& ar, CompleteProgramStage& command) {
+    ar(command.company);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Command& command) {
     auto index = static_cast<std::uint8_t>(command.index());
     ar(index);
@@ -255,6 +265,12 @@ void serialize(Archive& ar, Command& command) {
                 break;
             case 9:
                 command = SetCoverCosts{};
+                break;
+            case 10:
+                command = DeliverToProgram{};
+                break;
+            case 11:
+                command = CompleteProgramStage{};
                 break;
             default:
                 ar.fail();

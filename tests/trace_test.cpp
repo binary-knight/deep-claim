@@ -1,9 +1,11 @@
 #include "game/trace.h"
 
 #include "sim/commands.h"
+#include "sim/content.h"
 #include "sim/ids.h"
 #include "sim/money.h"
 #include "sim/save.h"
+#include "sim/simulation.h"
 #include "sim/types.h"
 #include "sim/world_state.h"
 
@@ -111,7 +113,10 @@ TEST_CASE("Every command survives a trip through trace JSON", "[trace]") {
         sim::SetSellPolicy{sim::CompanyId(0), sim::ResourceId(1), 1, 250,
                            sim::Money::fromUnits(950)},
         sim::SetCoverCosts{sim::CompanyId(0), 0},
+        sim::DeliverToProgram{sim::CompanyId(0), sim::ResourceId(1), 250},
+        sim::CompleteProgramStage{sim::CompanyId(0)},
     };
+    REQUIRE(commands.size() == std::variant_size_v<sim::Command>);
     for (const sim::Command& command : commands) {
         const std::string json = game::encodeCommand(command);
         sim::Command decoded;
@@ -137,6 +142,15 @@ TEST_CASE("Every command survives a trip through trace JSON", "[trace]") {
     CHECK_FALSE(
         game::decodeCommand(R"({"cmd":"SetSellPolicy","resource":0,"enabled":1})", decoded));
     CHECK_FALSE(game::decodeCommand(R"({"cmd":"SetCoverCosts"})", decoded));
+    // The program's orders go by name: a delivery needs its good and its
+    // tonnes, a stage completion names nothing but the order.
+    REQUIRE(game::decodeCommand(R"({"cmd":"DeliverToProgram","resource":2,"tonnes":40})", decoded));
+    CHECK(std::get<sim::DeliverToProgram>(decoded).resource == sim::ResourceId(2));
+    CHECK(std::get<sim::DeliverToProgram>(decoded).tonnes == 40);
+    CHECK_FALSE(game::decodeCommand(R"({"cmd":"DeliverToProgram","resource":2})", decoded));
+    CHECK_FALSE(game::decodeCommand(R"({"cmd":"DeliverToProgram","tonnes":40})", decoded));
+    REQUIRE(game::decodeCommand(R"({"cmd":"CompleteProgramStage"})", decoded));
+    CHECK(std::holds_alternative<sim::CompleteProgramStage>(decoded));
     CHECK(game::decodeCommand(
         R"({"cmd":"SetSellPolicy","resource":0,"enabled":true,"reserve":5,"floor_cents":100})",
         decoded));
@@ -632,4 +646,96 @@ TEST_CASE("A trace with queued and cancelled orders replays to the same game", "
     CHECK(result.session->pendingOrders().empty());
     CHECK(result.session->view().loans.size() == 1);
     CHECK(result.session->log().size() == live.log().size());
+}
+
+namespace {
+
+// A save of a fresh game in which the player's first program stage is one
+// delivery and one order from done: its research complete, the iron it needs
+// in stock and plenty of cash. The fixture's first stage costs 1,000,000 and
+// needs 1,000 t of iron (resource 0).
+std::vector<std::uint8_t> saveWithStageInReach(const sim::Content& content, sim::Seed seed) {
+    const sim::Simulation fresh(content, seed, test::setup());
+    sim::WorldState state = fresh.state();
+    sim::Company& player = state.companies[game::Session::kPlayer.index()];
+    player.completedTechs.push_back(content.program.stages[0].research);
+    player.inventoryTonnes[0] = 1'500;
+    player.cash = sim::Money::fromUnits(5'000'000);
+    return sim::saveGame(state, {}, sim::hashContent(content));
+}
+
+sim::Company playerOf(const sim::Content& content, const game::Session& session) {
+    sim::WorldState state;
+    std::vector<sim::Command> pending;
+    REQUIRE(sim::loadGame(session.save(), content, state, pending));
+    return state.companies[game::Session::kPlayer.index()];
+}
+
+}  // namespace
+
+TEST_CASE("The program's orders are priced, applied by a tick and replayed", "[trace][replay]") {
+    const sim::Content content = test::makeContent();
+    const sim::Seed seed = 31;
+    const std::vector<std::uint8_t> saveBytes = saveWithStageInReach(content, seed);
+    const sim::Money stageCost = content.program.stages[0].cost;
+
+    std::ostringstream out;
+    game::TraceWriter trace(out);
+    trace.newGame(seed, test::setup(), sim::hashContent(content), "test");
+    game::Session live(content, seed, test::setup());
+    live.setTrace(&trace);
+    game::AutoPause never;
+    never.enabled.fill(false);
+    live.setAutoPause(never);
+    REQUIRE(live.load(saveBytes));
+    trace.loaded(live.day(), "stage.dcsave", live.stateHash());
+
+    // A delivery costs nothing up front; completing a stage costs the stage.
+    CHECK(live.orderCost(sim::DeliverToProgram{{}, sim::ResourceId(0), 1'000}) ==
+          sim::Money::zero());
+    CHECK(live.orderCost(sim::CompleteProgramStage{}) == stageCost);
+
+    // Both orders on one day: the sim takes them in the order given, so the
+    // delivery lands before the stage is checked.
+    live.submit(sim::DeliverToProgram{{}, sim::ResourceId(0), 1'000});
+    live.submit(sim::CompleteProgramStage{});
+    CHECK(live.committed() == stageCost);
+    const sim::Money cashBefore = playerOf(content, live).cash;
+    live.stepOneDay();
+
+    const sim::Company after = playerOf(content, live);
+    CHECK(after.programStage == 1);
+    CHECK(after.inventoryTonnes[0] == 500);
+    CHECK(after.programDelivered[0] == 0);  // cleared for the next stage
+    CHECK(after.cash <= cashBefore - stageCost);
+    // The next completion is priced at the second stage's cost.
+    CHECK(live.orderCost(sim::CompleteProgramStage{}) == content.program.stages[1].cost);
+
+    // A delivery alone moves stock to the program and stays there.
+    live.submit(sim::DeliverToProgram{{}, sim::ResourceId(0), 300});
+    live.stepOneDay();
+    CHECK(playerOf(content, live).programDelivered[0] == 300);
+    CHECK(playerOf(content, live).programStage == 1);
+    trace.end(live.day());
+
+    const std::vector<game::TraceRecord> commands = commandRecords(out.str());
+    REQUIRE(commands.size() == 3);
+    CHECK(std::holds_alternative<sim::DeliverToProgram>(commands[0].command.value()));
+    CHECK(std::holds_alternative<sim::CompleteProgramStage>(commands[1].command.value()));
+    CHECK(out.str().find(R"("cmd":"DeliverToProgram")") != std::string::npos);
+    CHECK(out.str().find(R"("cmd":"CompleteProgramStage")") != std::string::npos);
+
+    game::ReplayOptions options;
+    options.readSave = [&saveBytes](const std::string& file) {
+        return file == "stage.dcsave" ? saveBytes : std::vector<std::uint8_t>{};
+    };
+    std::istringstream in(out.str());
+    const game::ReplayResult result = game::replayTrace(content, in, options);
+    REQUIRE(result.ok());
+    REQUIRE(result.session != nullptr);
+    CHECK_FALSE(result.firstDivergence.has_value());
+    CHECK(result.commands == 3);
+    CHECK(result.session->day() == live.day());
+    CHECK(result.session->stateHash() == live.stateHash());
+    CHECK(playerOf(content, *result.session).programStage == 1);
 }

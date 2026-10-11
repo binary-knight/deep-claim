@@ -17,8 +17,8 @@
 #include <string_view>
 #include <vector>
 
-// The program's rules (spec 010, BR-003 and BR-005), called directly: the
-// orders join the command set in a later task.
+// The program's rules (spec 010, BR-003 and BR-005), called directly; the
+// orders going through a session and a tick are covered in trace_test.cpp.
 
 namespace {
 
