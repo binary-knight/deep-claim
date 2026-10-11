@@ -329,9 +329,24 @@ void serialize(Archive& ar, AiParams& ai) {
 }
 
 template <class Archive>
+void serialize(Archive& ar, ProgramRequirement& requirement) {
+    ar(requirement.resource, requirement.tonnes);
+}
+
+template <class Archive>
+void serialize(Archive& ar, ProgramStage& stage) {
+    ar(stage.id, stage.cost, stage.research, stage.requirements);
+}
+
+template <class Archive>
+void serialize(Archive& ar, ProgramDef& program) {
+    ar(program.deadlineDay, program.stages);
+}
+
+template <class Archive>
 void serialize(Archive& ar, Content& content) {
     ar(content.resources, content.techs, content.regions, content.events, content.balance,
-       content.ai);
+       content.ai, content.program);
 }
 
 }  // namespace sim

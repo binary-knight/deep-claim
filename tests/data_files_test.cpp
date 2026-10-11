@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 TEST_CASE("Shipped data files load cleanly", "[content][data]") {
     const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
@@ -71,6 +72,63 @@ TEST_CASE("Shipped research tree holds the three program stage projects",
         CHECK(tech.durationDays == project.durationDays);
         CHECK(tech.effects.empty());
         CHECK(tech.prerequisites.empty());
+    }
+}
+
+TEST_CASE("Shipped program has the deadline and the three provisional stages",
+          "[content][data][spec010]") {
+    // Spec 010, step 1 (BR-001, BR-002, AC-001): the race ends on day 10,800,
+    // thirty game years in. Each stage needs cash, its own research project
+    // and ore the company mined itself; only the third needs lithium, the ore
+    // behind research. The costs and tonnages are provisional until the race
+    // is tuned (task 016), so this pins what ships, not what the loader allows.
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& c = *result.content;
+
+    CHECK(c.program.deadlineDay == 10800);
+    CHECK(c.program.deadlineDay == 30 * sim::kDaysPerYear);
+
+    struct Need {
+        std::string_view resource;
+        std::int64_t tonnes;
+    };
+    struct Stage {
+        std::string_view id;
+        std::int64_t cost;
+        std::string_view research;
+        std::vector<Need> needs;
+    };
+    const std::array<Stage, 3> kStages = {{
+        {"stage_1", 5'000'000, "program_stage_1", {{"iron", 60'000}, {"copper", 8'000}}},
+        {"stage_2",
+         15'000'000,
+         "program_stage_2",
+         {{"iron", 150'000}, {"copper", 20'000}, {"nickel", 6'000}}},
+        {"stage_3",
+         30'000'000,
+         "program_stage_3",
+         {{"iron", 200'000}, {"copper", 30'000}, {"nickel", 12'000}, {"lithium", 2'000}}},
+    }};
+    REQUIRE(c.program.stages.size() == kStages.size());
+    std::size_t i = 0;  // the stage's position, counting from zero
+    for (const Stage& expected : kStages) {
+        const sim::ProgramStage& stage = c.program.stages[i];
+        INFO(expected.id);
+        CHECK(stage.id == expected.id);
+        CHECK(stage.cost == sim::Money::fromUnits(expected.cost));
+        REQUIRE(c.findTech(expected.research).valid());
+        CHECK(stage.research == c.findTech(expected.research));
+        CHECK(c.techs[stage.research.index()].requiresProgramStage == i);
+        REQUIRE(stage.requirements.size() == expected.needs.size());
+        for (std::size_t r = 0; r < expected.needs.size(); ++r) {
+            INFO(expected.needs[r].resource);
+            REQUIRE(c.findResource(expected.needs[r].resource).valid());
+            CHECK(stage.requirements[r].resource == c.findResource(expected.needs[r].resource));
+            CHECK(stage.requirements[r].tonnes == expected.needs[r].tonnes);
+        }
+        ++i;
     }
 }
 

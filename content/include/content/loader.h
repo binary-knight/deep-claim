@@ -15,6 +15,7 @@ inline constexpr const char* kRegionsFile = "regions.json";
 inline constexpr const char* kEventsFile = "events.json";
 inline constexpr const char* kBalanceFile = "balance.json";
 inline constexpr const char* kAiFile = "ai.json";
+inline constexpr const char* kProgramFile = "program.json";
 inline constexpr const char* kStringsFile = "strings.json";
 
 struct LoadError {
@@ -31,6 +32,7 @@ struct Sources {
     std::string events;
     std::string balance;
     std::string ai;       // the built-in competitor's tuning (spec 006)
+    std::string program;  // the race: deadline and program stages (spec 010)
     std::string strings;  // the prose catalogue (spec 002)
 };
 
@@ -41,13 +43,13 @@ struct LoadResult {
     [[nodiscard]] bool ok() const { return content.has_value(); }
 };
 
-// Parses and validates all seven documents. Every problem found is reported,
+// Parses and validates all eight documents. Every problem found is reported,
 // not just the first. Decimal values are parsed as doubles, rejected if not
 // finite or if they carry more precision than Fixed or Money can hold, then
 // rounded to nearest.
 [[nodiscard]] LoadResult loadFromStrings(const Sources& sources);
 
-// Reads the seven files from `directory` and calls loadFromStrings.
+// Reads the eight files from `directory` and calls loadFromStrings.
 [[nodiscard]] LoadResult loadFromDirectory(const std::filesystem::path& directory);
 
 // One line per error, for logs and CLI output.

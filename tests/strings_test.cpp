@@ -56,6 +56,7 @@ content::Sources shippedSources() {
     s.events = test::readTextFile(dir + content::kEventsFile);
     s.balance = test::readTextFile(dir + content::kBalanceFile);
     s.ai = test::readTextFile(dir + content::kAiFile);
+    s.program = test::readTextFile(dir + content::kProgramFile);
     s.strings = test::readTextFile(dir + content::kStringsFile);
     return s;
 }

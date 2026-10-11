@@ -72,6 +72,22 @@ inline sim::Content makeContent() {
         {sim::TechEffectType::UnlockResource, sim::Fixed::zero(), sim::ResourceId(2)});
     c.techs.push_back(lithiumTech);
 
+    // Spec 010: one research project per program stage, each waiting for the
+    // stages before it. Appended so the two techs above keep their indices.
+    const auto stageProject = [&c](const char* id, const char* name, std::int64_t cost,
+                                   sim::Day durationDays, std::uint32_t requiresStage) {
+        sim::TechDef project;
+        project.id = id;
+        project.name = name;
+        project.cost = sim::Money::fromUnits(cost);
+        project.durationDays = durationDays;
+        project.requiresProgramStage = requiresStage;
+        c.techs.push_back(project);
+    };
+    stageProject("program_stage_1", "Program Stage 1", 5'000'000, 120, 0);
+    stageProject("program_stage_2", "Program Stage 2", 6'000'000, 150, 1);
+    stageProject("program_stage_3", "Program Stage 3", 7'000'000, 210, 2);
+
     sim::RegionDef north;
     north.id = "north";
     north.name = "North";
@@ -145,6 +161,23 @@ inline sim::Content makeContent() {
     c.balance.demandFactorMin = sim::Fixed::fromRatio(1, 100);
     c.balance.demandFactorMax = sim::Fixed::fromInt(1000);
     c.balance.mineLossNoticeDays = 5;
+
+    // Spec 010: a small program that obeys the loader's rules (three stages,
+    // each project tied to its position, lithium in the third). The deadline
+    // is the shipped one, thirty game years.
+    c.program.deadlineDay = 10'800;
+    c.program.stages.push_back({"stage_1",
+                                sim::Money::fromUnits(1'000'000),
+                                sim::TechId(2),
+                                {{sim::ResourceId(0), 1'000}}});
+    c.program.stages.push_back({"stage_2",
+                                sim::Money::fromUnits(2'000'000),
+                                sim::TechId(3),
+                                {{sim::ResourceId(0), 2'000}, {sim::ResourceId(1), 200}}});
+    c.program.stages.push_back({"stage_3",
+                                sim::Money::fromUnits(3'000'000),
+                                sim::TechId(4),
+                                {{sim::ResourceId(0), 3'000}, {sim::ResourceId(2), 50}}});
 
     // The competitor's knobs as they stood in code before spec 006 moved
     // them to data/ai.json; tests that tune the AI change copies of these.

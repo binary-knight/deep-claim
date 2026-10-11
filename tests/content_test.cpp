@@ -5,6 +5,7 @@
 #include "sim/save.h"
 
 #include "content/loader.h"
+#include "test_content.h"
 #include "test_strings.h"
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,7 +32,13 @@ content::Sources goodSources() {
       {"id": "seismic_1", "cost": 600000, "duration_days": 90,
        "requires": [], "effects": [{"type": "survey_noise_mult", "value": 0.8}]},
       {"id": "lithium_processing", "cost": 4000000, "duration_days": 240,
-       "requires": ["seismic_1"], "effects": [{"type": "unlock_resource", "resource": "lithium"}]}
+       "requires": ["seismic_1"], "effects": [{"type": "unlock_resource", "resource": "lithium"}]},
+      {"id": "program_stage_1", "cost": 5000000, "duration_days": 120,
+       "requires_program_stage": 0, "effects": []},
+      {"id": "program_stage_2", "cost": 6000000, "duration_days": 150,
+       "requires_program_stage": 1, "effects": []},
+      {"id": "program_stage_3", "cost": 7000000, "duration_days": 210,
+       "requires_program_stage": 2, "effects": []}
     ])";
     s.regions = R"([
       {"id": "north", "name": "North", "plot_count": 10,
@@ -73,7 +80,20 @@ content::Sources goodSources() {
       "bootstrap_loan": 4000000, "first_mine_recoverable_share": 0.6,
       "first_mine_required_return": 1.1, "supply_discount": 1
     })";
-    s.strings = test::fixtureStrings({"boom"}, {"seismic_1", "lithium_processing"});
+    s.program = R"({
+      "deadline_day": 10800,
+      "stages": [
+        {"id": "stage_1", "cost": 1000000, "research": "program_stage_1",
+         "requires": [{"resource": "iron", "tonnes": 1000}]},
+        {"id": "stage_2", "cost": 2000000.5, "research": "program_stage_2",
+         "requires": [{"resource": "iron", "tonnes": 2000}]},
+        {"id": "stage_3", "cost": 3000000, "research": "program_stage_3",
+         "requires": [{"resource": "iron", "tonnes": 3000}, {"resource": "lithium", "tonnes": 50}]}
+      ]
+    })";
+    s.strings =
+        test::fixtureStrings({"boom"}, {"seismic_1", "lithium_processing", "program_stage_1",
+                                        "program_stage_2", "program_stage_3"});
     return s;
 }
 
@@ -109,7 +129,7 @@ TEST_CASE("Valid content loads with resolved references and converted numbers", 
     CHECK(c.resources[1].basePrice == sim::Money::fromCents(1'400'025));
     CHECK(c.resources[1].unlockedBy == c.findTech("lithium_processing"));
 
-    REQUIRE(c.techs.size() == 2);
+    REQUIRE(c.techs.size() == 5);  // two improvements and the three stage projects
     CHECK(c.techs[1].prerequisites == std::vector<sim::TechId>{c.findTech("seismic_1")});
     REQUIRE(c.techs[1].effects.size() == 1);
     CHECK(c.techs[1].effects[0].type == sim::TechEffectType::UnlockResource);
@@ -724,6 +744,297 @@ TEST_CASE("All errors are collected in one pass", "[content]") {
 TEST_CASE("Missing directory reports unreadable files", "[content]") {
     const auto result = content::loadFromDirectory("/definitely/not/a/real/dir");
     CHECK_FALSE(result.ok());
-    CHECK(result.errors.size() == 7);  // one per data file, the catalogue included
+    CHECK(result.errors.size() == 8);  // one per data file, the catalogue included
+    CHECK(std::any_of(result.errors.begin(), result.errors.end(), [](const auto& e) {
+        return e.file == "program.json" && e.message.find("cannot read") != std::string::npos;
+    }));
     CHECK(result.errors[0].message.find("cannot read") != std::string::npos);
+}
+
+// ---- the program (program.json, spec 010 BR-001, BR-002, AC-001) ----
+
+TEST_CASE("The program loads with its deadline and three stages in order", "[content][spec010]") {
+    const auto result = content::loadFromStrings(goodSources());
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& c = *result.content;
+
+    CHECK(c.program.deadlineDay == 10800);
+    REQUIRE(c.program.stages.size() == 3);
+    CHECK(c.program.stages[0].id == "stage_1");
+    CHECK(c.program.stages[0].cost == sim::Money::fromUnits(1'000'000));
+    CHECK(c.program.stages[0].research == c.findTech("program_stage_1"));
+    REQUIRE(c.program.stages[0].requirements.size() == 1);
+    CHECK(c.program.stages[0].requirements[0].resource == c.findResource("iron"));
+    CHECK(c.program.stages[0].requirements[0].tonnes == 1000);
+
+    CHECK(c.program.stages[1].id == "stage_2");
+    CHECK(c.program.stages[1].cost == sim::Money::fromCents(200'000'050));
+    CHECK(c.program.stages[1].research == c.findTech("program_stage_2"));
+
+    CHECK(c.program.stages[2].id == "stage_3");
+    CHECK(c.program.stages[2].research == c.findTech("program_stage_3"));
+    REQUIRE(c.program.stages[2].requirements.size() == 2);
+    CHECK(c.program.stages[2].requirements[1].resource == c.findResource("lithium"));
+    CHECK(c.program.stages[2].requirements[1].tonnes == 50);
+}
+
+TEST_CASE("The program must have exactly three stages", "[content][spec010]") {
+    content::Sources missing = goodSources();
+    missing.program =
+        replaceOnce(missing.program,
+                    R"({"id": "stage_2", "cost": 2000000.5, "research": "program_stage_2",
+         "requires": [{"resource": "iron", "tonnes": 2000}]},)",
+                    "");
+    const auto two = content::loadFromStrings(missing);
+    CHECK_FALSE(two.ok());
+    CHECK(hasError(two, "program.json", "stages", "exactly 3 stages"));
+
+    content::Sources extra = goodSources();
+    extra.program = replaceOnce(extra.program, R"({"resource": "lithium", "tonnes": 50}]})",
+                                R"({"resource": "lithium", "tonnes": 50}]},
+        {"id": "stage_4", "cost": 1, "research": "program_stage_3",
+         "requires": [{"resource": "lithium", "tonnes": 1}]})");
+    const auto four = content::loadFromStrings(extra);
+    CHECK_FALSE(four.ok());
+    CHECK(hasError(four, "program.json", "stages", "exactly 3 stages"));
+
+    content::Sources none = goodSources();
+    none.program = R"({"deadline_day": 10800, "stages": []})";
+    CHECK(hasError(content::loadFromStrings(none), "program.json", "stages", "exactly 3 stages"));
+
+    // An element that is not a stage is reported as such, and once.
+    content::Sources number = goodSources();
+    number.program =
+        replaceOnce(number.program,
+                    R"({"id": "stage_2", "cost": 2000000.5, "research": "program_stage_2",
+         "requires": [{"resource": "iron", "tonnes": 2000}]},)",
+                    "7,");
+    const auto notAStage = content::loadFromStrings(number);
+    CHECK_FALSE(notAStage.ok());
+    CHECK(hasError(notAStage, "program.json", "stages[1]", "expected an object"));
+    CHECK_FALSE(hasError(notAStage, "program.json", "stages", "exactly 3 stages"));
+}
+
+TEST_CASE("The deadline must be a positive whole day", "[content][spec010]") {
+    const auto loadWith = [](std::string_view value) {
+        content::Sources s = goodSources();
+        s.program = replaceOnce(s.program, R"("deadline_day": 10800)",
+                                R"("deadline_day": )" + std::string(value));
+        return content::loadFromStrings(s);
+    };
+    for (const std::string_view value : {"0", "-360", "36001"}) {
+        INFO(value);
+        const auto result = loadWith(value);
+        CHECK_FALSE(result.ok());
+        CHECK(hasError(result, "program.json", "deadline_day", "must be between 1 and 36000"));
+    }
+    CHECK(hasError(loadWith("10800.5"), "program.json", "deadline_day", "expected an integer"));
+
+    content::Sources missing = goodSources();
+    missing.program = replaceOnce(missing.program, R"("deadline_day": 10800,)", "");
+    CHECK(hasError(content::loadFromStrings(missing), "program.json", "deadline_day",
+                   "missing required key"));
+}
+
+TEST_CASE("A stage's cost and required tonnes must be positive", "[content][spec010]") {
+    for (const std::string_view cost : {"0", "-5"}) {
+        INFO(cost);
+        content::Sources s = goodSources();
+        s.program =
+            replaceOnce(s.program, R"("cost": 1000000,)", R"("cost": )" + std::string(cost) + ",");
+        const auto result = content::loadFromStrings(s);
+        CHECK_FALSE(result.ok());
+        CHECK(hasError(result, "program.json", "stages[0].cost", "must be at least 0.01"));
+    }
+    for (const std::string_view tonnes : {"0", "-1"}) {
+        INFO(tonnes);
+        content::Sources s = goodSources();
+        s.program =
+            replaceOnce(s.program, R"("tonnes": 2000)", R"("tonnes": )" + std::string(tonnes));
+        const auto result = content::loadFromStrings(s);
+        CHECK_FALSE(result.ok());
+        CHECK(
+            hasError(result, "program.json", "stages[1].requires[0].tonnes", "must be between 1"));
+    }
+    // Whole tonnes only.
+    content::Sources fractional = goodSources();
+    fractional.program = replaceOnce(fractional.program, R"("tonnes": 2000)", R"("tonnes": 0.5)");
+    CHECK(hasError(content::loadFromStrings(fractional), "program.json",
+                   "stages[1].requires[0].tonnes", "expected an integer"));
+}
+
+TEST_CASE("A stage's goods and research project must exist", "[content][spec010]") {
+    content::Sources s = goodSources();
+    s.program = replaceOnce(s.program, R"({"resource": "iron", "tonnes": 2000})",
+                            R"({"resource": "steel", "tonnes": 2000})");
+    s.program = replaceOnce(s.program, R"("research": "program_stage_1")",
+                            R"("research": "program_stage_9")");
+    const auto result = content::loadFromStrings(s);
+    CHECK_FALSE(result.ok());
+    CHECK(hasError(result, "program.json", "stages[1].requires[0].resource",
+                   "unknown resource 'steel'"));
+    CHECK(hasError(result, "program.json", "stages[0].research", "unknown tech 'program_stage_9'"));
+}
+
+TEST_CASE("A stage may not name the same good twice", "[content][spec010]") {
+    content::Sources s = goodSources();
+    s.program = replaceOnce(s.program, R"({"resource": "lithium", "tonnes": 50})",
+                            R"({"resource": "lithium", "tonnes": 50},
+                               {"resource": "iron", "tonnes": 1})");
+    const auto result = content::loadFromStrings(s);
+    CHECK_FALSE(result.ok());
+    CHECK(hasError(result, "program.json", "stages[2].requires[2].resource",
+                   "duplicate resource 'iron'"));
+}
+
+TEST_CASE("A stage's research project must require exactly the stages before it",
+          "[content][spec010]") {
+    // Stage 1's project requires no completed stage, stage 2's one, stage 3's
+    // two: a project tied to the wrong stage would start early or never.
+    content::Sources swapped = goodSources();
+    swapped.program = replaceOnce(swapped.program, R"("research": "program_stage_2")",
+                                  R"("research": "program_stage_3")");
+    const auto wrong = content::loadFromStrings(swapped);
+    CHECK_FALSE(wrong.ok());
+    CHECK(hasError(wrong, "program.json", "stages[1].research",
+                   "tech 'program_stage_3' must have requires_program_stage 1"));
+
+    // A project that carries no stage requirement counts as requiring none,
+    // so it fits the first stage only.
+    content::Sources ordinary = goodSources();
+    ordinary.program = replaceOnce(ordinary.program, R"("research": "program_stage_3")",
+                                   R"("research": "seismic_1")");
+    const auto plain = content::loadFromStrings(ordinary);
+    CHECK_FALSE(plain.ok());
+    CHECK(hasError(plain, "program.json", "stages[2].research",
+                   "tech 'seismic_1' must have requires_program_stage 2"));
+
+    content::Sources retied = goodSources();
+    retied.techs = replaceOnce(retied.techs, R"("requires_program_stage": 0, "effects": [])",
+                               R"("requires_program_stage": 1, "effects": [])");
+    const auto late = content::loadFromStrings(retied);
+    CHECK_FALSE(late.ok());
+    CHECK(hasError(late, "program.json", "stages[0].research",
+                   "tech 'program_stage_1' must have requires_program_stage 0"));
+}
+
+TEST_CASE("The third stage must require lithium", "[content][spec010]") {
+    content::Sources s = goodSources();
+    s.program = replaceOnce(s.program, R"(, {"resource": "lithium", "tonnes": 50})", "");
+    const auto result = content::loadFromStrings(s);
+    CHECK_FALSE(result.ok());
+    CHECK(hasError(result, "program.json", "stages[2].requires", "must require lithium"));
+
+    // Lithium in an earlier stage does not stand in for it.
+    content::Sources early = goodSources();
+    early.program = replaceOnce(early.program, R"(, {"resource": "lithium", "tonnes": 50})", "");
+    early.program = replaceOnce(early.program, R"({"resource": "iron", "tonnes": 1000})",
+                                R"({"resource": "lithium", "tonnes": 50})");
+    CHECK(hasError(content::loadFromStrings(early), "program.json", "stages[2].requires",
+                   "must require lithium"));
+
+    // Content with no lithium at all cannot satisfy the rule.
+    content::Sources renamed = goodSources();
+    renamed.resources = replaceOnce(renamed.resources, R"("id": "lithium")", R"("id": "brine")");
+    CHECK(hasError(content::loadFromStrings(renamed), "program.json", "stages[2].requires",
+                   "must require lithium"));
+}
+
+TEST_CASE("Program keys are checked like every other data file", "[content][spec010]") {
+    content::Sources s = goodSources();
+    s.program = replaceOnce(s.program, R"("deadline_day": 10800,)",
+                            R"("deadline_day": 10800, "deadline": 1,)");
+    s.program = replaceOnce(s.program, R"({"id": "stage_1", "cost": 1000000,)",
+                            R"({"id": "stage_1", "price": 1,)");
+    s.program = replaceOnce(s.program, R"({"resource": "iron", "tonnes": 3000})",
+                            R"({"resource": "iron", "tonnes": 3000, "unit": "t"})");
+    s.program = replaceOnce(s.program, R"("id": "stage_2")", R"("id": "stage_1")");
+    const auto result = content::loadFromStrings(s);
+    CHECK_FALSE(result.ok());
+    CHECK(hasError(result, "program.json", "deadline", "unknown key"));
+    CHECK(hasError(result, "program.json", "stages[0].price", "unknown key"));
+    CHECK(hasError(result, "program.json", "stages[0].cost", "missing required key"));
+    CHECK(hasError(result, "program.json", "stages[2].requires[0].unit", "unknown key"));
+    CHECK(hasError(result, "program.json", "stages[1].id", "duplicate id 'stage_1'"));
+
+    content::Sources array = goodSources();
+    array.program = "[]";
+    CHECK(hasError(content::loadFromStrings(array), "program.json", "",
+                   "expected a top-level object"));
+
+    content::Sources broken = goodSources();
+    broken.program = "{";
+    CHECK(hasError(content::loadFromStrings(broken), "program.json", "", "invalid JSON"));
+
+    content::Sources bare = goodSources();
+    bare.program = R"({"deadline_day": 10800})";
+    CHECK(
+        hasError(content::loadFromStrings(bare), "program.json", "stages", "missing required key"));
+}
+
+TEST_CASE("The whole program is part of the content fingerprint", "[content][spec010]") {
+    // A save or trace must not open against a different race.
+    const auto loaded = content::loadFromStrings(goodSources());
+    REQUIRE(loaded.ok());
+    const sim::Content& original = *loaded.content;
+    const std::uint64_t hash = sim::hashContent(original);
+
+    sim::Content deadline = original;
+    deadline.program.deadlineDay += 1;
+    CHECK(sim::hashContent(deadline) != hash);
+
+    sim::Content id = original;
+    id.program.stages[0].id = "first";
+    CHECK(sim::hashContent(id) != hash);
+
+    sim::Content cost = original;
+    cost.program.stages[1].cost += sim::Money::fromCents(1);
+    CHECK(sim::hashContent(cost) != hash);
+
+    sim::Content research = original;
+    research.program.stages[2].research = original.findTech("seismic_1");
+    CHECK(sim::hashContent(research) != hash);
+
+    sim::Content good = original;
+    good.program.stages[0].requirements[0].resource = original.findResource("lithium");
+    CHECK(sim::hashContent(good) != hash);
+
+    sim::Content tonnes = original;
+    tonnes.program.stages[2].requirements[1].tonnes += 1;
+    CHECK(sim::hashContent(tonnes) != hash);
+
+    sim::Content fewer = original;
+    fewer.program.stages.pop_back();
+    CHECK(sim::hashContent(fewer) != hash);
+}
+
+TEST_CASE("The in-code fixture carries a program the loader would accept", "[content][spec010]") {
+    // test::makeContent() is built by hand, so nothing else holds it to the
+    // loader's program rules.
+    const sim::Content c = test::makeContent();
+    CHECK(c.program.deadlineDay > 0);
+    REQUIRE(c.program.stages.size() == 3);
+    for (std::size_t i = 0; i < c.program.stages.size(); ++i) {
+        const sim::ProgramStage& stage = c.program.stages[i];
+        INFO(stage.id);
+        CHECK_FALSE(stage.id.empty());
+        CHECK(stage.cost > sim::Money::zero());
+        REQUIRE(stage.research.valid());
+        REQUIRE(stage.research.index() < c.techs.size());
+        CHECK(c.techs[stage.research.index()].requiresProgramStage == i);
+        for (std::size_t r = 0; r < stage.requirements.size(); ++r) {
+            const sim::ProgramRequirement& requirement = stage.requirements[r];
+            REQUIRE(requirement.resource.valid());
+            REQUIRE(requirement.resource.index() < c.resources.size());
+            CHECK(requirement.tonnes > 0);
+            for (std::size_t earlier = 0; earlier < r; ++earlier) {
+                CHECK(stage.requirements[earlier].resource != requirement.resource);
+            }
+        }
+    }
+    const auto& last = c.program.stages[2].requirements;
+    CHECK(std::any_of(last.begin(), last.end(), [&c](const sim::ProgramRequirement& requirement) {
+        return requirement.resource == c.findResource("lithium");
+    }));
 }

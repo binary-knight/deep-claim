@@ -1014,6 +1014,112 @@ void parseAi(const json& document, sim::AiParams& ai, ErrorSink& sink) {
 }
 
 // ---------------------------------------------------------------------------
+// The race (program.json, spec 010)
+// ---------------------------------------------------------------------------
+
+// The ore the third stage must need (spec 010, BR-002): it is the one ore
+// behind research, so the race cannot be won on day-one ores alone.
+constexpr std::string_view kFinalStageResource = "lithium";
+
+void parseProgramRequirement(const Node& node, const sim::Content& content,
+                             sim::ProgramStage& stage) {
+    node.allowKeys({"resource", "tonnes"});
+    sim::ProgramRequirement requirement;
+    requirement.tonnes = valueOr(node.integer("tonnes", true, 1, sim::kMaxStockTonnes), 0LL);
+    if (const std::optional<std::string> name = node.string("resource", true)) {
+        requirement.resource = content.findResource(*name);
+        const auto& listed = stage.requirements;
+        if (!requirement.resource.valid()) {
+            node.report("resource", "unknown resource '" + *name + "'");
+        } else if (std::any_of(listed.begin(), listed.end(), [&](const auto& earlier) {
+                       return earlier.resource == requirement.resource;
+                   })) {
+            node.report("resource", "duplicate resource '" + *name + "'");
+        }
+    }
+    stage.requirements.push_back(requirement);
+}
+
+// A stage's project must be the tech that waits for exactly the stages
+// before this one. `position` is absent when the stage list is malformed and
+// positions cannot be trusted.
+void parseStageResearch(const Node& node, const sim::Content& content,
+                        std::optional<std::size_t> position, sim::ProgramStage& stage) {
+    const std::optional<std::string> name = node.string("research", true);
+    if (!name) {
+        return;
+    }
+    stage.research = content.findTech(*name);
+    if (!stage.research.valid()) {
+        node.report("research", "unknown tech '" + *name + "'");
+        return;
+    }
+    if (position && content.techs[stage.research.index()].requiresProgramStage != *position) {
+        node.report("research", "tech '" + *name + "' must have requires_program_stage " +
+                                    std::to_string(*position));
+    }
+}
+
+sim::ProgramStage parseProgramStage(const Node& node, const sim::Content& content,
+                                    std::optional<std::size_t> position,
+                                    std::vector<std::string>& seenIds) {
+    node.allowKeys({"id", "cost", "research", "requires"});
+    sim::ProgramStage stage;
+    stage.id = readId(node, seenIds);
+    stage.cost = valueOr(node.money("cost", true, sim::Money::fromCents(1)), sim::Money::zero());
+    parseStageResearch(node, content, position, stage);
+    const auto requirements = node.objectArray("requires", true);
+    if (!requirements) {
+        return stage;
+    }
+    for (const Node& requirement : *requirements) {
+        parseProgramRequirement(requirement, content, stage);
+    }
+    const sim::ResourceId finalResource = content.findResource(kFinalStageResource);
+    const bool isLast = position && *position + 1 == static_cast<std::size_t>(kMaxProgramStage);
+    const auto& listed = stage.requirements;
+    if (isLast && (!finalResource.valid() ||
+                   std::none_of(listed.begin(), listed.end(), [&](const auto& requirement) {
+                       return requirement.resource == finalResource;
+                   }))) {
+        node.report("requires", "the third stage must require " + std::string(kFinalStageResource));
+    }
+    return stage;
+}
+
+// Runs after resources and techs: stages name both.
+void parseProgram(const json& document, const sim::Content& content, sim::ProgramDef& program,
+                  ErrorSink& sink) {
+    if (!document.is_object()) {
+        sink.add("", "expected a top-level object, got " + std::string(typeName(document)));
+        return;
+    }
+    const Node node(document, "", sink);
+    node.allowKeys({"deadline_day", "stages"});
+    program.deadlineDay =
+        static_cast<sim::Day>(valueOr(node.integer("deadline_day", true, 1, kMaxDays), 0LL));
+    const auto stages = node.objectArray("stages", true);
+    if (!stages) {
+        return;
+    }
+    // The count is taken from the file, so an element that is not an object
+    // is reported once, as itself, and not again as a missing stage.
+    const auto expected = static_cast<std::size_t>(kMaxProgramStage);
+    const std::size_t written = document["stages"].size();
+    if (written != expected) {
+        node.report("stages", "the program has exactly " + std::to_string(expected) +
+                                  " stages, found " + std::to_string(written));
+    }
+    const bool positionsKnown = written == expected && stages->size() == expected;
+    std::vector<std::string> seenIds;
+    for (std::size_t i = 0; i < stages->size(); ++i) {
+        const std::optional<std::size_t> position =
+            positionsKnown ? std::optional<std::size_t>(i) : std::nullopt;
+        program.stages.push_back(parseProgramStage((*stages)[i], content, position, seenIds));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Prose catalogue (strings.json, spec 002)
 // ---------------------------------------------------------------------------
 
@@ -1479,6 +1585,7 @@ LoadResult loadFromStrings(const Sources& sources) {
     ErrorSink eventSink(result.errors, kEventsFile);
     ErrorSink balanceSink(result.errors, kBalanceFile);
     ErrorSink aiSink(result.errors, kAiFile);
+    ErrorSink programSink(result.errors, kProgramFile);
     ErrorSink stringsSink(result.errors, kStringsFile);
 
     std::vector<std::string> unlockedByNames;
@@ -1501,6 +1608,9 @@ LoadResult loadFromStrings(const Sources& sources) {
     }
     if (const auto document = parseDocument(sources.ai, aiSink)) {
         parseAi(*document, content.ai, aiSink);
+    }
+    if (const auto document = parseDocument(sources.program, programSink)) {
+        parseProgram(*document, content, content.program, programSink);
     }
     // Last: the per-id keys depend on the event and tech ids parsed above.
     if (const auto document = parseDocument(sources.strings, stringsSink)) {
@@ -1530,6 +1640,7 @@ LoadResult loadFromDirectory(const std::filesystem::path& directory) {
     read(kEventsFile, sources.events);
     read(kBalanceFile, sources.balance);
     read(kAiFile, sources.ai);
+    read(kProgramFile, sources.program);
     read(kStringsFile, sources.strings);
     if (!errors.empty()) {
         LoadResult result;

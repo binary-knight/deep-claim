@@ -197,6 +197,32 @@ struct AiParams {
     Money bootstrapLoan;  // size of the one loan taken to buy a first plot
 };
 
+// One good a program stage needs, in whole tonnes of the company's own
+// production (spec 010).
+struct ProgramRequirement {
+    ResourceId resource;
+    std::int64_t tonnes = 0;
+};
+
+// One stage of the space program: cash, one research project and goods. The
+// project is the tech whose requiresProgramStage equals this stage's
+// position, counting from zero.
+struct ProgramStage {
+    std::string id;
+    Money cost;
+    TechId research;
+    std::vector<ProgramRequirement> requirements;  // "requires" in the data file
+};
+
+// The race (data/program.json, spec 010): the day the game ends if nobody has
+// founded the program, and the program's stages in the order a company must
+// complete them. The loader guarantees exactly three stages; in-code content
+// may leave the program empty.
+struct ProgramDef {
+    Day deadlineDay = 0;
+    std::vector<ProgramStage> stages;
+};
+
 struct Content {
     std::vector<ResourceDef> resources;
     std::vector<TechDef> techs;
@@ -204,6 +230,7 @@ struct Content {
     std::vector<EventDef> events;
     BalanceParams balance;
     AiParams ai;
+    ProgramDef program;
     // Every sentence a player reads, keyed as in docs/specs/002-prose-catalogue.md
     // (data/strings.json). Prose only: it is not serialized and not part of
     // the content hash, so a wording fix never invalidates a save. The sim
