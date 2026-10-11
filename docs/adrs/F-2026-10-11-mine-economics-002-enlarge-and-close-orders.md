@@ -1,0 +1,7 @@
+# ADR-F-2026-10-11-mine-economics-002: Enlarging and closing are two new orders; an enlargement is fields on the mine
+
+**Date:** 2026-10-11
+**Status:** Accepted
+**Context:** The player and the AI must be able to enlarge a mine and to close one for a cost (spec BR-007, BR-008). The alternatives were to give the existing mothball order more meanings, or to model an enlargement as its own entity. Orders are serialized by position in a variant and pass through spec 007's pending queue.
+**Decision:** `EnlargeMine` and `CloseMine` are appended to the command variant; existing orders keep their positions. `BuildMine` gains a size. An enlargement in progress is one field on the mine, `enlargeDoneDay` (zero means none); its target is always one size up. Orders are validated and charged in the commands step; the mines step applies a finished enlargement and charges a depleted mine the mothballed keeping cost. Closing sets the existing `Closed` state and is final. In the client, Close takes two presses, because an order placed with the clock running is applied almost at once and cannot be undone.
+**Consequences:** Each order has one meaning, one cost and one trace name, and the queue, chips and Cancel work as for any order. One enlargement at a time needs no extra rule. Each new order must be registered in the serializer, the trace, the session's pricing and the client's wording. A mine closed by order and one closed by bankruptcy share a state; the runner tells them apart by the public `MineClosed` notice, which bankruptcy does not raise.

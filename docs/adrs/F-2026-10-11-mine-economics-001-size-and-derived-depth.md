@@ -1,0 +1,7 @@
+# ADR-F-2026-10-11-mine-economics-001: A mine has a size; its depth is derived from tonnes dug, not stored
+
+**Date:** 2026-10-11
+**Status:** Accepted
+**Context:** A mine needs a size chosen at build and a running cost that rises as it is worked out (spec BR-001 to BR-006). The existing fall-off reads the hidden true deposit, which the player may not see, and a large deposit never ends. The mine already saves the tonnes it has extracted per ore.
+**Decision:** A mine stores `size`, an index into exactly three sizes defined in `data/balance.json` (output, build-cost and running-cost multiples; standard is 1, 1, 1). Depth is not stored. It is computed when needed as the sum over ores of extracted tonnes divided by that ore's reference tonnage (`data/resources.json`) and by the current size's output multiple, in fixed point. Running cost is the spec 008 cost times the size's multiple times `1 + slope x depth`, capped. The fall-off constant 0.5 moves to data. Cost, margin and break-even stay in `sim/src/mines.cpp` (spec 008, record 002).
+**Consequences:** Running cost never reveals the hidden deposit, and every mine eventually stops paying however much ore remains. No new saved number can drift from the tonnes dug. Enlarging a mine lowers its depth in one step, because the divisor grows; the spec accepts this and the enlargement premium and tuning must make a late enlargement a poor trade. Depth cannot remember at which size each tonne was dug. The played-game golden hash moves because mine state grows.
