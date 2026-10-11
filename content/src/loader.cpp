@@ -31,7 +31,8 @@ namespace {
 
 using nlohmann::json;
 
-constexpr std::int64_t kMaxDays = 36000;  // 100 in-game years
+constexpr std::int64_t kMaxDays = 36000;      // 100 in-game years
+constexpr std::int64_t kMaxProgramStage = 3;  // the program has three stages (spec 010)
 
 // Largest magnitudes accepted from data files. Chosen so that a double keeps
 // well over the required resolution (0.01 or 0.000001) at the extreme.
@@ -518,12 +519,16 @@ void parseTechs(const json& document, sim::Content& content, ErrorSink& sink) {
     std::vector<std::string> seen;
     std::vector<std::vector<std::string>> requiresNames;
     for (const Node& node : *nodes) {
-        node.allowKeys({"id", "cost", "duration_days", "requires", "effects"});
+        node.allowKeys(
+            {"id", "cost", "duration_days", "requires_program_stage", "requires", "effects"});
         sim::TechDef def;
         def.id = readId(node, seen);  // name and description come from the catalogue
         def.cost = valueOr(node.money("cost", true, sim::Money::zero()), sim::Money::zero());
         def.durationDays =
             static_cast<sim::Day>(valueOr(node.integer("duration_days", true, 1, kMaxDays), 1LL));
+        // Optional: a project outside the program requires no stage.
+        def.requiresProgramStage = static_cast<std::uint32_t>(
+            valueOr(node.integer("requires_program_stage", false, 0, kMaxProgramStage), 0LL));
         requiresNames.push_back(
             valueOr(node.stringArray("requires", false), std::vector<std::string>()));
         if (const auto effects = node.objectArray("effects", true)) {

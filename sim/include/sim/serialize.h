@@ -275,7 +275,8 @@ void serialize(Archive& ar, TechEffect& effect) {
 
 template <class Archive>
 void serialize(Archive& ar, TechDef& def) {
-    ar(def.id, def.name, def.cost, def.durationDays, def.prerequisites, def.effects);
+    ar(def.id, def.name, def.cost, def.durationDays, def.requiresProgramStage, def.prerequisites,
+       def.effects);
 }
 
 template <class Archive>

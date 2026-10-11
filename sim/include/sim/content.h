@@ -52,6 +52,9 @@ struct TechDef {
     std::string description;  // from the prose catalogue; not part of the content hash
     Money cost;
     Day durationDays = 0;
+    // Program stages the company must have completed before this project may
+    // start: 0 for none, otherwise 1 to 3 (spec 010).
+    std::uint32_t requiresProgramStage = 0;
     std::vector<TechId> prerequisites;
     std::vector<TechEffect> effects;
 };

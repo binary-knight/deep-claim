@@ -2,12 +2,14 @@
 
 #include "sim/fixed.h"
 #include "sim/money.h"
+#include "sim/save.h"
 
 #include "content/loader.h"
 #include "test_strings.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -228,6 +230,66 @@ TEST_CASE("Prerequisite cycles and self-requirements are reported", "[content]")
                     R"("requires": ["seismic_1"], "effects": [{"type": "survey_noise_mult")");
     const auto selfResult = content::loadFromStrings(self);
     CHECK(hasError(selfResult, "techs.json", "[0].requires[0]", "cannot require itself"));
+}
+
+TEST_CASE("A research project may require a program stage; without the key it requires none",
+          "[content]") {
+    const auto plain = content::loadFromStrings(goodSources());
+    REQUIRE(plain.ok());
+    CHECK(plain.content->techs[0].requiresProgramStage == 0);
+    CHECK(plain.content->techs[1].requiresProgramStage == 0);
+
+    for (const std::uint32_t stage : {0U, 1U, 2U, 3U}) {
+        content::Sources s = goodSources();
+        s.techs = replaceOnce(
+            s.techs, R"("duration_days": 240,)",
+            R"("duration_days": 240, "requires_program_stage": )" + std::to_string(stage) + ",");
+        const auto staged = content::loadFromStrings(s);
+        INFO(content::formatErrors(staged.errors));
+        REQUIRE(staged.ok());
+        CHECK(staged.content->techs[0].requiresProgramStage == 0);
+        CHECK(staged.content->techs[1].requiresProgramStage == stage);
+    }
+}
+
+TEST_CASE("A required program stage must be a whole number from 0 to 3", "[content]") {
+    const auto loadWith = [](std::string_view value) {
+        content::Sources s = goodSources();
+        s.techs = replaceOnce(
+            s.techs, R"("duration_days": 240,)",
+            R"("duration_days": 240, "requires_program_stage": )" + std::string(value) + ",");
+        return content::loadFromStrings(s);
+    };
+    const std::string_view path = "[1].requires_program_stage";
+
+    const auto tooHigh = loadWith("4");
+    CHECK_FALSE(tooHigh.ok());
+    CHECK(hasError(tooHigh, "techs.json", path, "must be between 0 and 3"));
+
+    const auto negative = loadWith("-1");
+    CHECK_FALSE(negative.ok());
+    CHECK(hasError(negative, "techs.json", path, "must be between 0 and 3"));
+
+    const auto fractional = loadWith("1.5");
+    CHECK_FALSE(fractional.ok());
+    CHECK(hasError(fractional, "techs.json", path, "expected an integer, got a number"));
+
+    const auto text = loadWith(R"("2")");
+    CHECK_FALSE(text.ok());
+    CHECK(hasError(text, "techs.json", path, "expected an integer, got a string"));
+}
+
+TEST_CASE("A project's required program stage is part of the content fingerprint", "[content]") {
+    // A save or trace made before a project was tied to a stage must not open
+    // against content that ties it.
+    const auto plain = content::loadFromStrings(goodSources());
+    REQUIRE(plain.ok());
+    sim::Content staged = *plain.content;
+    staged.techs[1].requiresProgramStage = 1;
+    CHECK(sim::hashContent(staged) != sim::hashContent(*plain.content));
+    sim::Content later = staged;
+    later.techs[1].requiresProgramStage = 2;
+    CHECK(sim::hashContent(later) != sim::hashContent(staged));
 }
 
 TEST_CASE("Effect fields are validated against the effect type", "[content]") {
