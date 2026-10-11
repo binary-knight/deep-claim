@@ -340,3 +340,8 @@ ui.mine_earns	Earns
 ui.mine_loses	Loses
 ui.mine_mothballed	Mothballed
 ui.mine_if_reopened_key	If reopened
+reject.program_not_needed	The program does not need that for its current stage.
+reject.program_stage_not_ready	The stage still needs its research or its deliveries.
+reject.program_complete	We have already completed every stage of the program.
+notice.program_delivered	Delivered {tonnes} of {resource} to the program.
+notice.program_stage_complete	{company} completed a stage of the program for {amount}.

@@ -74,6 +74,12 @@ const char* rejectReasonName(RejectReason reason) {
             return "research_busy";
         case RejectReason::PrerequisitesMissing:
             return "prerequisites_missing";
+        case RejectReason::ProgramNotNeeded:
+            return "program_not_needed";
+        case RejectReason::ProgramStageNotReady:
+            return "program_stage_not_ready";
+        case RejectReason::ProgramComplete:
+            return "program_complete";
     }
     return "unknown";
 }
@@ -142,6 +148,10 @@ const char* noticeKindName(NoticeKind kind) {
             return "rival_unlocked_resource";
         case NoticeKind::MineLosingMoney:
             return "mine_losing_money";
+        case NoticeKind::ProgramDelivered:
+            return "program_delivered";
+        case NoticeKind::ProgramStageComplete:
+            return "program_stage_complete";
     }
     return "unknown";
 }
@@ -157,6 +167,7 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::EventEnded:
         case NoticeKind::PlotWithdrawn:
         case NoticeKind::RivalUnlockedResource:
+        case NoticeKind::ProgramStageComplete:
             return true;
         case NoticeKind::CommandRejected:
         case NoticeKind::AuctionLost:
@@ -180,6 +191,7 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::MineFoundNothing:
         case NoticeKind::MineRunningLow:
         case NoticeKind::MineLosingMoney:
+        case NoticeKind::ProgramDelivered:
             return false;
     }
     return false;

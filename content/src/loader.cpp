@@ -1414,6 +1414,9 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.mine_loses", ""},
     {"ui.mine_mothballed", ""},
     {"ui.mine_if_reopened_key", ""},
+    // Spec 010.
+    {"notice.program_delivered", "tonnes,resource"},
+    {"notice.program_stage_complete", "company,amount"},
 });
 
 // Names of the {placeholders} a template uses. Braces that do not form a

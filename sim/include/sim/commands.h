@@ -86,6 +86,23 @@ struct SetCoverCosts {
     std::uint8_t enabled = 0;
 };
 
+// Move stock to the company's program, toward the stage it is working on
+// (spec 010): at most what that stage still needs of the good. Not a sale,
+// and it cannot be undone.
+struct DeliverToProgram {
+    CompanyId company;
+    ResourceId resource;
+    std::int64_t tonnes = 0;
+};
+
+// Complete the program stage the company is working on: its research done,
+// every delivery met, and the stage's cost paid now (spec 010).
+struct CompleteProgramStage {
+    CompanyId company;
+};
+
+// DeliverToProgram and CompleteProgramStage are not orders yet: they join the
+// variant, and the tick, in the next task of spec 010.
 using Command = std::variant<BidOnPlot, CommissionSurvey, BuildMine, SetMineState, SellOre,
                              TakeLoan, RepayLoan, StartResearch, SetSellPolicy, SetCoverCosts>;
 
@@ -123,6 +140,9 @@ enum class RejectReason : std::uint8_t {
     TechAlreadyKnown,
     ResearchBusy,
     PrerequisitesMissing,
+    ProgramNotNeeded,      // the current stage does not need that good, or not that much more
+    ProgramStageNotReady,  // the stage's research or a delivery is outstanding
+    ProgramComplete,       // the company has completed every stage
 };
 
 // Private notices are visible only to `company`; public ones to everyone.
@@ -161,6 +181,9 @@ enum class NoticeKind : std::uint8_t {
     RivalUnlockedResource,  // public: company, tech, resource (research unlocked a resource)
     MineLosingMoney,        // private: company, plot, mine, amount = the day's loss (positive),
                             // tonnes = consecutive losing days (once per run of losing days)
+    ProgramDelivered,       // private: company, resource, tonnes moved from stock to the program
+    ProgramStageComplete,   // public: company, amount = the stage's cost, tonnes = the stage
+                            // just completed (1 for the first), tech = that stage's research
 };
 
 struct Notice {
