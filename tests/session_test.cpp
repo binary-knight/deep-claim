@@ -1246,3 +1246,190 @@ TEST_CASE("A bid given on the day its auction closes still counts as the player'
         }
     }
 }
+
+// Spec 008: the losing-mine notice can stop the clock.
+
+namespace {
+
+const sim::ResourceId kIron(0);
+
+// The fixture with iron at 100,000 a day: a mine's 400 t break even at $250
+// a tonne, far above the fixture's $60, so an iron mine loses money every day.
+sim::Content losingMineContent() {
+    sim::Content content = test::makeContent();
+    test::addStrings(content);
+    content.resources[kIron.index()].mineOpexPerDay = sim::Money::fromUnits(100'000);
+    return content;
+}
+
+void reload(sim::Simulation& simulation, const sim::Content& content,
+            const sim::WorldState& edited) {
+    REQUIRE(simulation.load(sim::saveGame(edited, {}, sim::hashContent(content))));
+}
+
+// Buys the first listed plot for the player at its asking price.
+sim::PlotId buyListedPlot(sim::Simulation& simulation) {
+    const sim::WorldState& state = simulation.state();
+    const auto listed = std::find_if(state.plots.begin(), state.plots.end(), [](const auto& plot) {
+        return plot.listing == sim::PlotListing::Listed;
+    });
+    REQUIRE(listed != state.plots.end());
+    const sim::PlotId plot(static_cast<std::uint32_t>(listed - state.plots.begin()));
+    const sim::Day closes = state.auctions[listed->auction.index()].closesOnDay;
+    simulation.submit(sim::BidOnPlot{game::Session::kPlayer, plot, listed->askPrice});
+    while (simulation.state().day <= closes) {
+        simulation.tick();
+    }
+    REQUIRE(simulation.state().plots[plot.index()].owner == game::Session::kPlayer);
+    return plot;
+}
+
+// A saved solo game in which the player runs `mines` iron mines at a loss,
+// each one day short of its losing-mine notice and none announced yet.
+std::vector<std::uint8_t> eveOfLosingNotice(const sim::Content& content, std::size_t mines) {
+    sim::Simulation simulation(content, 1, soloSetup());
+    sim::WorldState rich = simulation.state();
+    rich.companies[game::Session::kPlayer.index()].cash = sim::Money::fromUnits(50'000'000);
+    reload(simulation, content, rich);
+
+    std::vector<sim::PlotId> plots;
+    for (std::size_t i = 0; i < mines; ++i) {
+        plots.push_back(buyListedPlot(simulation));
+    }
+    sim::WorldState seeded = simulation.state();
+    for (const sim::PlotId plot : plots) {
+        seeded.hidden.plotDeposits[plot.index()].deposits = {{kIron, 1'000'000, 1'000'000}};
+    }
+    reload(simulation, content, seeded);
+    for (const sim::PlotId plot : plots) {
+        simulation.submit(sim::BuildMine{game::Session::kPlayer, plot});
+    }
+    simulation.tick(content.balance.mineBuildDays + 1);
+    REQUIRE(simulation.state().mines.size() == mines);
+
+    REQUIRE(content.balance.mineLossNoticeDays >= 2);
+    sim::WorldState eve = simulation.state();
+    for (sim::Mine& mine : eve.mines) {
+        REQUIRE(mine.state == sim::MineState::Operating);
+        REQUIRE(mine.lossDays > 0);  // it really is losing money at the market's price
+        mine.lossDays = content.balance.mineLossNoticeDays - 1;
+        mine.lossAnnounced = 0;
+    }
+    return sim::saveGame(eve, {}, sim::hashContent(content));
+}
+
+}  // namespace
+
+TEST_CASE("The losing-mine stop rule has a stable key and is on by default", "[session][spec008]") {
+    CHECK(game::pauseOnKey(game::PauseOn::MineLosing) == "mine_losing");
+    const game::AutoPause defaults = game::AutoPause::defaults();
+    CHECK(defaults.isEnabled(game::PauseOn::MineLosing));
+
+    // The player's own losing mine is the reason; nobody else's is.
+    sim::Notice losing =
+        sim::makeNotice(sim::NoticeKind::MineLosingMoney, game::Session::kPlayer, sim::PlotId(3));
+    CHECK(game::AutoPause::reasonFor(losing, game::Session::kPlayer) == game::PauseOn::MineLosing);
+    CHECK(defaults.shouldPause(losing, game::Session::kPlayer));
+    losing.company = sim::CompanyId(1);
+    CHECK_FALSE(game::AutoPause::reasonFor(losing, game::Session::kPlayer).has_value());
+    CHECK_FALSE(defaults.shouldPause(losing, game::Session::kPlayer));
+
+    // The rule is written out with the others and comes back switched off.
+    game::AutoPause rules = game::AutoPause::defaults();
+    CHECK(rules.toText().find("mine_losing=1\n") != std::string::npos);
+    rules.set(game::PauseOn::MineLosing, false);
+    CHECK(rules.toText().find("mine_losing=0\n") != std::string::npos);
+    game::AutoPause restored = game::AutoPause::defaults();
+    CHECK(restored.fromText(rules.toText()));
+    CHECK_FALSE(restored.isEnabled(game::PauseOn::MineLosing));
+    CHECK(restored.enabled == rules.enabled);
+}
+
+TEST_CASE("A settings file from before the losing-mine rule gets its default and keeps its toggles",
+          "[session][spec008]") {
+    // As spec 004 to 007 wrote it: nine keys, no mine_losing.
+    const std::string old =
+        "insolvency=1\nbankrupt=1\nauction_won=0\nauction_lost=1\n"
+        "survey_complete=0\nmine_operational=1\nmine_found_nothing=1\n"
+        "idle_mine=0\nresearch_complete=0\n";
+    game::AutoPause migrated = game::AutoPause::defaults();
+    CHECK(migrated.fromText(old));
+    CHECK(migrated.isEnabled(game::PauseOn::MineLosing));
+
+    game::AutoPause expected = game::AutoPause::defaults();
+    expected.set(game::PauseOn::AuctionWon, false);
+    expected.set(game::PauseOn::SurveyComplete, false);
+    expected.set(game::PauseOn::MineOperational, true);
+    expected.set(game::PauseOn::IdleMine, false);
+    expected.set(game::PauseOn::ResearchComplete, false);
+    CHECK(migrated.enabled == expected.enabled);
+}
+
+TEST_CASE("A losing mine stops the clock on the day its notice arrives", "[session][spec008]") {
+    const sim::Content content = losingMineContent();
+    game::Session session(content, 1, soloSetup());
+    REQUIRE(session.load(eveOfLosingNotice(content, 1)));
+    const sim::Day eve = session.day();
+    REQUIRE(countKind(session, sim::NoticeKind::MineLosingMoney) == 0);
+
+    SECTION("with the rule on, as it is by default") {
+        session.setAutoPause(game::AutoPause::defaults());
+        session.setSpeed(game::Speed::Fastest);
+        CHECK(session.advance(1.0) == 1);  // 20 days were due; the first one stopped it
+        CHECK(session.speed() == game::Speed::Paused);
+        CHECK(session.day() == eve + 1);
+        REQUIRE(countKind(session, sim::NoticeKind::MineLosingMoney) == 1);
+        const std::optional<sim::Notice> why = session.takePausedBy();
+        REQUIRE(why.has_value());
+        CHECK(why->kind == sim::NoticeKind::MineLosingMoney);
+        CHECK(why->company == game::Session::kPlayer);
+        CHECK(why->mine == sim::MineId(0));
+        // Resuming works: the loss goes on, and nothing more is said about it.
+        session.setSpeed(game::Speed::Fastest);
+        CHECK(session.advance(1.0) == 20);
+        CHECK(countKind(session, sim::NoticeKind::MineLosingMoney) == 1);
+    }
+    SECTION("with the rule off the log still says so and the clock runs on") {
+        game::AutoPause rules = game::AutoPause::defaults();
+        rules.set(game::PauseOn::MineLosing, false);
+        session.setAutoPause(rules);
+        session.setSpeed(game::Speed::Fastest);
+        CHECK(session.advance(1.0) == 20);
+        CHECK(session.speed() == game::Speed::Fastest);
+        CHECK(session.day() == eve + 20);
+        CHECK_FALSE(session.takePausedBy().has_value());
+        REQUIRE(countKind(session, sim::NoticeKind::MineLosingMoney) == 1);
+        for (const game::LogEntry& entry : session.log()) {
+            if (entry.notice.kind == sim::NoticeKind::MineLosingMoney) {
+                CHECK(entry.day == eve);  // logged on the day it was raised
+                CHECK(entry.text.find("plot #") != std::string::npos);
+                CHECK(entry.text.front() != '[');  // the catalogue's sentence, not a missing key
+            }
+        }
+    }
+}
+
+TEST_CASE("Several mines turning to a loss on one day stop the clock once", "[session][spec008]") {
+    const sim::Content content = losingMineContent();
+    game::Session session(content, 1, soloSetup());
+    REQUIRE(session.load(eveOfLosingNotice(content, 2)));
+    const sim::Day eve = session.day();
+    session.setAutoPause(game::AutoPause::defaults());
+    session.setSpeed(game::Speed::Fastest);
+
+    CHECK(session.advance(1.0) == 1);
+    CHECK(session.speed() == game::Speed::Paused);
+    CHECK(session.day() == eve + 1);
+    // One line in the log for each mine; one stop, for the first of them.
+    CHECK(countKind(session, sim::NoticeKind::MineLosingMoney) == 2);
+    const std::optional<sim::Notice> why = session.takePausedBy();
+    REQUIRE(why.has_value());
+    CHECK(why->kind == sim::NoticeKind::MineLosingMoney);
+    CHECK(why->mine == sim::MineId(0));
+    CHECK_FALSE(session.takePausedBy().has_value());
+    // The second mine's notice is not held over to stop the clock again.
+    session.setSpeed(game::Speed::Fastest);
+    CHECK(session.advance(1.0) == 20);
+    CHECK(session.speed() == game::Speed::Fastest);
+    CHECK(countKind(session, sim::NoticeKind::MineLosingMoney) == 2);
+}

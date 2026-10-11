@@ -198,10 +198,15 @@ void printView(const sim::Content& content, const game::Session& session) {
         game::formatMoney(v.cash), game::formatMoney(v.reservedCash),
         game::formatMoney(v.outstandingPrincipal), game::formatMoney(v.loanCapacity),
         v.monthsInsolvent, v.bankrupt ? "  BANKRUPT" : "");
-    std::cout << std::format("storage {}/month  mine opex quote {}/day  survey noise {}\n",
+    std::cout << std::format("storage {}/month  survey noise {}\n",
                              game::formatMoney(v.monthlyStorageCost),
-                             game::formatMoney(v.mineOpexQuote),
                              game::formatRatio(v.surveyNoiseQuote));
+    std::cout << "mine opex quote per day:";
+    for (std::size_t r = 0; r < v.mineOpexQuotes.size(); ++r) {
+        std::cout << std::format("  {} {}", content.resources[r].name,
+                                 game::formatMoney(v.mineOpexQuotes[r]));
+    }
+    std::cout << '\n';
     std::cout << "\ncompanies:\n";
     for (const sim::CompanyPublicView& c : v.companies) {
         std::cout << std::format("  #{} {:<24} plots {}{}\n", c.id.value(), c.name, c.plotsOwned,

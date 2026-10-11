@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace sim {
 
@@ -143,9 +145,55 @@ void addOwnSurveys(const Content& content, const WorldState& state, CompanyId vi
     }
 }
 
+// Today's price of every ore, indexed by ResourceId.
+std::vector<Money> currentPrices(const WorldState& state) {
+    std::vector<Money> prices;
+    prices.reserve(state.markets.size());
+    for (const Market& market : state.markets) {
+        prices.push_back(market.price);
+    }
+    return prices;
+}
+
+// A mine has earnings to show once it runs, or has run and is mothballed,
+// and has a day's output on record (spec 008, edge case 4).
+bool hasEarnings(const Mine& mine) {
+    if (mine.state != MineState::Operating && mine.state != MineState::Mothballed) {
+        return false;
+    }
+    return std::ranges::any_of(mine.lastOutputTonnes,
+                               [](std::int64_t tonnes) { return tonnes > 0; });
+}
+
+// Cost, margin and break-even are the sim's own figures (R-001), worked out
+// at the price as it stands now. A mine with no earnings to show keeps the
+// zero margin and break-even it was constructed with.
+void addMineEconomics(const Content& content, const WorldState& state, const Company& owner,
+                      const Mine& mine, std::span<const Money> prices, MineView& mineView) {
+    mineView.dailyOpex = mineRunningCost(content, state, owner, mine, mine.state);
+    if (mine.state == MineState::Operating || mine.state == MineState::Mothballed) {
+        mineView.operatingOpex = mineRunningCost(content, state, owner, mine, MineState::Operating);
+    }
+    mineView.hasEarnings = hasEarnings(mine);
+    if (mineView.hasEarnings) {
+        mineView.dailyMargin = mineDailyMargin(content, state, owner, mine, prices);
+        mineView.breakEvenPrice = mineBreakEvenPrice(content, state, owner, mine, prices);
+    }
+}
+
+// What an operating mine producing each ore would cost the viewer today.
+void addMineOpexQuotes(const Content& content, const WorldState& state, const Company& viewer,
+                       CompanyView& view) {
+    view.mineOpexQuotes.reserve(content.resources.size());
+    for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
+        view.mineOpexQuotes.push_back(mineOpexQuote(content, state, viewer, ResourceId(r)));
+    }
+}
+
 void addOwnMines(const Content& content, const WorldState& state, CompanyId viewer,
                  CompanyView& view) {
     const Company& self = state.companies[viewer.index()];
+    const std::vector<Money> prices = currentPrices(state);
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         const Mine& mine = state.mines[i];
         if (mine.owner != viewer) {
@@ -168,7 +216,7 @@ void addOwnMines(const Content& content, const WorldState& state, CompanyId view
                     estimatedRemainingTonnes(state, mine, *survey, estimate);
             }
         }
-        mineView.dailyOpex = mineDailyOpex(content, state, self, mine.state);
+        addMineEconomics(content, state, self, mine, prices, mineView);
         view.mines.push_back(mineView);
     }
 }
@@ -294,7 +342,7 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     view.outstandingPrincipal = outstandingPrincipal(state, company);
     view.loanCapacity = content.balance.loanMaxPrincipal - view.outstandingPrincipal;
     view.monthlyStorageCost = monthlyStorageCost(content, state, company);
-    view.mineOpexQuote = mineDailyOpex(content, state, self, MineState::Operating);
+    addMineOpexQuotes(content, state, self, view);
     view.surveyNoiseQuote = surveyNoise(content, self);
     view.monthsInsolvent = self.monthsInsolvent;
     view.bankrupt = self.bankrupt != 0;

@@ -409,11 +409,22 @@ bool validLowWarning(const WorldState& state, const Mine& mine) {
     return survey.complete != 0 && survey.plot == mine.plot && survey.company == mine.owner;
 }
 
+// The losing-day fields (spec 008): the announcement is a flag, and a mine
+// that is not working carries no count, since the mines step clears it the
+// day a mine stops. A closed mine is the exception: bankruptcy is declared
+// in the finance step, after the mines step counted the day, so the count
+// stands until the next day's mines step.
+bool validLossFields(const Mine& mine) {
+    return mine.lossAnnounced <= 1 && (mine.lossDays == 0 || mine.state == MineState::Operating ||
+                                       mine.state == MineState::Closed);
+}
+
 bool validateMines(const Content& content, const WorldState& state) {
     for (std::uint32_t i = 0; i < state.mines.size(); ++i) {
         const Mine& mine = state.mines[i];
         if (!validateMineShape(content, state, mine, MineId(i)) ||
-            !validateMineAccounting(content, state, mine) || !validLowWarning(state, mine)) {
+            !validateMineAccounting(content, state, mine) || !validLowWarning(state, mine) ||
+            !validLossFields(mine)) {
             return false;
         }
     }

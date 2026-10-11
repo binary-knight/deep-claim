@@ -124,7 +124,8 @@ void serialize(Archive& ar, Survey& survey) {
 template <class Archive>
 void serialize(Archive& ar, Mine& mine) {
     ar(mine.plot, mine.owner, mine.builtDay, mine.operationalDay, mine.state, mine.extractedTonnes,
-       mine.lastDayTonnes, mine.lastOutputTonnes, mine.lowWarnedSurvey);
+       mine.lastDayTonnes, mine.lastOutputTonnes, mine.lowWarnedSurvey, mine.lossDays,
+       mine.lossAnnounced);
 }
 
 template <class Archive>
@@ -263,7 +264,8 @@ void serialize(Archive& ar, Command& command) {
 template <class Archive>
 void serialize(Archive& ar, ResourceDef& def) {
     ar(def.id, def.name, def.basePrice, def.baseDemandTonnesPerDay, def.baseOutputTonnesPerDay,
-       def.elasticity, def.volatility, def.storageCostPerTonneMonth, def.unlockedBy);
+       def.elasticity, def.volatility, def.storageCostPerTonneMonth, def.mineOpexPerDay,
+       def.unlockedBy);
 }
 
 template <class Archive>
@@ -298,19 +300,22 @@ void serialize(Archive& ar, EventDef& def) {
     ar(def.id, def.name, def.dailyWeight, def.minYear, def.durationDays, def.effects);
 }
 
+// A mine's running cost is not here: since spec 008 it is a figure per ore,
+// ResourceDef::mineOpexPerDay, serialized with the resource.
 template <class Archive>
 void serialize(Archive& ar, BalanceParams& balance) {
     ar(balance.startingCapital, balance.loanAnnualRate, balance.loanTermMonths,
        balance.loanMaxPrincipal, balance.loanMinPrincipal, balance.maxActiveLoans,
        balance.surveyCost, balance.surveyDurationDays, balance.surveyBaseNoise,
-       balance.mineCapexPerHectare, balance.mineBuildDays, balance.mineOpexPerDay,
-       balance.mineMothballOpexMult, balance.auctionWindowDays, balance.plotsListedAtStart,
-       balance.plotsListedPerMonth, balance.openingMinMineable, balance.openingMaxLockedRegion,
-       balance.openingMineablePresence, balance.maxUnsoldRounds, balance.relistCooldownDays,
-       balance.bankruptcyGraceMonths, balance.marketSupplySmoothingDays,
-       balance.marketPriceAdjustDays, balance.demandReversionRate, balance.demandMultMin,
-       balance.demandMultMax, balance.priceFloorMult, balance.priceCapMult,
-       balance.demandGrowthPerYear, balance.defaultSellPolicy, balance.defaultCoverCosts);
+       balance.mineCapexPerHectare, balance.mineBuildDays, balance.mineMothballOpexMult,
+       balance.auctionWindowDays, balance.plotsListedAtStart, balance.plotsListedPerMonth,
+       balance.openingMinMineable, balance.openingMaxLockedRegion, balance.openingMineablePresence,
+       balance.maxUnsoldRounds, balance.relistCooldownDays, balance.bankruptcyGraceMonths,
+       balance.mineLossNoticeDays, balance.marketSupplySmoothingDays, balance.marketPriceAdjustDays,
+       balance.demandReversionRate, balance.demandMultMin, balance.demandMultMax,
+       balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear,
+       balance.marketRatioMin, balance.marketRatioMax, balance.demandFactorMin,
+       balance.demandFactorMax, balance.defaultSellPolicy, balance.defaultCoverCosts);
 }
 
 template <class Archive>

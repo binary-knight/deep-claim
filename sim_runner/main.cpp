@@ -9,7 +9,10 @@
 // opening hand, the listing queue, how long unlisted land lasts and when the
 // first mine opens; and how the contest between the companies went (spec
 // 006): mines per company, bankruptcies, how long mines last and where
-// prices sat. Its exit code is the specs' goal thresholds.
+// prices sat; and whether the markets bite (spec 008): how often each ore
+// sells below what a mine at base output needs, how far its yearly price
+// moves, how long mines stand idle and what a company holds at year 10. Its
+// exit code is the specs' goal thresholds, with or without --sanity.
 #include "sim/ai_controller.h"
 #include "sim/commands.h"
 #include "sim/content.h"
@@ -36,6 +39,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -106,9 +110,10 @@ bool parseArgs(std::span<char*> args, Options& out) {
         }
     }
     if (out.sweep > 0) {
-        // A sweep has its own checks, and its seeds must not wrap round.
+        // A sweep's seeds must not wrap round. It has its own checks and
+        // always exits by them, so --sanity is accepted and adds nothing.
         const sim::Seed lastOffset = out.sweep - 1;
-        if (out.sanity || out.seed > std::numeric_limits<sim::Seed>::max() - lastOffset) {
+        if (out.seed > std::numeric_limits<sim::Seed>::max() - lastOffset) {
             return false;
         }
     }
@@ -373,7 +378,6 @@ constexpr sim::Day kGoalFirstMineDay = 250;
 constexpr std::int64_t kGoalBankruptSeedsPer50 = 1;
 constexpr std::int64_t kGoalMinesRatioPercent = 250;  // leader over trailer, median seed
 constexpr std::int64_t kGateMinesRatioPercent = 300;
-constexpr std::int64_t kGoalPriceMeanPermille = 750;  // mean price over base, each resource
 constexpr sim::Day kGoalMineLifeMinDays = 5 * sim::kDaysPerYear;
 constexpr sim::Day kGoalMineLifeMaxDays = 7 * sim::kDaysPerYear;
 constexpr std::int64_t kGoalWithdrawnYear8 = 25;
@@ -386,6 +390,42 @@ constexpr sim::Day kMineLifeCohortDays = kGoalMineLifeMaxDays;
 // the first and last pull against each other under the market rule (see
 // the spec's Decisions), and mine life needs a ten-year run to measure.
 constexpr bool kGateContest = true;
+
+// Thresholds from docs/specs/008-markets-that-bite.md (BR-010) and decision
+// record 003. They are set for 50 seeds over 20 years with one rival, and the
+// gates among them are evaluated only by a sweep that covers those 20 years:
+// a shorter one reports them as not evaluated.
+constexpr std::uint32_t kBiteFirstYear = 3;  // price below break-even is counted from here
+constexpr std::uint32_t kBiteLastYear = 20;  // to here, and the gates need a run this long
+constexpr sim::Day kBiteFirstDay = (kBiteFirstYear - 1) * sim::kDaysPerYear;  // last day before
+constexpr sim::Day kBiteLastDay = kBiteLastYear * sim::kDaysPerYear;
+// The ores whose price must spend this share of those days below base-output
+// break-even in the median seed.
+constexpr std::array<std::string_view, 3> kBiteOres = {"iron", "copper", "nickel"};
+constexpr std::int64_t kBiteMinPermille = 100;
+constexpr std::int64_t kBiteMaxPermille = 500;
+// A seed has an idled mine when one stood mothballed this many days in a row
+// and was then reopened within the run. A mine left mothballed, because its
+// extractable ore ran out or for any other reason, shows no price decision
+// and does not count.
+constexpr std::uint32_t kIdledRunDays = 30;
+constexpr std::int64_t kGoalIdledSeedsPer50 = 40;
+constexpr std::uint32_t kCashYear = 10;
+constexpr sim::Day kCashDay = kCashYear * sim::kDaysPerYear;
+// Company 0's median cash at the end of year 10, in whole currency units, in
+// the economy before spec 008 retuned it: the cash gate asks for at most half
+// of this. Measured once, on 2026-10-10 at commit e02f48d, with a release
+// build: sim_runner --sweep 50 --years 20 --ai 1 (seeds 1 to 50), reading
+// cash_y10_0.median. Measure it again if data from before spec 008 changes.
+constexpr std::int64_t kBaselineCashY10 = 765'667'709;
+constexpr std::int64_t kCashY10Divisor = 2;
+// The aim for an ore's mean price over base, reported and not gated. Lithium
+// aims higher: few companies reach it.
+constexpr std::int64_t kAimPriceMinPermille = 700;
+constexpr std::int64_t kAimPriceMaxPermille = 1300;
+constexpr std::string_view kLithiumId = "lithium";
+constexpr std::int64_t kAimLithiumMinPermille = 1000;
+constexpr std::int64_t kAimLithiumMaxPermille = 1400;
 
 // Mine counts are sampled at the sweep years and at the end of the run.
 constexpr std::size_t kMineSamples = kSweepYears.size() + 1;
@@ -416,9 +456,24 @@ struct SweepRow {
     // as never (run length + 1).
     std::vector<std::int64_t> mineLives;
     std::vector<std::int64_t> priceMeanPermille;  // per resource: mean price over base
+    // Spec 008. Per resource: the share of days in years 3 to 20 on which the
+    // price was below base-output break-even, and the lowest and highest
+    // yearly mean price over base. Per company: mine-days spent mothballed
+    // and cash at the end of year 10, in cents.
+    std::vector<std::int64_t> belowBreakEvenPermille;
+    std::vector<std::int64_t> priceYearMinPermille;
+    std::vector<std::int64_t> priceYearMaxPermille;
+    std::vector<std::int64_t> mineDaysIdled;
+    std::vector<std::int64_t> cashY10Cents;
+    std::uint32_t longestIdleRun = 0;  // most days in a row any one mine stood mothballed
+    // Times a mine went back to operating after kIdledRunDays or more mothballed.
+    std::uint32_t idleReopenSpells = 0;
     // Working state while the seed runs.
-    std::vector<sim::Day> depletedDay;        // per mine, 1-based, 0 = not yet
-    std::vector<std::int64_t> priceSumCents;  // per resource, saturating
+    std::vector<sim::Day> depletedDay;             // per mine, 1-based, 0 = not yet
+    std::vector<std::int64_t> priceSumCents;       // per resource, saturating
+    std::vector<std::int64_t> daysBelowBreakEven;  // per resource, within years 3 to 20
+    std::vector<std::int64_t> yearPriceSumCents;   // per resource, this year so far; saturating
+    std::vector<std::uint32_t> idleRun;            // per mine, days mothballed in a row
 };
 
 // The opening hand by region class, and the longest run of one region among
@@ -501,6 +556,14 @@ void recordContest(const sim::WorldState& state, const sim::TickReport& report, 
     }
 }
 
+// A price sum over `days` days as permille of the base price, truncated once
+// so a cheap ore's mean is not rounded to whole cents first. The sum
+// saturates only at prices no content bound allows over a permitted run.
+std::int64_t meanPermille(std::int64_t sumCents, sim::Money base, sim::Day days) {
+    const std::int64_t span = sim::checkedMulDiv(base.cents(), std::int64_t{days}, 1).value_or(0);
+    return span > 0 ? sim::checkedMulDiv(sumCents, 1000, span).value_or(0) : 0;
+}
+
 // End of the run: final mine counts, the lives of the cohort, mean prices.
 void finishContest(const Options& options, const sim::Content& content,
                    const sim::WorldState& state, SweepRow& row) {
@@ -524,14 +587,78 @@ void finishContest(const Options& options, const sim::Content& content,
                                     : std::int64_t{row.depletedDay[m]} - mine.operationalDay);
     }
     for (std::size_t r = 0; r < row.priceSumCents.size(); ++r) {
-        // sum x 1000 / (days x base), truncated once, so a cheap ore's mean
-        // is not rounded to whole cents first. The sum saturates only at
-        // prices no content bound allows over a run of any permitted length.
-        const std::int64_t base = content.resources[r].basePrice.cents();
-        const std::int64_t span =
-            sim::checkedMulDiv(base, std::int64_t{options.days}, 1).value_or(0);
         row.priceMeanPermille.push_back(
-            span > 0 ? sim::checkedMulDiv(row.priceSumCents[r], 1000, span).value_or(0) : 0);
+            meanPermille(row.priceSumCents[r], content.resources[r].basePrice, options.days));
+    }
+}
+
+// Whether one mine at tech level zero, selling its whole base output of this
+// ore at `price`, takes less than the ore's running cost: price below
+// mineOpexPerDay / baseOutputTonnesPerDay, compared without the division. No
+// company's research or event multiplier applies; this is the data's own
+// break-even, the same for every seed.
+bool belowBaseBreakEven(const sim::ResourceDef& resource, sim::Money price) {
+    const std::optional<std::int64_t> revenue =
+        sim::checkedMulDiv(price.cents(), resource.baseOutputTonnesPerDay, 1);
+    return revenue.has_value() && *revenue < resource.mineOpexPerDay.cents();
+}
+
+// Prices against break-even and by year (spec 008), once a day after the tick.
+void recordBitePrices(const sim::Content& content, const sim::WorldState& state, SweepRow& row) {
+    const bool counted = state.day > kBiteFirstDay && state.day <= kBiteLastDay;
+    const bool yearEnd = state.day % sim::kDaysPerYear == 0;
+    for (std::size_t r = 0; r < state.markets.size(); ++r) {
+        const sim::ResourceDef& resource = content.resources[r];
+        const sim::Money price = state.markets[r].price;
+        row.daysBelowBreakEven[r] += counted && belowBaseBreakEven(resource, price) ? 1 : 0;
+        row.yearPriceSumCents[r] = saturatingAdd(row.yearPriceSumCents[r], price.cents());
+        if (!yearEnd) {
+            continue;
+        }
+        const std::int64_t mean =
+            meanPermille(row.yearPriceSumCents[r], resource.basePrice, sim::kDaysPerYear);
+        row.priceYearMinPermille[r] = std::min(row.priceYearMinPermille[r], mean);
+        row.priceYearMaxPermille[r] = std::max(row.priceYearMaxPermille[r], mean);
+        row.yearPriceSumCents[r] = 0;
+    }
+}
+
+// Idled mines and cash at year 10 (spec 008), once a day after the tick.
+// Mine-days idled and the longest idle run count every mothballed day,
+// whoever chose it and why. An idle-and-reopen spell is a long enough run
+// that ends with the mine operating again: one that ends depleted or closed,
+// or is still running when the sweep stops, is not one.
+void recordBiteCompanies(const sim::WorldState& state, SweepRow& row) {
+    row.idleRun.resize(state.mines.size(), 0);
+    for (std::size_t m = 0; m < state.mines.size(); ++m) {
+        if (state.mines[m].state != sim::MineState::Mothballed) {
+            const bool reopened = state.mines[m].state == sim::MineState::Operating;
+            if (reopened && row.idleRun[m] >= kIdledRunDays) {
+                ++row.idleReopenSpells;
+            }
+            row.idleRun[m] = 0;
+            continue;
+        }
+        ++row.mineDaysIdled[state.mines[m].owner.index()];
+        row.longestIdleRun = std::max(row.longestIdleRun, ++row.idleRun[m]);
+    }
+    if (state.day == kCashDay) {
+        for (std::size_t c = 0; c < state.companies.size(); ++c) {
+            row.cashY10Cents[c] = state.companies[c].cash.cents();
+        }
+    }
+}
+
+// The days of years 3 to 20 that a run of this length covers.
+sim::Day biteDaysCovered(sim::Day days) {
+    return std::min(days, kBiteLastDay) - std::min(days, kBiteFirstDay);
+}
+
+// End of the run: days below break-even as a share of the days counted.
+void finishBite(const Options& options, SweepRow& row) {
+    const std::int64_t covered = biteDaysCovered(options.days);
+    for (const std::int64_t below : row.daysBelowBreakEven) {
+        row.belowBreakEvenPermille.push_back(covered > 0 ? below * 1000 / covered : 0);
     }
 }
 
@@ -554,6 +681,13 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
     row.minesByState.assign(companyCount, {});
     row.bankruptDay.assign(companyCount, 0);
     row.priceSumCents.assign(content.resources.size(), 0);
+    row.daysBelowBreakEven.assign(content.resources.size(), 0);
+    row.yearPriceSumCents.assign(content.resources.size(), 0);
+    row.priceYearMinPermille.assign(content.resources.size(),
+                                    std::numeric_limits<std::int64_t>::max());
+    row.priceYearMaxPermille.assign(content.resources.size(), 0);
+    row.mineDaysIdled.assign(companyCount, 0);
+    row.cashY10Cents.assign(companyCount, 0);
     for (sim::Day d = 0; d < options.days; ++d) {
         for (std::uint32_t c = 0; c < companyCount; ++c) {
             simulation.collectCommands(sim::CompanyId(c), ai);
@@ -566,8 +700,11 @@ SweepRow sweepSeed(const Options& options, const sim::Content& content, sim::See
         recordFirstMine(report, row);
         recordLand(content, state, row);
         recordContest(state, report, row);
+        recordBitePrices(content, state, row);
+        recordBiteCompanies(state, row);
     }
     finishContest(options, content, state, row);
+    finishBite(options, row);
     row.worldValid = row.worldValid && sim::validateWorld(content, state);
     for (const sim::Company& company : state.companies) {
         row.finalCashCents.push_back(company.cash.cents());
@@ -704,6 +841,64 @@ std::string contestJson(const Options& options, const SweepRow& row) {
         row.mineLives.size(), prices);
 }
 
+// What a run of this length has measured of spec 008. A figure it has not is
+// printed as null, never as zero.
+bool biteMeasured(sim::Day days) {
+    return biteDaysCovered(days) > 0;
+}
+bool priceYearsMeasured(sim::Day days) {
+    return days >= sim::kDaysPerYear;
+}
+bool cashY10Measured(sim::Day days) {
+    return days >= kCashDay;
+}
+bool laterYearsMeasured(sim::Day days) {
+    return days > kCashDay;
+}
+// The gates of spec 008 are set for a 20-year sweep and judge nothing shorter.
+bool biteGatesApply(sim::Day days) {
+    return days >= kBiteLastDay;
+}
+
+template <class Range>
+std::string listOrNull(bool measured, const Range& values) {
+    return measured ? "[" + joined(values) + "]" : std::string("null");
+}
+
+// The spec 008 part of a row. Cash at year 10 is in whole currency units.
+std::string biteJson(const Options& options, const SweepRow& row) {
+    std::vector<std::int64_t> cash;
+    cash.reserve(row.cashY10Cents.size());
+    for (const std::int64_t cents : row.cashY10Cents) {
+        cash.push_back(cents / 100);
+    }
+    const bool years = priceYearsMeasured(options.days);
+    return std::format(
+        "\"below_breakeven_permille\": {}, \"price_year_min_permille\": {}, "
+        "\"price_year_max_permille\": {}, \"mine_days_idled\": [{}], \"cash_y{}\": {}, "
+        "\"longest_idle_run_days\": {}, \"idle_reopen_spells\": {}",
+        listOrNull(biteMeasured(options.days), row.belowBreakEvenPermille),
+        listOrNull(years, row.priceYearMinPermille), listOrNull(years, row.priceYearMaxPermille),
+        joined(row.mineDaysIdled), kCashYear, listOrNull(cashY10Measured(options.days), cash),
+        row.longestIdleRun, row.idleReopenSpells);
+}
+
+// Whether any company went bankrupt on a day after `after` and up to `upTo`
+// (days are 1-based).
+bool bankruptWithin(const SweepRow& row, sim::Day after, sim::Day upTo) {
+    return std::ranges::any_of(row.bankruptDay,
+                               [=](sim::Day day) { return day > after && day <= upTo; });
+}
+bool bankruptEarly(const SweepRow& row) {
+    return bankruptWithin(row, 0, kCashDay);
+}
+bool bankruptLater(const SweepRow& row) {
+    return bankruptWithin(row, kCashDay, kBiteLastDay);
+}
+bool hasIdledMine(const SweepRow& row) {
+    return row.idleReopenSpells > 0;
+}
+
 // The spec 006 columns of one CSV row.
 void writeContestCsv(std::ostream& csv, const SweepRow& row, sim::Day days) {
     for (std::size_t c = 0; c < row.minesBuilt.size(); ++c) {
@@ -813,10 +1008,13 @@ void contestChecks(const Options& options, const sim::Content& content,
     const auto bankrupt = std::count_if(rows.begin(), rows.end(), anyBankrupt);
     // One seed in fifty, rounded up, so a ten-seed run still allows one.
     const std::int64_t allowed = (seeds * kGoalBankruptSeedsPer50 + 49) / 50;
+    // A sweep that covers 20 years gates bankruptcies in years 1 to 10 and
+    // reports the later ones (spec 008), so there the whole-run count is
+    // reported only.
     checks.push_back({"seeds_with_bankruptcy", bankrupt <= allowed,
                       std::format("{} of {} seeds had a bankrupt company (goal: at most {})",
                                   bankrupt, seeds, allowed),
-                      kGateContest});
+                      kGateContest && !biteGatesApply(options.days)});
 
     // A contest needs two companies; with one there is nothing to compare.
     const bool contested = options.aiCompanies >= 1;
@@ -843,13 +1041,20 @@ void contestChecks(const Options& options, const sim::Content& content,
     for (std::size_t r = 0; r < content.resources.size(); ++r) {
         const Spread mean =
             spreadOver(rows, [r](const SweepRow& row) { return row.priceMeanPermille[r]; });
-        pricesOk = pricesOk && mean.median >= kGoalPriceMeanPermille;
+        const bool lithium = content.resources[r].id == kLithiumId;
+        pricesOk = pricesOk &&
+                   mean.median >= (lithium ? kAimLithiumMinPermille : kAimPriceMinPermille) &&
+                   mean.median <= (lithium ? kAimLithiumMaxPermille : kAimPriceMaxPermille);
         prices += std::format("{}{} {:.2f}x", r == 0 ? "" : ", ", content.resources[r].id,
                               static_cast<double>(mean.median) / 1000.0);
     }
     checks.push_back({"mean_prices", pricesOk,
-                      std::format("mean price over base, median seed: {} (goal: {:.2f}x or more)",
-                                  prices, static_cast<double>(kGoalPriceMeanPermille) / 1000.0),
+                      std::format("mean price over base, median seed: {} (aim: {:.2f}x to "
+                                  "{:.2f}x; {} {:.2f}x to {:.2f}x)",
+                                  prices, static_cast<double>(kAimPriceMinPermille) / 1000.0,
+                                  static_cast<double>(kAimPriceMaxPermille) / 1000.0, kLithiumId,
+                                  static_cast<double>(kAimLithiumMinPermille) / 1000.0,
+                                  static_cast<double>(kAimLithiumMaxPermille) / 1000.0),
                       false});
 
     const bool lifeMeasured = options.days > kMineLifeCohortDays;
@@ -892,6 +1097,69 @@ void contestChecks(const Options& options, const sim::Content& content,
          false});
 }
 
+// The gates of spec 008 (BR-010, decision record 003) and the bankruptcies it
+// reports. A sweep shorter than 20 years evaluates none of them.
+void biteChecks(const Options& options, const sim::Content& content,
+                const std::vector<SweepRow>& rows, std::vector<Check>& checks) {
+    const bool applies = biteGatesApply(options.days);
+    const std::string skipped =
+        "not evaluated: the sweep is shorter than " + std::to_string(kBiteLastYear) + " years";
+    const auto add = [&](std::string name, bool passed, const std::string& detail, bool gated) {
+        checks.push_back({std::move(name), !applies || passed, applies ? detail : skipped, gated});
+    };
+    const auto seeds = static_cast<std::int64_t>(rows.size());
+
+    for (const std::string_view ore : kBiteOres) {
+        const auto found = std::ranges::find(content.resources, ore, &sim::ResourceDef::id);
+        const auto r = static_cast<std::size_t>(found - content.resources.begin());
+        const bool known = found != content.resources.end();
+        const Spread below =
+            known ? spreadOver(rows,
+                               [r](const SweepRow& row) { return row.belowBreakEvenPermille[r]; })
+                  : Spread{};
+        add(std::format("bite_{}", ore),
+            known && below.median >= kBiteMinPermille && below.median <= kBiteMaxPermille,
+            known ? std::format("{}: price below base-output break-even on {} permille of days in "
+                                "years {} to {}, median seed (goal: {} to {})",
+                                ore, below.median, kBiteFirstYear, kBiteLastYear, kBiteMinPermille,
+                                kBiteMaxPermille)
+                  : std::format("{}: the content has no such ore", ore),
+            true);
+    }
+
+    // Forty seeds in fifty, rounded up, so a smaller sweep is held to the
+    // same share and never a looser one.
+    const auto idled = std::count_if(rows.begin(), rows.end(), hasIdledMine);
+    const std::int64_t needed = (seeds * kGoalIdledSeedsPer50 + 49) / 50;
+    add("idled_mines", idled >= needed,
+        std::format("{} of {} seeds had a mine mothballed for {} days in a row or more and then "
+                    "reopened (goal: at least {})",
+                    idled, seeds, kIdledRunDays, needed),
+        true);
+
+    const Spread cash =
+        spreadOver(rows, [](const SweepRow& row) { return row.cashY10Cents.front() / 100; });
+    add("cash_y10", cash.median <= kBaselineCashY10 / kCashY10Divisor,
+        std::format("company 0's cash at the end of year {}, median seed: {} (goal: at most {}, "
+                    "half the {} measured before spec 008)",
+                    kCashYear, cash.median, kBaselineCashY10 / kCashY10Divisor, kBaselineCashY10),
+        true);
+
+    // One seed in fifty, rounded up, as for the whole-run count above.
+    const std::int64_t allowed = (seeds * kGoalBankruptSeedsPer50 + 49) / 50;
+    const auto early = std::count_if(rows.begin(), rows.end(), bankruptEarly);
+    add("bankruptcy_y1_10", early <= allowed,
+        std::format("{} of {} seeds had a bankruptcy in years 1 to {} (goal: at most {})", early,
+                    seeds, kCashYear, allowed),
+        true);
+    const auto later = std::count_if(rows.begin(), rows.end(), bankruptLater);
+    add("bankruptcy_y11_20", later <= allowed,
+        std::format("{} of {} seeds had a bankruptcy in years {} to {} (reported against the "
+                    "limit for years 1 to {}: at most {})",
+                    later, seeds, kCashYear + 1, kBiteLastYear, kCashYear, allowed),
+        false);
+}
+
 void printSweepRows(const Options& options, const std::vector<SweepRow>& rows) {
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const SweepRow& row = rows[i];
@@ -908,12 +1176,55 @@ void printSweepRows(const Options& options, const std::vector<SweepRow>& rows) {
             row.seed, row.openingMineable, row.openingLocked, row.longestRegionRun,
             row.lastNewListingDay, sampleList(row.unlisted, options.days),
             sampleList(row.withdrawn, options.days), row.firstMineStartedDay,
-            row.firstMineOperatingDay, cash, contestJson(options, row),
+            row.firstMineOperatingDay, cash,
+            contestJson(options, row) + ", " + biteJson(options, row),
             i + 1 < rows.size() ? "," : "");
     }
 }
 
-// The spec 006 lines of the summary, which end it.
+// One summary line: a spread, or null for a figure the run did not measure.
+void printSpreadLine(const std::string& name, bool measured, const Spread& spread) {
+    std::cout << std::format("    {}: {},\n", jsonString(name),
+                             measured ? spreadJson(spread) : std::string("null"));
+}
+
+// The spec 008 lines of the summary, which end it. Cash is in whole currency
+// units, as final_cash is.
+void printBiteSummary(const Options& options, const sim::Content& content,
+                      const std::vector<SweepRow>& rows) {
+    using Figures = std::vector<std::int64_t> SweepRow::*;
+    const auto each = [&](std::string_view key, bool measured, Figures figures) {
+        for (std::size_t r = 0; r < content.resources.size(); ++r) {
+            printSpreadLine(
+                std::format("{}_{}", key, content.resources[r].id), measured,
+                spreadOver(rows, [=](const SweepRow& row) { return (row.*figures)[r]; }));
+        }
+    };
+    each("below_breakeven_permille", biteMeasured(options.days), &SweepRow::belowBreakEvenPermille);
+    const bool years = priceYearsMeasured(options.days);
+    each("price_year_min_permille", years, &SweepRow::priceYearMinPermille);
+    each("price_year_max_permille", years, &SweepRow::priceYearMaxPermille);
+    const std::size_t companies = rows.empty() ? 0 : rows.front().mineDaysIdled.size();
+    for (std::size_t c = 0; c < companies; ++c) {
+        printSpreadLine(
+            std::format("mine_days_idled_{}", c), true,
+            spreadOver(rows, [c](const SweepRow& row) { return row.mineDaysIdled[c]; }));
+    }
+    for (std::size_t c = 0; c < companies; ++c) {
+        printSpreadLine(
+            std::format("cash_y{}_{}", kCashYear, c), cashY10Measured(options.days),
+            spreadOver(rows, [c](const SweepRow& row) { return row.cashY10Cents[c] / 100; }));
+    }
+    const auto later = std::count_if(rows.begin(), rows.end(), bankruptLater);
+    std::cout << std::format(
+        "    \"seeds_with_bankruptcy_y1_{}\": {},\n    \"seeds_with_bankruptcy_y{}_{}\": {},\n"
+        "    \"seeds_with_idled_mine\": {}\n",
+        kCashYear, std::count_if(rows.begin(), rows.end(), bankruptEarly), kCashYear + 1,
+        kBiteLastYear, laterYearsMeasured(options.days) ? std::to_string(later) : "null",
+        std::count_if(rows.begin(), rows.end(), hasIdledMine));
+}
+
+// The spec 006 lines of the summary; the spec 008 lines follow them.
 void printContestSummary(const Options& options, const sim::Content& content,
                          const std::vector<SweepRow>& rows) {
     const auto line = [](std::string_view name, const Spread& spread) {
@@ -948,7 +1259,7 @@ void printContestSummary(const Options& options, const sim::Content& content,
                spreadOver(rows, [](const SweepRow& r) { return r.depletedByGoalYear; }));
     lineOrNull("cohort_mine_life_days", !pooledMineLives(rows).empty(),
                spreadOf(pooledMineLives(rows)));
-    std::cout << std::format("    \"cohort_mines\": {},\n    \"seeds_with_bankruptcy\": {}\n",
+    std::cout << std::format("    \"cohort_mines\": {},\n    \"seeds_with_bankruptcy\": {},\n",
                              pooledMineLives(rows).size(),
                              std::count_if(rows.begin(), rows.end(), anyBankrupt));
 }
@@ -1004,6 +1315,7 @@ void printSweep(const Options& options, const sim::Content& content,
              spreadOver(rows, [c](const SweepRow& r) { return r.finalCashCents[c] / 100; }));
     }
     printContestSummary(options, content, rows);
+    printBiteSummary(options, content, rows);
     std::cout << "  },\n  \"never_day\": " << std::int64_t{options.days} + 1
               << ",\n  \"checks\": [\n";
     for (std::size_t i = 0; i < checks.size(); ++i) {
@@ -1025,6 +1337,7 @@ int runSweep(const Options& options, const sim::Content& content) {
     }
     std::vector<Check> checks = sweepChecks(options, rows);
     contestChecks(options, content, rows, checks);
+    biteChecks(options, content, rows, checks);
     const bool allPassed = std::ranges::all_of(
         checks, [](const Check& check) { return check.passed || !check.gated; });
     printSweep(options, content, rows, checks, allPassed);
@@ -1050,7 +1363,10 @@ int main(int argc, char** argv) {
     Options options;
     if (!parseArgs(std::span<char*>(argv, static_cast<std::size_t>(argc)), options)) {
         std::cerr << "usage: sim_runner [--seed N] [--days N | --years N] [--ai N] [--data DIR] "
-                     "[--csv FILE] [--sanity] [--sweep N]\n";
+                     "[--csv FILE] [--sanity] [--sweep N]\n"
+                     "  --sanity  exit non-zero when a check of a single run fails; with --sweep "
+                     "it has no further effect, since a sweep always exits non-zero when a gated "
+                     "check fails\n";
         return 2;
     }
     const content::LoadResult loaded = content::loadFromDirectory(options.dataDir);

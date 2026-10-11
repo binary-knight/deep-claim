@@ -95,9 +95,9 @@
                                 <tr><th class="w-plot">Plot</th><th class="w-region2">Region</th><th class="w-mine">Mine</th><th>Output</th><th>Remaining</th><th class="act w-act" data-class-wide="owned_orders"></th></tr>
                                 <tr data-for="o : owned" class="row" data-event-click="select_plot(o.index)">
                                     <td class="name num">{{o.name}}</td>
-                                    <td class="nw">{{o.region}} <span class="muted num">{{o.area}}</span></td>
+                                    <td class="nw">{{o.region}} <span class="muted num area">{{o.area}}</span></td>
                                     <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
-                                    <td class="figure wrap">{{o.output}}</td>
+                                    <td class="figure wrap">{{o.output}}<span class="sub" data-if="o.figures.shown" data-class-warn="o.figures.loss">{{o.figures.earns}} <span data-if="o.figures.loss">{{ui_mine_loss}}</span></span><span class="sub" data-if="o.figures.reopen != ''" data-class-warn="o.figures.reopen_loss">{{ui_mine_if_reopened}} {{o.figures.reopen}}</span><span class="sub" data-if="o.figures.break_even != ''">{{o.figures.break_even}}</span></td>
                                     <td class="figure wrap">{{o.remaining}}</td>
                                     <td class="act"><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button><span class="chip accent" data-if="o.mine_order.pending">{{o.mine_order.text}}</span><button class="sm" data-if="o.mine_order.pending" data-event-click="cancel(o.mine_order.id)">{{ui_cancel}}</button><span class="chip accent" data-if="o.build_order.pending">{{o.build_order.text}}</span><button class="sm" data-if="o.build_order.pending" data-event-click="cancel(o.build_order.id)">{{ui_cancel}}</button></td>
                                 </tr>
@@ -183,7 +183,7 @@
                                     <td class="name num">{{o.name}}</td>
                                     <td class="nw">{{o.region}}<span class="sub num">{{o.area}}</span></td>
                                     <td class="nw"><span class="chip" data-class-good="o.mine_class == 'good'" data-class-warn="o.mine_class == 'warn'" data-class-muted="o.mine_class == 'muted'" data-class-danger="o.mine_class == 'danger'">{{o.mine}}</span></td>
-                                    <td class="figure wrap">{{o.output}}</td>
+                                    <td class="figure wrap">{{o.output}}<span class="sub" data-if="o.figures.shown" data-class-warn="o.figures.loss">{{o.figures.earns}} <span data-if="o.figures.loss">{{ui_mine_loss}}</span></span><span class="sub" data-if="o.figures.reopen != ''" data-class-warn="o.figures.reopen_loss">{{ui_mine_if_reopened}} {{o.figures.reopen}}</span><span class="sub" data-if="o.figures.break_even != ''">{{o.figures.break_even}}</span></td>
                                     <td class="figure wrap">{{o.remaining}}</td>
                                     <td class="act"><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Mothball</button><button class="sm" data-if="!o.mine_order.pending && o.can_toggle && !o.mine_operating" data-event-click="toggle_mine(o.mine_index)">Reopen</button><span class="chip accent" data-if="o.mine_order.pending">{{o.mine_order.text}}</span><button class="sm" data-if="o.mine_order.pending" data-event-click="cancel(o.mine_order.id)">{{ui_cancel}}</button><span class="chip accent" data-if="o.build_order.pending">{{o.build_order.text}}</span><button class="sm" data-if="o.build_order.pending" data-event-click="cancel(o.build_order.id)">{{ui_cancel}}</button></td>
                                 </tr>
@@ -200,6 +200,19 @@
                                 <div class="kv" data-if="panel.owner != ''"><span class="k">Owner</span><span class="v">{{panel.owner}}</span></div>
                                 <div class="kv" data-if="panel.sale != ''"><span class="k">Sold</span><span class="v num"><span class="line wrapok">{{panel.sale}}</span></span></div>
                                 <div class="kv"><span class="k">Mine capex</span><span class="v num">{{panel.capex}}</span></div>
+                                <!-- What the player's mine here earns a day at today's price,
+                                     and the price at which that is nothing (spec 008). The sim
+                                     works both out. A loss carries its minus sign and its own
+                                     key as well as the warning colour; a mothballed mine shows
+                                     what it costs to keep, then what it would earn reopened. -->
+                                <div class="kv" data-if="panel.figures.shown">
+                                    <span class="k"><span data-if="panel.figures.mothballed">{{ui_mine_mothballed}}</span><span data-if="!panel.figures.mothballed && panel.figures.loss">{{ui_mine_loses}}</span><span data-if="!panel.figures.mothballed && !panel.figures.loss">{{ui_mine_earns}}</span></span>
+                                    <span class="v num"><span class="line" data-class-warn="panel.figures.loss">{{panel.figures.earns}}</span><span class="subline" data-if="!panel.figures.mothballed && panel.figures.note != ''">{{panel.figures.note}}</span><span class="subline" data-if="!panel.figures.mothballed && panel.figures.break_even != ''">{{panel.figures.break_even}}</span></span>
+                                </div>
+                                <div class="kv" data-if="panel.figures.reopen != ''">
+                                    <span class="k">{{ui_mine_if_reopened_key}}</span>
+                                    <span class="v num"><span class="line" data-class-warn="panel.figures.reopen_loss">{{panel.figures.reopen}}</span><span class="subline">{{panel.figures.note}}</span><span class="subline">{{panel.figures.break_even}}</span></span>
+                                </div>
                                 <div class="kv"><span class="k">Region odds</span><span class="v num"><span class="line wrapok">{{panel.odds}}</span></span></div>
                                 <h2 style="margin-top: 4dp;"><span class="idx">04</span>{{panel.survey_title}}</h2>
                                 <!-- The row's class binding sits one level below the data-for

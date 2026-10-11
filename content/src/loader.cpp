@@ -447,7 +447,7 @@ std::vector<std::string> parseResources(const json& document, sim::Content& cont
     for (const Node& node : *nodes) {
         node.allowKeys({"id", "name", "base_price", "base_demand_tonnes_per_day",
                         "base_output_tonnes_per_day", "elasticity", "volatility",
-                        "storage_cost_per_tonne_month", "unlocked_by"});
+                        "storage_cost_per_tonne_month", "mine_opex_per_day", "unlocked_by"});
         sim::ResourceDef def;
         def.id = readId(node, seen);
         def.name = valueOr(node.string("name", true), std::string());
@@ -466,6 +466,9 @@ std::vector<std::string> parseResources(const json& document, sim::Content& cont
         def.storageCostPerTonneMonth =
             valueOr(node.money("storage_cost_per_tonne_month", true, sim::Money::zero()),
                     sim::Money::zero());
+        // Spec 008: a mine that costs nothing to run can never lose money.
+        def.mineOpexPerDay = valueOr(
+            node.money("mine_opex_per_day", true, sim::Money::fromCents(1)), sim::Money::zero());
         unlockedByNames.push_back(valueOr(node.string("unlocked_by", false), std::string()));
         content.resources.push_back(std::move(def));
     }
@@ -761,6 +764,67 @@ void parseEvents(const json& document, sim::Content& content, ErrorSink& sink) {
     }
 }
 
+// Bounds on the market clamps (spec 008). The price target is base price
+// times ratio^elasticity, and the loader allows an elasticity of 5 and a base
+// price of 1e11: a ratio of 10 keeps that product inside int64 cents, and a
+// ratio of 1/100 keeps elasticity x ln(ratio) inside fixedExp's range. The
+// demand factor multiplies a base demand of up to 1e9 tonnes, so 1000 is the
+// most that still fits Fixed.
+//
+// The ratio clamp must also straddle 1: the minimum may not exceed 1 and the
+// maximum may not fall below it. Base price is the price at a ratio of 1, so
+// a clamp wholly on one side would hold every price above or below base for
+// good, and the AI clamps its supply discount between the minimum and 1
+// (sim/src/ai_controller.cpp), which a minimum above 1 turns into a premium.
+// The demand factor has no such pivot: each end may sit anywhere in its range.
+const sim::Fixed kMarketRatioMin = sim::Fixed::fromRatio(1, 100);
+const sim::Fixed kMarketRatioMax = sim::Fixed::fromInt(10);
+const sim::Fixed kDemandFactorMin = sim::Fixed::fromRaw(1);  // the smallest value above zero
+const sim::Fixed kDemandFactorMax = sim::Fixed::fromInt(1000);
+
+// The lower end must lie in [lowest, minCeiling] and the upper end in
+// [maxFloor, highest].
+struct ClampSpec {
+    std::string_view minKey;
+    std::string_view maxKey;
+    sim::Fixed lowest;
+    sim::Fixed minCeiling;
+    sim::Fixed maxFloor;
+    sim::Fixed highest;
+};
+
+// One clamp: each end inside its bounds and the lower strictly below the
+// upper. The order is checked only when both ends are usable, so a value
+// already rejected is reported once.
+void parseClamp(const Node& node, const ClampSpec& spec, sim::Fixed& min, sim::Fixed& max) {
+    const std::optional<sim::Fixed> low =
+        node.fixed(spec.minKey, true, spec.lowest, spec.minCeiling);
+    const std::optional<sim::Fixed> high =
+        node.fixed(spec.maxKey, true, spec.maxFloor, spec.highest);
+    if (low && high && *low >= *high) {
+        node.report(spec.maxKey, "must be greater than " + std::string(spec.minKey));
+    }
+    min = valueOr(low, spec.lowest);
+    max = valueOr(high, spec.highest);
+}
+
+void parseMarketClamps(const Node& node, sim::BalanceParams& balance) {
+    const ClampSpec ratio{.minKey = "market_ratio_min",
+                          .maxKey = "market_ratio_max",
+                          .lowest = kMarketRatioMin,
+                          .minCeiling = sim::Fixed::one(),
+                          .maxFloor = sim::Fixed::one(),
+                          .highest = kMarketRatioMax};
+    const ClampSpec demand{.minKey = "demand_factor_min",
+                           .maxKey = "demand_factor_max",
+                           .lowest = kDemandFactorMin,
+                           .minCeiling = kDemandFactorMax,
+                           .maxFloor = kDemandFactorMin,
+                           .highest = kDemandFactorMax};
+    parseClamp(node, ratio, balance.marketRatioMin, balance.marketRatioMax);
+    parseClamp(node, demand, balance.demandFactorMin, balance.demandFactorMax);
+}
+
 void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& sink) {
     if (!document.is_object()) {
         sink.add("", "expected a top-level object, got " + std::string(typeName(document)));
@@ -778,7 +842,6 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "survey_base_noise",
                     "mine_capex_per_hectare",
                     "mine_build_days",
-                    "mine_opex_per_day",
                     "mine_mothball_opex_mult",
                     "auction_window_days",
                     "plots_listed_at_start",
@@ -790,6 +853,11 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "price_floor_mult",
                     "price_cap_mult",
                     "demand_growth_per_year",
+                    "market_ratio_min",
+                    "market_ratio_max",
+                    "demand_factor_min",
+                    "demand_factor_max",
+                    "mine_loss_notice_days",
                     "plots_listed_per_month",
                     "opening_min_mineable",
                     "opening_max_locked_region",
@@ -828,7 +896,6 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     }
     balance.mineBuildDays =
         static_cast<sim::Day>(valueOr(node.integer("mine_build_days", true, 1, kMaxDays), 1LL));
-    balance.mineOpexPerDay = valueOr(node.money("mine_opex_per_day", true, zero), zero);
     balance.mineMothballOpexMult =
         valueOr(node.fixed("mine_mothball_opex_mult", true, sim::Fixed::zero(), sim::Fixed::one()),
                 sim::Fixed::zero());
@@ -879,6 +946,9 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     balance.demandGrowthPerYear = valueOr(
         node.fixed("demand_growth_per_year", true, sim::Fixed::zero(), sim::Fixed::fromRatio(1, 2)),
         sim::Fixed::zero());
+    parseMarketClamps(node, balance);
+    balance.mineLossNoticeDays = static_cast<std::uint32_t>(
+        valueOr(node.integer("mine_loss_notice_days", true, 1, kMaxDays), 1LL));
     // Spec 001: the standing sell order every company starts with.
     if (const std::optional<Node> policy = node.object("default_sell_policy", true)) {
         policy->allowKeys({"enabled", "reserve_tonnes", "floor_price"});
@@ -1220,6 +1290,19 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.pending_not_covered", ""},
     {"status.order_cancelled", ""},
     {"ui.survey_unaffordable", "amount"},
+    // Spec 008.
+    {"notice.mine_losing_money", "plot,amount,days"},
+    {"ui.pause_on.mine_losing", ""},
+    {"ui.mine_margin", "amount"},
+    {"ui.mine_break_even", "amount"},
+    {"ui.mine_no_figure", ""},
+    {"ui.mine_margin_note", ""},
+    {"ui.mine_loss", ""},
+    {"ui.mine_if_reopened", ""},
+    {"ui.mine_earns", ""},
+    {"ui.mine_loses", ""},
+    {"ui.mine_mothballed", ""},
+    {"ui.mine_if_reopened_key", ""},
 });
 
 // Names of the {placeholders} a template uses. Braces that do not form a

@@ -20,9 +20,6 @@ namespace sim {
 
 namespace {
 
-// Demand/supply ratio is clamped so the power law stays tame.
-const Fixed kRatioMin = Fixed::fromRatio(1, 5);
-const Fixed kRatioMax = Fixed::fromInt(5);
 const Fixed kMaxDemandSigma = Fixed::fromInt(3);
 
 }  // namespace
@@ -224,15 +221,18 @@ void runMarkets(const Content& content, WorldState& state) {
         // The world outside the game supplies exactly the base demand, so with
         // no company sales and no demand shift the price sits at base.
         const Fixed baseDemand = Fixed::fromInt(resource.baseDemandTonnesPerDay);
-        // Combined demand factor is bounded before it meets base demand so the
-        // product fits Fixed for any valid content (1e9 t x 1000 = 1e12 t).
+        // Combined demand factor is bounded (balance.demandFactorMin/Max) before
+        // it meets base demand so the product fits Fixed for any valid content.
         const Fixed demandFactor = clampFixed(
             market.demandMult * growth *
                 eventMultiplier(content, state, EventEffectType::DemandMult, ResourceId(i)),
-            Fixed::fromRatio(1, 100), Fixed::fromInt(1000));
+            balance.demandFactorMin, balance.demandFactorMax);
         const Fixed demand = baseDemand * demandFactor;
         const Fixed supply = baseDemand + market.supplySmoothed;
-        const Fixed ratio = clampFixed(demand / supply, kRatioMin, kRatioMax);
+        // Demand over supply is clamped (balance.marketRatioMin/Max) so the
+        // power law stays tame.
+        const Fixed ratio =
+            clampFixed(demand / supply, balance.marketRatioMin, balance.marketRatioMax);
         const Money target = resource.basePrice.scaled(fixedPow(ratio, resource.elasticity));
 
         // Move part of the way to the target each day, then clamp.

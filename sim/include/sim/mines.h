@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace sim {
@@ -18,8 +19,46 @@ namespace sim {
 // What a company with these techs would pay to build on a plot of this area.
 [[nodiscard]] Money mineCapexQuote(const Content& content, const std::vector<TechId>& completed,
                                    std::int64_t areaHectares);
-[[nodiscard]] Money mineDailyOpex(const Content& content, const WorldState& world,
-                                  const Company& company, MineState state);
+
+// What `mine` costs its owner for one day in state `as` (spec 008). The
+// highest mineOpexPerDay among the mine's cost ores, times the owner's
+// research cost multiplier and the active event cost multiplier, times the
+// mothball share when `as` is Mothballed; zero when Building, Depleted or
+// Closed. The cost ores are the ores the mine produced on its most recent
+// operating day (lastOutputTonnes); when there are none, every ore the owner
+// has unlocked. Never the plot's true deposits: a cost must not reveal an
+// ore the owner has not seen. `as` is passed apart from mine.state so a
+// caller can ask what a mothballed mine would cost to run. Saturates at
+// kMaxCashCents.
+[[nodiscard]] Money mineRunningCost(const Content& content, const WorldState& world,
+                                    const Company& company, const Mine& mine, MineState as);
+
+// What an operating mine producing `resource` costs `company` today: the
+// ore's mineOpexPerDay times the same research and event cost multipliers
+// mineRunningCost applies. Quoted whether or not the company can extract the
+// ore yet; zero for a resource the content does not have. Saturates at
+// kMaxCashCents.
+[[nodiscard]] Money mineOpexQuote(const Content& content, const WorldState& world,
+                                  const Company& company, ResourceId resource);
+
+// What `mine` earns in a day at `prices` (one per resource, per tonne): its
+// most recent operating day's output at those prices, less its running cost
+// as an operating mine. For a mothballed mine this is what it would earn if
+// reopened; a mine that has produced nothing shows the bare cost as a loss.
+// An ore with no entry in `prices`, and a negative price or tonnage, counts
+// as nothing. Each term and the result saturate at +/- kMaxCashCents.
+[[nodiscard]] Money mineDailyMargin(const Content& content, const WorldState& world,
+                                    const Company& company, const Mine& mine,
+                                    std::span<const Money> prices);
+
+// The price of the mine's principal ore (the one with the largest output x
+// price; the lowest id on a tie) at which mineDailyMargin is zero, the other
+// ores held at `prices`. Rounded up to a whole cent, never negative: zero
+// when the other ores alone cover the cost, and zero when the mine has no
+// output to price.
+[[nodiscard]] Money mineBreakEvenPrice(const Content& content, const WorldState& world,
+                                       const Company& company, const Mine& mine,
+                                       std::span<const Money> prices);
 
 // Tonnes an operating mine would extract today from a deposit of the given
 // size: base output scaled by tech and by remaining share (output falls to

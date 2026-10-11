@@ -1,5 +1,7 @@
 #include "sim/ai_controller.h"
 #include "sim/commands.h"
+#include "sim/content.h"
+#include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/money.h"
 #include "sim/save.h"
@@ -12,7 +14,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -246,7 +250,9 @@ sim::CompanyView prospectView(const sim::Content& content, std::int64_t tonnes, 
     view.day = 30;
     view.cash = sim::Money::fromUnits(20'000'000);
     view.loanCapacity = content.balance.loanMaxPrincipal;
-    view.mineOpexQuote = content.balance.mineOpexPerDay;
+    for (const sim::ResourceDef& resource : content.resources) {
+        view.mineOpexQuotes.push_back(resource.mineOpexPerDay);
+    }
     view.inventoryTonnes.assign(content.resources.size(), 0);
     for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
         sim::MarketView market;
@@ -379,4 +385,288 @@ TEST_CASE("The AI does not strand itself on land it cannot develop", "[ai]") {
                   plot.mineCapexQuote.cents());
         }
     }
+}
+
+// Spec 008: what a mine earns is the sim's figure, carried on the view.
+
+namespace {
+
+const sim::ResourceId kIron(0);
+const sim::ResourceId kCopper(1);
+const sim::ResourceId kLithium(2);  // locked until tech 1 in the fixture
+
+// The fixture with a different running cost per ore: iron 8,000, copper
+// 12,000 and (locked) lithium 20,000 a day.
+sim::Content costedContent() {
+    sim::Content c = test::makeContent();
+    c.resources[kIron.index()].mineOpexPerDay = sim::Money::fromUnits(8'000);
+    c.resources[kCopper.index()].mineOpexPerDay = sim::Money::fromUnits(12'000);
+    c.resources[kLithium.index()].mineOpexPerDay = sim::Money::fromUnits(20'000);
+    return c;
+}
+
+// A new game in which the rival holds one mine in `state` whose most recent
+// operating day produced `output` (iron, copper, lithium), with iron at
+// `ironPrice`, copper at $900 and lithium at $14,000.
+sim::WorldState worldWithMine(const sim::Content& content, sim::MineState state,
+                              const std::vector<std::int64_t>& output,
+                              sim::Money ironPrice = sim::Money::fromUnits(60)) {
+    const sim::Simulation simulation(content, 1, test::setup());
+    sim::WorldState world = simulation.state();
+    world.markets[kIron.index()].price = ironPrice;
+    world.markets[kCopper.index()].price = sim::Money::fromUnits(900);
+    world.markets[kLithium.index()].price = sim::Money::fromUnits(14'000);
+    sim::Mine mine;
+    mine.plot = sim::PlotId(0);
+    mine.owner = kRival;
+    mine.state = state;
+    mine.extractedTonnes = output;
+    mine.lastDayTonnes.assign(content.resources.size(), 0);
+    mine.lastOutputTonnes = output;
+    world.mines.push_back(mine);
+    return world;
+}
+
+sim::MineView mineViewOf(const sim::Content& content, const sim::WorldState& world) {
+    const sim::CompanyView view = sim::makeCompanyView(content, world, kRival);
+    REQUIRE(view.mines.size() == 1);
+    return view.mines[0];
+}
+
+}  // namespace
+
+TEST_CASE("The view quotes a running cost for each ore", "[ai][view][spec008]") {
+    const sim::Content content = costedContent();
+    const sim::Simulation simulation(content, 1, test::setup());
+    const sim::CompanyView view = simulation.view(kRival);
+    // Every ore is quoted, the locked one too: the quote is what a mine
+    // producing that ore would cost, whoever can dig it today.
+    REQUIRE(view.mineOpexQuotes.size() == content.resources.size());
+    CHECK(view.mineOpexQuotes[kIron.index()] == sim::Money::fromUnits(8'000));
+    CHECK(view.mineOpexQuotes[kCopper.index()] == sim::Money::fromUnits(12'000));
+    CHECK(view.mineOpexQuotes[kLithium.index()] == sim::Money::fromUnits(20'000));
+}
+
+TEST_CASE("A single-ore mine's view carries its margin and break-even price",
+          "[ai][view][spec008]") {
+    const sim::Content content = costedContent();
+    // 400 t of iron at $60 is $24,000 against a cost of $8,000.
+    const sim::MineView atBase =
+        mineViewOf(content, worldWithMine(content, sim::MineState::Operating, {400, 0, 0}));
+    CHECK(atBase.hasEarnings);
+    CHECK(atBase.dailyOpex == sim::Money::fromUnits(8'000));
+    CHECK(atBase.operatingOpex == sim::Money::fromUnits(8'000));
+    CHECK(atBase.dailyMargin == sim::Money::fromUnits(16'000));
+    CHECK(atBase.breakEvenPrice == sim::Money::fromUnits(20));
+
+    // The margin follows the price the view is built at; the break-even
+    // price does not move.
+    const sim::MineView atTen = mineViewOf(
+        content,
+        worldWithMine(content, sim::MineState::Operating, {400, 0, 0}, sim::Money::fromUnits(10)));
+    CHECK(atTen.hasEarnings);
+    CHECK(atTen.dailyMargin == sim::Money::fromUnits(-4'000));
+    CHECK(atTen.breakEvenPrice == sim::Money::fromUnits(20));
+}
+
+TEST_CASE("A two-ore mine's view pays the dearer cost and prices its principal ore",
+          "[ai][view][spec008]") {
+    const sim::Content content = costedContent();
+    // 100 t of iron ($6,000) and 60 t of copper ($54,000) against copper's
+    // $12,000: copper earns most, and must fetch $100 to cover what iron
+    // leaves of the cost.
+    const sim::MineView mine =
+        mineViewOf(content, worldWithMine(content, sim::MineState::Operating, {100, 60, 0}));
+    CHECK(mine.hasEarnings);
+    CHECK(mine.dailyOpex == sim::Money::fromUnits(12'000));
+    CHECK(mine.dailyMargin == sim::Money::fromUnits(48'000));
+    CHECK(mine.breakEvenPrice == sim::Money::fromUnits(100));
+}
+
+TEST_CASE("A mothballed mine's view shows its idle cost and what reopening would earn",
+          "[ai][view][spec008]") {
+    const sim::Content content = costedContent();
+    const sim::MineView mine =
+        mineViewOf(content, worldWithMine(content, sim::MineState::Mothballed, {400, 0, 0}));
+    CHECK(mine.hasEarnings);
+    CHECK(mine.dailyOpex ==
+          sim::Money::fromUnits(8'000).scaled(content.balance.mineMothballOpexMult));
+    CHECK(mine.operatingOpex == sim::Money::fromUnits(8'000));
+    CHECK(mine.dailyMargin == sim::Money::fromUnits(16'000));
+    CHECK(mine.breakEvenPrice == sim::Money::fromUnits(20));
+}
+
+TEST_CASE("A mine with nothing to show presents no margin and no break-even",
+          "[ai][view][spec008]") {
+    const sim::Content content = costedContent();
+    // Running but yet to produce: charged the dearest ore its owner can
+    // dig (copper; lithium is locked), with no earnings figure.
+    const sim::MineView fresh =
+        mineViewOf(content, worldWithMine(content, sim::MineState::Operating, {0, 0, 0}));
+    CHECK_FALSE(fresh.hasEarnings);
+    CHECK(fresh.dailyOpex == sim::Money::fromUnits(12'000));
+    CHECK(fresh.dailyMargin == sim::Money::zero());
+    CHECK(fresh.breakEvenPrice == sim::Money::zero());
+}
+
+TEST_CASE("A mine that is building, depleted or closed presents no figures",
+          "[ai][view][spec008]") {
+    // Under construction, and finished for good with output still on record.
+    const sim::Content content = costedContent();
+    for (const sim::MineState state :
+         {sim::MineState::Building, sim::MineState::Depleted, sim::MineState::Closed}) {
+        const sim::MineView mine = mineViewOf(content, worldWithMine(content, state, {400, 0, 0}));
+        const std::array<sim::Money, 4> figures = {mine.dailyOpex, mine.operatingOpex,
+                                                   mine.dailyMargin, mine.breakEvenPrice};
+        CHECK_FALSE(mine.hasEarnings);
+        CHECK(std::ranges::all_of(figures, [](sim::Money m) { return m == sim::Money::zero(); }));
+    }
+}
+
+namespace {
+
+// A hand-built view for the rival, long past any grace period: one mine in
+// `state` with the figures given, every market at base price and every ore
+// quoted at 8,000 a day. The mine's output is whatever the test says, so a
+// test can make the tonnage and the margin disagree.
+sim::CompanyView mineOwnerView(const sim::Content& content, sim::MineState state, sim::Money margin,
+                               bool hasEarnings, std::int64_t ironOutput) {
+    sim::CompanyView view;
+    view.me = kRival;
+    view.day = 1'000;
+    view.cash = sim::Money::fromUnits(1'000'000);
+    view.inventoryTonnes.assign(content.resources.size(), 0);
+    for (std::uint32_t r = 0; r < content.resources.size(); ++r) {
+        sim::MarketView market;
+        market.resource = sim::ResourceId(r);
+        market.price = content.resources[r].basePrice;
+        market.basePrice = content.resources[r].basePrice;
+        market.baseDemandTonnesPerDay = content.resources[r].baseDemandTonnesPerDay;
+        view.markets.push_back(market);
+        view.mineOpexQuotes.push_back(sim::Money::fromUnits(8'000));
+    }
+    view.companies.resize(2);
+    sim::MineView mine;
+    mine.id = sim::MineId(0);
+    mine.plot = sim::PlotId(0);
+    mine.state = state;
+    mine.operationalDay = 100;
+    mine.lastOutputTonnes.assign(content.resources.size(), 0);
+    mine.lastOutputTonnes[kIron.index()] = ironOutput;
+    mine.operatingOpex = sim::Money::fromUnits(8'000);
+    mine.dailyOpex = mine.operatingOpex;
+    mine.dailyMargin = margin;
+    mine.hasEarnings = hasEarnings;
+    view.mines.push_back(mine);
+    return view;
+}
+
+// The run flag of the order the AI gives its one mine: 0 to idle it, 1 to
+// reopen it, nothing when it leaves the mine alone.
+std::optional<std::uint8_t> mineOrder(const sim::Content& content, const sim::CompanyView& view) {
+    sim::HeuristicController ai(content);
+    std::vector<sim::Command> out;
+    ai.decide(view, out);
+    std::optional<std::uint8_t> order;
+    for (const sim::Command& command : out) {
+        if (const auto* set = std::get_if<sim::SetMineState>(&command)) {
+            REQUIRE_FALSE(order.has_value());
+            order = set->operate;
+        }
+    }
+    return order;
+}
+
+}  // namespace
+
+TEST_CASE("The AI idles a mine on the view's margin, not on its own sums", "[ai][spec008]") {
+    const sim::Content content = test::makeContent();
+    const sim::Money cent = sim::Money::fromCents(1);
+    // 400 t of iron at $60 would look like $24,000 against $8,000, but the
+    // sim says the mine loses money: it is idled.
+    CHECK(mineOrder(content, mineOwnerView(content, sim::MineState::Operating,
+                                           sim::Money::zero() - cent, true, 400)) == 0);
+    // No output on record, but the sim says it earns: it keeps running.
+    CHECK_FALSE(mineOrder(content, mineOwnerView(content, sim::MineState::Operating, cent, true, 0))
+                    .has_value());
+    CHECK_FALSE(mineOrder(content, mineOwnerView(content, sim::MineState::Operating,
+                                                 sim::Money::zero(), true, 0))
+                    .has_value());
+}
+
+TEST_CASE("The AI idles a running mine that has produced nothing", "[ai][spec008]") {
+    // Past the grace period with no earnings to show (an empty plot, or ore
+    // the company cannot dig yet): the mine only costs money.
+    const sim::Content content = test::makeContent();
+    CHECK(mineOrder(content, mineOwnerView(content, sim::MineState::Operating, sim::Money::zero(),
+                                           false, 0)) == 0);
+    // Still inside the grace period it is left alone.
+    sim::CompanyView young =
+        mineOwnerView(content, sim::MineState::Operating, sim::Money::zero(), false, 0);
+    young.mines[0].operationalDay = young.day;
+    CHECK_FALSE(mineOrder(content, young).has_value());
+}
+
+TEST_CASE("The AI reopens a mine when the view's margin clears its own cost by the knob",
+          "[ai][spec008]") {
+    // Reopen at revenue of 1.25 x cost: a margin of a quarter of the cost of
+    // running this mine, 2,000 on 8,000.
+    const sim::Content content = test::makeContent();
+    const sim::Money threshold = sim::Money::fromUnits(2'000);
+    const sim::Money cent = sim::Money::fromCents(1);
+    CHECK(mineOrder(content,
+                    mineOwnerView(content, sim::MineState::Mothballed, threshold, true, 0)) == 1);
+    CHECK_FALSE(mineOrder(content, mineOwnerView(content, sim::MineState::Mothballed,
+                                                 threshold - cent, true, 400))
+                    .has_value());
+
+    // The cost is this mine's, not the company-wide quote: a dearer mine
+    // needs a quarter of 20,000.
+    sim::CompanyView dear =
+        mineOwnerView(content, sim::MineState::Mothballed, sim::Money::fromUnits(4'999), true, 0);
+    dear.mines[0].operatingOpex = sim::Money::fromUnits(20'000);
+    CHECK_FALSE(mineOrder(content, dear).has_value());
+    dear.mines[0].dailyMargin = sim::Money::fromUnits(5'000);
+    CHECK(mineOrder(content, dear) == 1);
+
+    // A mothballed mine with no earnings figure stays shut.
+    CHECK_FALSE(mineOrder(content, mineOwnerView(content, sim::MineState::Mothballed,
+                                                 sim::Money::fromUnits(50'000), false, 0))
+                    .has_value());
+}
+
+TEST_CASE("The AI values a prospect at the running cost of the ores its survey reports",
+          "[ai][spec008]") {
+    // 200,000 t of iron, worth buying at 8,000 a day (see the test above).
+    sim::Content content = test::makeContent();
+    content.ai.recoverableShare = sim::Fixed::one();
+    content.ai.firstMineRecoverableShare = sim::Fixed::one();
+    content.ai.requiredReturn = sim::Fixed::one();
+    content.ai.firstMineRequiredReturn = sim::Fixed::one();
+    constexpr std::int64_t kTonnes = 200'000;
+    const sim::Money dear = sim::Money::fromUnits(30'000);
+    REQUIRE(bids(content, prospectView(content, kTonnes, false)));
+
+    // Iron mines cost more than 400 t of iron fetches: not worth buying.
+    sim::CompanyView dearIron = prospectView(content, kTonnes, false);
+    dearIron.mineOpexQuotes[kIron.index()] = dear;
+    CHECK_FALSE(bids(content, dearIron));
+
+    // An ore the survey does not report costs this mine nothing.
+    sim::CompanyView dearCopper = prospectView(content, kTonnes, false);
+    dearCopper.mineOpexQuotes[kCopper.index()] = dear;
+    CHECK(bids(content, dearCopper));
+
+    // Nor does an ore it reports but the company cannot dig.
+    sim::CompanyView lockedLithium = prospectView(content, kTonnes, false);
+    lockedLithium.mineOpexQuotes[kLithium.index()] = dear;
+    lockedLithium.surveys[0].estimates.push_back(
+        {kLithium, 1'000, sim::Fixed::fromRatio(1, 2), false});
+    CHECK(bids(content, lockedLithium));
+
+    // A survey reporting two ores is costed at the dearer of them.
+    sim::CompanyView both = prospectView(content, kTonnes, false);
+    both.mineOpexQuotes[kCopper.index()] = dear;
+    both.surveys[0].estimates.push_back({kCopper, 60, sim::Fixed::fromRatio(1, 2), false});
+    CHECK_FALSE(bids(content, both));
 }

@@ -15,7 +15,7 @@ namespace {
 
 constexpr std::array<std::string_view, kPauseOnCount> kKeys = {
     "insolvency",       "bankrupt",           "auction_won", "auction_lost",      "survey_complete",
-    "mine_operational", "mine_found_nothing", "idle_mine",   "research_complete",
+    "mine_operational", "mine_found_nothing", "idle_mine",   "research_complete", "mine_losing",
 };
 
 std::string_view trim(std::string_view text) {
@@ -64,6 +64,9 @@ std::optional<PauseOn> AutoPause::reasonFor(const sim::Notice& notice, sim::Comp
             return PauseOn::IdleMine;
         case K::ResearchComplete:
             return notice.company == player ? std::optional<PauseOn>(PauseOn::ResearchComplete)
+                                            : std::nullopt;
+        case K::MineLosingMoney:
+            return notice.company == player ? std::optional<PauseOn>(PauseOn::MineLosing)
                                             : std::nullopt;
         default:
             return std::nullopt;

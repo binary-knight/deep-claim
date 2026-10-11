@@ -336,6 +336,65 @@ std::string remainingText(const sim::Content& content, const sim::MineView& mine
                 {{"tonnes", formatTonnes(tonnes)}, {"days", std::to_string(days)}});
 }
 
+// "+$12.3k" or "-$2.1k": a gain says so as plainly as a loss does.
+std::string signedMoney(sim::Money amount) {
+    return (amount >= sim::Money::zero() ? "+" : "") + formatMoney(amount);
+}
+
+}  // namespace
+
+std::string exactPrice(sim::Money amount) {
+    // exactMoney is "-1430.00": the sign, the dollars, a point and two cents.
+    std::string digits = exactMoney(amount);
+    const bool negative = digits.starts_with('-');
+    if (negative) {
+        digits.erase(0, 1);
+    }
+    constexpr std::size_t kCentsAndPoint = 3;
+    constexpr std::size_t kGroup = 3;
+    for (std::size_t at = digits.size() - kCentsAndPoint; at > kGroup; at -= kGroup) {
+        digits.insert(at - kGroup, ",");
+    }
+    return (negative ? "-$" : "$") + digits;
+}
+
+namespace {
+
+// What a mine earns a day and the price at which that is nothing (spec 008),
+// as the sim worked them out for the view: formatted here, never recomputed.
+// A mothballed mine leads with what it costs to keep, written as the loss it
+// is, and then says what it would earn if reopened today.
+MineFigures mineFigures(const sim::Content& content, const sim::MineView& mine) {
+    MineFigures figures;
+    if (mine.state == sim::MineState::Depleted || mine.state == sim::MineState::Closed) {
+        return figures;  // nothing left to earn: the row already says why
+    }
+    figures.shown = true;
+    const auto perDay = [&](sim::Money amount) {
+        return text(content, "ui.mine_margin", {{"amount", signedMoney(amount)}});
+    };
+    sim::Money shownFirst = mine.dailyMargin;
+    if (mine.state == sim::MineState::Mothballed) {
+        figures.mothballed = true;
+        shownFirst = saturatingSub(sim::Money::zero(), mine.dailyOpex);
+        if (mine.hasEarnings) {
+            figures.reopen = perDay(mine.dailyMargin);
+            figures.reopen_loss = mine.dailyMargin < sim::Money::zero();
+        }
+    } else if (!mine.hasEarnings) {
+        figures.earns = text(content, "ui.mine_no_figure");
+        return figures;
+    }
+    figures.earns = perDay(shownFirst);
+    figures.loss = shownFirst < sim::Money::zero();
+    if (mine.hasEarnings) {
+        figures.break_even =
+            text(content, "ui.mine_break_even", {{"amount", exactPrice(mine.breakEvenPrice)}});
+        figures.note = text(content, "ui.mine_margin_note");
+    }
+    return figures;
+}
+
 std::string formatPercent(sim::Fixed ratio) {
     return std::to_string(ratio.raw() / (sim::Fixed::kScale / 100)) + "%";
 }
@@ -529,6 +588,12 @@ void fillPending(const Session& session, const Orders& orders, UiModel& model) {
     model.ui_cancel = text(content, "ui.cancel");
     model.ui_cancel_all = text(content, "ui.cancel_all");
     model.ui_not_covered = text(content, "ui.pending_not_covered");
+    model.ui_mine_loss = text(content, "ui.mine_loss");
+    model.ui_mine_if_reopened = text(content, "ui.mine_if_reopened");
+    model.ui_mine_earns = text(content, "ui.mine_earns");
+    model.ui_mine_loses = text(content, "ui.mine_loses");
+    model.ui_mine_mothballed = text(content, "ui.mine_mothballed");
+    model.ui_mine_if_reopened_key = text(content, "ui.mine_if_reopened_key");
 }
 
 // ---- header and strip ----
@@ -831,6 +896,7 @@ OwnedRow makeOwnedRow(const sim::Content& content, const sim::CompanyView& view,
     row.mine_class = mineStateClass(mine->state);
     row.output = mine->state == sim::MineState::Operating ? outputText(content, *mine) : "—";
     row.remaining = remainingText(content, *mine, view.day);
+    row.figures = mineFigures(content, *mine);
     row.mine_operating = mine->state == sim::MineState::Operating;
     row.can_toggle = !view.bankrupt && (mine->state == sim::MineState::Operating ||
                                         mine->state == sim::MineState::Mothballed);
@@ -1222,6 +1288,10 @@ void fillPanelActions(const sim::Content& content, const sim::CompanyView& view,
     if (plot.mine) {
         const sim::MinePublicView& mine = *plot.mine;
         panel.mine_index = static_cast<int>(mine.id.value());
+        // Only the player's own mines are in view.mines: a rival's shows nothing.
+        if (const sim::MineView* own = panel.owned ? findMine(view, mine.id) : nullptr) {
+            panel.figures = mineFigures(content, *own);
+        }
         panel.mine_operating = mine.state == sim::MineState::Operating;
         panel.can_toggle_mine =
             panel.owned && !view.bankrupt &&
@@ -1531,6 +1601,7 @@ bool noticeIsWarning(sim::NoticeKind kind) {
         case sim::NoticeKind::IdleMineWarning:
         case sim::NoticeKind::MineFoundNothing:
         case sim::NoticeKind::MineRunningLow:
+        case sim::NoticeKind::MineLosingMoney:
             return true;
         default:
             return false;

@@ -154,6 +154,14 @@ struct Mine {
     // (spec 004): the warning is given once per survey, whatever the mine
     // does afterwards. Invalid until the first warning.
     SurveyId lowWarnedSurvey;
+    // Consecutive days the mine has run at a loss (spec 008): operating, with
+    // output to price, and a negative margin at the price the mines step saw.
+    // Zero after a day at break-even or better and while it is not operating.
+    std::uint32_t lossDays = 0;
+    // Set when the losing-mine notice is raised for this run of losing days,
+    // so it is said once; cleared by a day of strictly positive margin or
+    // when the mine stops operating (a break-even day leaves it set).
+    std::uint8_t lossAnnounced = 0;
 };
 
 // One research project. A company runs at most one at a time; the cost is

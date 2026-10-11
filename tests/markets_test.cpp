@@ -215,3 +215,121 @@ TEST_CASE("Demand growth lifts prices slowly in an otherwise calm world", "[mark
     CHECK(price > base * 110 / 100);
     CHECK(price < base * 115 / 100);
 }
+
+namespace {
+
+// One number for every price a run produced, in order.
+std::uint64_t foldPriceHistories(const sim::Simulation& simulation) {
+    std::uint64_t folded = 14695981039346656037ULL;
+    for (const sim::Market& market : simulation.state().markets) {
+        for (const sim::Money price : market.priceHistory) {
+            folded = (folded ^ static_cast<std::uint64_t>(price.cents())) * 1099511628211ULL;
+        }
+    }
+    return folded;
+}
+
+// Iron's price after a company has sold a mine's worth every day for long
+// enough to settle: demand over supply is 800 / 1600.
+sim::Money settledIronPrice(const sim::Content& content) {
+    sim::Simulation simulation(content, 1, test::setup());
+    grantOre(simulation, content, kPlayer, kIron, 100'000);
+    for (int day = 0; day < 120; ++day) {
+        simulation.submit(sim::SellOre{kPlayer, kIron, 800});
+        simulation.tick();
+    }
+    return simulation.state().markets[0].price;
+}
+
+sim::Money ironPriceAfter(const sim::Content& content, sim::Day days) {
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(days);
+    return simulation.state().markets[0].price;
+}
+
+}  // namespace
+
+TEST_CASE("Prices over five years are unchanged at the shipped clamp values", "[markets]") {
+    // Recorded before spec 008 moved the two clamps from sim/src/markets.cpp
+    // into content.balance: reading them from data must not move one price.
+    constexpr std::uint64_t kRecorded = 0x4a415465b0d90deaULL;
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 7, test::setup());
+    simulation.tick(sim::kDaysPerYear * 5);
+    CHECK(foldPriceHistories(simulation) == kRecorded);
+}
+
+TEST_CASE("The demand-over-supply clamp comes from content", "[markets]") {
+    const sim::Content content = calmContent();
+    const sim::Money base = content.resources[0].basePrice;
+
+    // A ratio of 0.5 is inside the shipped clamp; a floor of 0.75 holds it up.
+    sim::Content floored = content;
+    floored.balance.marketRatioMin = sim::Fixed::fromRatio(3, 4);
+    const sim::Money settled = settledIronPrice(content);
+    const sim::Money held = settledIronPrice(floored);
+    CHECK(held > settled);
+    // 0.75^0.6 = 0.84 of base.
+    CHECK(held > base.scaled(sim::Fixed::fromRatio(82, 100)));
+    CHECK(held < base.scaled(sim::Fixed::fromRatio(86, 100)));
+
+    // Five years of 4% growth lift the ratio to 1.217; a ceiling of 1 holds
+    // the price at base.
+    sim::Content growing = content;
+    growing.balance.demandGrowthPerYear = sim::Fixed::fromRatio(4, 100);
+    sim::Content capped = growing;
+    capped.balance.marketRatioMax = sim::Fixed::one();
+    CHECK(ironPriceAfter(growing, sim::kDaysPerYear * 5) > base);
+    CHECK(ironPriceAfter(capped, sim::kDaysPerYear * 5) == base);
+}
+
+TEST_CASE("The demand-factor clamp comes from content", "[markets]") {
+    const sim::Content content = calmContent();
+    const sim::Money base = content.resources[0].basePrice;
+    CHECK(ironPriceAfter(content, 200) == base);
+
+    // A calm world's factor is 1: a floor of 2 doubles demand (2^0.6 = 1.52
+    // of base), a ceiling of 0.5 halves it (0.5^0.6 = 0.66 of base).
+    sim::Content lifted = content;
+    lifted.balance.demandFactorMin = sim::Fixed::fromInt(2);
+    const sim::Money high = ironPriceAfter(lifted, 200);
+    CHECK(high > base.scaled(sim::Fixed::fromRatio(149, 100)));
+    CHECK(high < base.scaled(sim::Fixed::fromRatio(154, 100)));
+
+    sim::Content pressed = content;
+    pressed.balance.demandFactorMax = sim::Fixed::fromRatio(1, 2);
+    const sim::Money low = ironPriceAfter(pressed, 200);
+    CHECK(low > base.scaled(sim::Fixed::fromRatio(64, 100)));
+    CHECK(low < base.scaled(sim::Fixed::fromRatio(68, 100)));
+}
+
+namespace {
+
+// The fixture with one spec 008 value changed, once per value.
+std::vector<sim::Content> spec008Variants(const sim::Content& content) {
+    std::vector<sim::Content> variants(6, content);
+    variants[0].resources[1].mineOpexPerDay = sim::Money::fromUnits(8'001);
+    variants[1].balance.marketRatioMin = sim::Fixed::fromRatio(1, 4);
+    variants[2].balance.marketRatioMax = sim::Fixed::fromInt(4);
+    variants[3].balance.demandFactorMin = sim::Fixed::fromRatio(1, 50);
+    variants[4].balance.demandFactorMax = sim::Fixed::fromInt(500);
+    variants[5].balance.mineLossNoticeDays = 6;
+    return variants;
+}
+
+}  // namespace
+
+TEST_CASE("Spec 008 content values are part of the content fingerprint", "[markets][content]") {
+    // A save or trace made with one set of running costs, clamps or loss
+    // threshold must not open against another.
+    const sim::Content content = test::makeContent();
+    const std::uint64_t original = sim::hashContent(content);
+    const sim::Simulation saved(content, 3, test::setup());
+
+    for (const sim::Content& changed : spec008Variants(content)) {
+        sim::Simulation other(changed, 3, test::setup());
+        const bool refused = !other.load(saved.save());
+        CHECK(sim::hashContent(changed) != original);
+        CHECK(refused);
+    }
+}

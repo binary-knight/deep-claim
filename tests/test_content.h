@@ -25,6 +25,7 @@ inline sim::Content makeContent() {
     iron.elasticity = sim::Fixed::fromRatio(6, 10);
     iron.volatility = sim::Fixed::fromRatio(2, 100);
     iron.storageCostPerTonneMonth = sim::Money::fromCents(150);
+    iron.mineOpexPerDay = sim::Money::fromUnits(8'000);
     c.resources.push_back(iron);
 
     sim::ResourceDef copper;
@@ -36,6 +37,7 @@ inline sim::Content makeContent() {
     copper.elasticity = sim::Fixed::fromRatio(8, 10);
     copper.volatility = sim::Fixed::fromRatio(3, 100);
     copper.storageCostPerTonneMonth = sim::Money::fromCents(250);
+    copper.mineOpexPerDay = sim::Money::fromUnits(8'000);
     c.resources.push_back(copper);
 
     sim::ResourceDef lithium;
@@ -47,6 +49,7 @@ inline sim::Content makeContent() {
     lithium.elasticity = sim::Fixed::fromRatio(11, 10);
     lithium.volatility = sim::Fixed::fromRatio(5, 100);
     lithium.storageCostPerTonneMonth = sim::Money::fromUnits(8);
+    lithium.mineOpexPerDay = sim::Money::fromUnits(8'000);
     lithium.unlockedBy = sim::TechId(1);
     c.resources.push_back(lithium);
 
@@ -117,7 +120,6 @@ inline sim::Content makeContent() {
     c.balance.surveyBaseNoise = sim::Fixed::fromRatio(1, 2);
     c.balance.mineCapexPerHectare = sim::Money::fromUnits(4'000);
     c.balance.mineBuildDays = 180;
-    c.balance.mineOpexPerDay = sim::Money::fromUnits(8'000);
     c.balance.mineMothballOpexMult = sim::Fixed::fromRatio(3, 20);
     c.balance.auctionWindowDays = 45;
     c.balance.plotsListedAtStart = 3;
@@ -136,6 +138,13 @@ inline sim::Content makeContent() {
     c.balance.priceFloorMult = sim::Fixed::fromRatio(1, 10);
     c.balance.priceCapMult = sim::Fixed::fromInt(10);
     c.balance.demandGrowthPerYear = sim::Fixed::fromRatio(4, 100);
+    // Spec 008: the clamps as they stood in sim/src/markets.cpp, and the
+    // per-ore running costs above equal to the single figure they replace.
+    c.balance.marketRatioMin = sim::Fixed::fromRatio(1, 5);
+    c.balance.marketRatioMax = sim::Fixed::fromInt(5);
+    c.balance.demandFactorMin = sim::Fixed::fromRatio(1, 100);
+    c.balance.demandFactorMax = sim::Fixed::fromInt(1000);
+    c.balance.mineLossNoticeDays = 5;
 
     // The competitor's knobs as they stood in code before spec 006 moved
     // them to data/ai.json; tests that tune the AI change copies of these.

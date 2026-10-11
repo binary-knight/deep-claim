@@ -28,6 +28,7 @@ enum class PauseOn : std::uint8_t {
     MineFoundNothing,  // MineFoundNothing
     IdleMine,          // IdleMineWarning
     ResearchComplete,  // ResearchComplete (the player's own lab)
+    MineLosing,        // MineLosingMoney (the player's own mine)
     kCount,
 };
 
@@ -42,6 +43,7 @@ struct AutoPause {
     // The defaults: everything on except mine operational. Survey and
     // research complete joined the "on" set with spec 004: a report that
     // lands unseen or a lab left idle costs the player more than a stop.
+    // A mine losing money (spec 008) is on too: every day unseen is paid for.
     [[nodiscard]] static AutoPause defaults();
 
     [[nodiscard]] bool isEnabled(PauseOn reason) const {

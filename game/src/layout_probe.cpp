@@ -17,7 +17,11 @@
 // and a research order through the real buttons: it exits non-zero when
 // the pending chips, the Committed and Available figures, the waiting line
 // or Cancel are wrong, and lays the turn out with the waiting-orders list
-// open and closed, before and after one order is cancelled.
+// open and closed, before and after one order is cancelled. Then (spec 008)
+// a second app runs on the probe's own copy of the content, in which mining
+// costs far more than ore fetches: it plays the fixed game to a mine that
+// loses money and exits non-zero when the mine's row, the plot's panel, the
+// log line or the clock are wrong, with the stop rule on and with it off.
 // Not part of the shipped game.
 #include "sim/commands.h"
 #include "sim/view.h"
@@ -607,19 +611,21 @@ int probeScenarios(Rml::Context& context, game::App& app, LoggingSystem& system,
 
 constexpr int kPendingFailure = 6;
 
-// Collects what is wrong with the pending state, printing each failure.
+// Collects what is wrong with a stage's state, printing each failure under
+// the stage's label.
 class Checks {
 public:
+    explicit Checks(std::string_view label = "PENDING") : label_(label) {}
     void expect(bool held, std::string_view what) {
         if (!held) {
-            std::cout << "PENDING: " << what << '\n';
+            std::cout << label_ << ": " << what << '\n';
             ok_ = false;
         }
     }
     template <typename T>
     void same(std::string_view what, const T& actual, const T& expected) {
         if (!(actual == expected)) {
-            std::cout << std::format("PENDING: {}: \"{}\", expected \"{}\"\n", what, actual,
+            std::cout << std::format("{}: {}: \"{}\", expected \"{}\"\n", label_, what, actual,
                                      expected);
             ok_ = false;
         }
@@ -627,6 +633,7 @@ public:
     [[nodiscard]] bool ok() const { return ok_; }
 
 private:
+    std::string label_;
     bool ok_ = true;
 };
 
@@ -1116,6 +1123,519 @@ int probePendingOrders(Rml::Context& context, game::App& app, LoggingSystem& sys
     return laidOut ? 0 : kLayoutFailure;
 }
 
+// ---- a mine losing money (spec 008) ----
+
+constexpr int kLosingFailure = 7;
+
+// What a day's mining costs, for every ore, in the losing stage's own copy
+// of the content. The shipped figures are 18,000 to 35,000; at this one a
+// mine loses a little over $12M a day whatever it digs, so the fixed seed
+// reaches a loss without a market having to fall first, and the figure on
+// screen is the widest the client writes below $100M ("-$12.34M/day", 12
+// characters), which is the one the Output column has least room for.
+constexpr std::int64_t kLosingOpexDollars = 12'400'000;
+constexpr std::size_t kWidestFigure = 12;
+constexpr float kSpillTolerance = 0.5F;  // as `inspect` allows an edge
+constexpr float kNothingMeasured = -10000.0F;
+// Days due in one second at the fastest speed (game::daysPerSecond).
+constexpr sim::Day kDaysDue = 20;
+
+// The losing mine, and what the clock did when its notice arrived.
+struct LosingMine {
+    sim::PlotId plot;
+    sim::MineId mine;
+    sim::Day opened = 0;      // the day the clock was started on
+    sim::Day stopped = 0;     // the day after one second at the fastest speed
+    sim::Day noticeDay = 0;   // the log's day for the notice
+    std::string noticeText;   // its line in the log
+    std::size_t notices = 0;  // losing-mine lines in the log
+    game::Speed speed = game::Speed::Paused;
+    std::string status;  // the status line after that second
+};
+
+// The shipped content with mining made ruinous. The app and its session read
+// this copy; the shipped data and the sim's rules are untouched.
+sim::Content losingContent(const sim::Content& shipped) {
+    sim::Content content = shipped;
+    for (sim::ResourceDef& ore : content.resources) {
+        ore.mineOpexPerDay = sim::Money::fromUnits(kLosingOpexDollars);
+    }
+    return content;
+}
+
+const sim::MineView* mineOn(const sim::CompanyView& view, sim::PlotId plot) {
+    const auto found = std::ranges::find_if(
+        view.mines, [&](const sim::MineView& mine) { return mine.plot == plot; });
+    return found == view.mines.end() ? nullptr : &*found;
+}
+
+std::size_t countLosingNotices(const game::Session& session) {
+    return static_cast<std::size_t>(
+        std::ranges::count_if(session.log(), [](const game::LogEntry& entry) {
+            return entry.notice.kind == sim::NoticeKind::MineLosingMoney;
+        }));
+}
+
+// Starts the fixed game on the losing content and plays it, with no stop
+// rule, to the first day the player's mine has a day's output on record:
+// the cheapest plot bought at half again its ask and built on. Then runs
+// the clock for one second at the fastest speed under `rules`, through the
+// app as the window's frame loop does. Returns false with a reason when the
+// fixed seed no longer gets a mine and its notice.
+bool playLosingMine(game::App& app, const game::AutoPause& rules, LosingMine& losing) {
+    const auto fail = [&](std::string_view what) {
+        std::cout << std::format("SCENARIO (losing mine): {} ({})\n", what, app.model().day);
+        return false;
+    };
+    app.startGame(kScenarioSeed);
+    game::Session& session = app.session();
+    game::AutoPause never;
+    never.enabled.fill(false);
+    session.setAutoPause(never);
+    losing.plot = cheapestListed(session.view());
+    if (!losing.plot.valid()) {
+        return fail("no plot is listed on day 0");
+    }
+    const sim::Money ask = session.view().plots[losing.plot.index()].askPrice;
+    session.submit(sim::BidOnPlot{{}, losing.plot, ask + ask / 2});
+    bool building = false;
+    const sim::MineView* mine = nullptr;
+    for (int day = 0; day < kScenarioMaxDays; ++day) {
+        session.stepOneDay();
+        if (!building &&
+            session.view().plots[losing.plot.index()].owner == game::Session::kPlayer) {
+            session.submit(sim::BuildMine{{}, losing.plot});
+            building = true;
+        }
+        mine = mineOn(session.view(), losing.plot);
+        if (mine != nullptr && mine->state == sim::MineState::Operating && mine->hasEarnings) {
+            break;
+        }
+    }
+    if (mine == nullptr || !mine->hasEarnings) {
+        return fail("the player has no mine with a day's output");
+    }
+    if (countLosingNotices(session) != 0 || session.gameOver()) {
+        return fail("the notice came, or the company fell, before the clock was started");
+    }
+    losing.mine = mine->id;
+    losing.opened = session.day();
+    session.setAutoPause(rules);
+    session.setSpeed(game::Speed::Fastest);
+    app.update(1.0);
+    app.refreshNow();
+    app.selectPlot(static_cast<int>(losing.plot.value()));
+    losing.stopped = session.day();
+    losing.speed = session.speed();
+    losing.status = app.model().status_line;
+    losing.notices = countLosingNotices(session);
+    for (const game::LogEntry& entry : session.log()) {
+        if (entry.notice.kind == sim::NoticeKind::MineLosingMoney) {
+            losing.noticeDay = entry.day;
+            losing.noticeText = entry.text;
+        }
+    }
+    if (losing.notices == 0 || session.gameOver()) {
+        return fail(std::format("no losing-mine notice within {} days of the mine opening",
+                                session.day() - losing.opened));
+    }
+    return true;
+}
+
+// What the mine's row and panel must read, formatted from the sim's view the
+// way the client formats it (ui_model.cpp mineFigures; for a loss its signed
+// money is formatMoney's own minus sign, and the break-even price is exact
+// to the cent, game::exactPrice), with the catalogue's labels for them.
+struct LosingFigures {
+    std::string plot;       // "#18"
+    std::string earns;      // "-$12.36M/day"
+    std::string breakEven;  // "Break-even $31,000.00/t"
+    std::string note;       // "at today's price"
+    std::string lossWord;   // "loss", beside the row's figure
+    std::string losesKey;   // "Loses", the panel's key for an operating mine's loss
+    // Every key the panel can put on a mine's earnings lines: Loses, Earns,
+    // Mothballed, If reopened.
+    std::array<std::string, 4> panelKeys;
+};
+
+// The sim's figures for the mine: a loss, and a break-even price above what
+// its principal ore fetches today.
+LosingFigures simFigures(const game::Session& session, const LosingMine& losing, Checks& checks) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    LosingFigures figures;
+    figures.plot = std::format("#{}", losing.plot.value() + 1);
+    const sim::MineView* mine = mineOn(view, losing.plot);
+    if (mine == nullptr || mine->state != sim::MineState::Operating || !mine->hasEarnings) {
+        checks.expect(false, "the mine is no longer operating with earnings to show");
+        return figures;
+    }
+    // The principal ore is the one earning most (spec 008, BR-005).
+    std::size_t principal = 0;
+    sim::Money most = sim::Money::zero();
+    for (std::size_t ore = 0; ore < view.markets.size(); ++ore) {
+        const sim::Money earned = view.markets[ore].price * mine->lastOutputTonnes.at(ore);
+        if (earned > most) {
+            principal = ore;
+            most = earned;
+        }
+    }
+    const sim::Money price = view.markets[principal].price;
+    checks.expect(
+        mine->dailyMargin < sim::Money::zero(),
+        std::format("the sim's margin is {}, not a loss", game::formatMoney(mine->dailyMargin)));
+    checks.expect(mine->breakEvenPrice > price,
+                  std::format("the sim's break-even {} is not above {}'s price {}",
+                              game::formatMoney(mine->breakEvenPrice),
+                              content.resources[principal].name, game::formatMoney(price)));
+    figures.earns =
+        game::text(content, "ui.mine_margin", {{"amount", game::formatMoney(mine->dailyMargin)}});
+    figures.breakEven = game::text(content, "ui.mine_break_even",
+                                   {{"amount", game::exactPrice(mine->breakEvenPrice)}});
+    figures.note = game::text(content, "ui.mine_margin_note");
+    figures.lossWord = game::text(content, "ui.mine_loss");
+    figures.losesKey = game::text(content, "ui.mine_loses");
+    figures.panelKeys = {figures.losesKey, game::text(content, "ui.mine_earns"),
+                         game::text(content, "ui.mine_mothballed"),
+                         game::text(content, "ui.mine_if_reopened_key")};
+    std::cout << std::format("  sim: margin {} a day ({} cents), break-even {} against {} at {}\n",
+                             game::formatMoney(mine->dailyMargin), mine->dailyMargin.cents(),
+                             game::exactPrice(mine->breakEvenPrice),
+                             content.resources[principal].name, game::formatMoney(price));
+    return figures;
+}
+
+// A break-even price is a threshold the player sells against, so it is
+// written out in full (Codex finding 5 on spec 008: a nickel mine's $1,430
+// read "$1.4k/t", though selling at $1,400 loses money).
+void checkExactPrices(Checks& checks) {
+    const auto shown = [&](std::int64_t cents, const std::string& expected) {
+        checks.same(std::format("exact price of {} cents", cents),
+                    game::exactPrice(sim::Money::fromCents(cents)), expected);
+    };
+    shown(143'000, "$1,430.00");
+    shown(4'120, "$41.20");
+    shown(5, "$0.05");
+    shown(99'999, "$999.99");
+    shown(100'000, "$1,000.00");
+    shown(3'100'045, "$31,000.45");
+    shown(123'456'789, "$1,234,567.89");
+    shown(-143'000, "-$1,430.00");
+}
+
+void checkModelFigures(std::string_view where, const game::MineFigures& shown,
+                       const LosingFigures& expected, Checks& checks) {
+    checks.expect(shown.shown && shown.loss && !shown.mothballed,
+                  std::format("{}: the figure is not shown as an operating mine's loss", where));
+    checks.same(std::format("{}: daily figure", where), shown.earns, expected.earns);
+    checks.same(std::format("{}: break-even", where), shown.break_even, expected.breakEven);
+    checks.same(std::format("{}: note", where), shown.note, expected.note);
+    checks.same(std::format("{}: if-reopened figure", where), shown.reopen, std::string());
+}
+
+// The visible owned-plots rows for this plot: its name cell beside an output
+// cell (the sales record names plots too, without one).
+std::vector<Rml::Element*> ownedRows(Rml::Element* root, const std::string& plot) {
+    std::vector<Rml::Element*> rows = visibleElements(root, "tr", "row");
+    std::erase_if(rows, [&](Rml::Element* row) {
+        return visibleElements(row, "td", "name", plot).empty() ||
+               visibleElements(row, "td", "figure").empty();
+    });
+    return rows;
+}
+
+// The widest word under `e`: text breaks at white space only, so in a cell
+// that wraps this is what must fit. `inspect` cannot see it: it measures
+// whole lines, and only where the text may not wrap.
+void widestWord(Rml::Element* e, float& widest, std::string& word) {
+    for (int i = 0; i < e->GetNumChildren(); ++i) {
+        Rml::Element* child = e->GetChild(i);
+        if (!child->IsVisible(true)) {
+            continue;
+        }
+        auto* text = rmlui_dynamic_cast<Rml::ElementText*>(child);
+        if (text == nullptr) {
+            widestWord(child, widest, word);
+            continue;
+        }
+        std::string_view rest = text->GetText();
+        while (!rest.empty()) {
+            const std::size_t end = std::min(rest.find_first_of(" \t\r\n"), rest.size());
+            const std::string candidate(rest.substr(0, end));
+            const auto width =
+                static_cast<float>(Rml::ElementUtilities::GetStringWidth(e, candidate));
+            if (width > widest) {
+                widest = width;
+                word = candidate;
+            }
+            rest.remove_prefix(std::min(end + 1, rest.size()));
+        }
+    }
+}
+
+// The mine's row as the player reads it, on the tab showing: the sim's loss
+// with the word "loss" beside it in the warning colour, and the break-even
+// price under it, exact to the cent. "loss" and the panel's "Loses" come
+// from the catalogue through the UI model (ui.mine_loss, ui.mine_loses), so
+// they are read from the catalogue here. Returns how far the row's widest word runs past its Output
+// cell (zero or less when it fits), which is reported, not judged, here.
+float checkLosingRow(Rml::Context& context, std::string_view where, const LosingFigures& expected,
+                     Checks& checks) {
+    settle(context);
+    Rml::Element* content = context.GetDocument(0)->GetElementById("content");
+    const std::vector<Rml::Element*> rows = ownedRows(content, expected.plot);
+    checks.same(std::format("{}: rows for plot {}", where, expected.plot), rows.size(),
+                std::size_t{1});
+    if (rows.size() != 1) {
+        return kNothingMeasured;
+    }
+    Rml::Element* cell = visibleElements(rows.front(), "td", "figure").front();
+    const std::vector<Rml::Element*> subs = visibleElements(cell, "span", "sub");
+    checks.same(std::format("{}: lines under the output", where), subs.size(), std::size_t{2});
+    if (subs.size() == 2) {
+        checks.same(std::format("{}: daily figure on screen", where),
+                    squeezed(visibleText(subs[0])), squeezed(expected.earns + expected.lossWord));
+        checks.expect(subs[0]->IsClassSet("warn"),
+                      std::format("{}: the loss is not in the warning colour", where));
+        checks.same(std::format("{}: break-even on screen", where), visibleText(subs[1]),
+                    expected.breakEven);
+        checks.expect(!subs[1]->IsClassSet("warn"),
+                      std::format("{}: the break-even price is in the warning colour", where));
+        // The exact price is the longest thing the break-even line writes;
+        // it is inside the cell-wide measure below, and reported on its own.
+        float priceWidth = 0.0F;
+        std::string price;
+        widestWord(subs[1], priceWidth, price);
+        std::cout << std::format("    {}: break-even word \"{}\" {:.1f}dp\n", where, price,
+                                 priceWidth);
+    }
+    const float room = cell->GetBox().GetSize(Rml::BoxArea::Content).x;
+    float widest = 0.0F;
+    std::string word;
+    widestWord(cell, widest, word);
+    std::cout << std::format(
+        "    {}: Output cell {:.1f}dp ({:.1f}dp with its padding), widest word \"{}\" {:.1f}dp{}\n",
+        where, room, cell->GetBox().GetSize(Rml::BoxArea::Padding).x, word, widest,
+        widest > room + kSpillTolerance ? std::format(": SPILLS by {:.1f}dp", widest - room)
+                                        : std::string());
+    return widest - room;
+}
+
+// The selected plot's panel on the Plots tab: "Loses", the same figure, the
+// note that it is at today's price, and the break-even price.
+void checkLosingPanel(Rml::Context& context, std::string_view where, const LosingFigures& expected,
+                      Checks& checks) {
+    settle(context);
+    Rml::Element* content = context.GetDocument(0)->GetElementById("content");
+    std::vector<Rml::Element*> lines = visibleElements(content, "div", "kv");
+    std::erase_if(lines, [&](Rml::Element* line) {
+        const std::string shown = visibleText(line);
+        return std::ranges::none_of(expected.panelKeys, [&](const std::string& key) {
+            return !key.empty() && shown.starts_with(key);
+        });
+    });
+    checks.same(std::format("{}: earnings lines on the panel", where), lines.size(),
+                std::size_t{1});
+    if (lines.size() != 1) {
+        return;
+    }
+    checks.same(std::format("{}: the panel's earnings line", where),
+                squeezed(visibleText(lines.front())),
+                squeezed(expected.losesKey + expected.earns + expected.note + expected.breakEven));
+    const std::vector<Rml::Element*> figure =
+        visibleElements(lines.front(), "span", "line", expected.earns);
+    checks.expect(figure.size() == 1 && figure.front()->IsClassSet("warn"),
+                  std::format("{}: the panel's loss is not in the warning colour", where));
+}
+
+// The notice's line on the Log tab, shown as a warning: main.rml binds the
+// row's `warning` to the line's "warn" class, which main.rcss colours.
+void checkLosingLogLine(Rml::Context& context, std::string_view where, const LosingMine& losing,
+                        Checks& checks) {
+    settle(context);
+    Rml::Element* content = context.GetDocument(0)->GetElementById("content");
+    std::size_t shown = 0;
+    std::size_t warnings = 0;
+    for (Rml::Element* line : visibleElements(content, "div", "line")) {
+        const std::size_t here = visibleElements(line, "span", "t", losing.noticeText).size();
+        shown += here;
+        warnings += line->IsClassSet("warn") ? here : 0;
+    }
+    checks.same(std::format("{}: the notice's lines on the Log tab", where), shown, std::size_t{1});
+    checks.same(std::format("{}: the notice's lines shown as a warning", where), warnings,
+                std::size_t{1});
+}
+
+// The notice and the clock. With the rule on the clock stopped on the day
+// the notice arrived (it is logged on the day it was raised, and the stop
+// leaves the session on the next day, as in tests/session_test.cpp) and the
+// status line says why; with the rule off every day that was due went by
+// and the clock is running. (The status line is not checked then: the app
+// keeps the last one across the probe's restart of the game.)
+void checkNotice(const game::App& app, const sim::Content& content, const LosingMine& losing,
+                 bool ruleOn, Checks& checks) {
+    const game::UiModel& model = app.model();
+    const std::string plot = "plot #" + std::to_string(losing.plot.value() + 1);
+    checks.same("losing-mine lines in the log", losing.notices, std::size_t{1});
+    checks.expect(losing.noticeText.find(plot) != std::string::npos,
+                  std::format("the notice does not name {}: \"{}\"", plot, losing.noticeText));
+    const auto row = std::ranges::find_if(
+        model.log, [&](const game::LogRow& shown) { return shown.text == losing.noticeText; });
+    checks.expect(row != model.log.end(), "the notice is not among the Log tab's rows");
+    checks.expect(row != model.log.end() && row->warning,
+                  "the notice's row in the log is not a warning");
+    const auto rule = static_cast<std::size_t>(game::PauseOn::MineLosing);
+    checks.expect(
+        model.pause_rows.size() > rule && model.pause_rows[rule].on == ruleOn &&
+            model.pause_rows[rule].label == game::text(content, "ui.pause_on.mine_losing"),
+        "the Stops menu does not show the losing-mine rule as it is set");
+    const std::string paused =
+        game::text(content, "status.paused_by", {{"text", losing.noticeText}});
+    if (ruleOn) {
+        checks.expect(losing.speed == game::Speed::Paused && model.speed == 0,
+                      "the clock is still running with the rule on");
+        checks.same("the day the clock stopped on", losing.stopped, losing.noticeDay + 1);
+        checks.expect(losing.stopped - losing.opened < kDaysDue,
+                      "every day that was due went by with the rule on");
+        checks.same("the status line", losing.status, paused);
+    } else {
+        checks.expect(losing.speed == game::Speed::Fastest && model.speed == 3,
+                      "the clock stopped with the rule off");
+        checks.same("days gone by with the rule off", losing.stopped - losing.opened, kDaysDue);
+        checks.expect(losing.stopped > losing.noticeDay + 1,
+                      "the clock did not run on past the notice");
+    }
+}
+
+// Every tab in both frames with the losing mine's plot selected, and after
+// each of the Dashboard, Plots and Log tabs what it must show. Returns false
+// when a tab fails its layout; `spill` takes the furthest the row's widest
+// word runs past the Output cell, for the caller to judge.
+bool probeLosingFrames(Rml::Context& context, game::App& app, LoggingSystem& system,
+                       const LosingMine& losing, const LosingFigures& expected, const char* label,
+                       Checks& checks, float& spill) {
+    bool ok = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== {}, frame {}x{}{} ==\n", label, frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        for (std::size_t tab = 0; tab < kTabs.size(); ++tab) {
+            const bool passed = probeTab(context, app, system, frame, tab, Popover::None);
+            ok = ok && passed;
+            const std::string where = std::string(kTabs.at(tab)) + ' ' +
+                                      std::to_string(frame.width) + 'x' +
+                                      std::to_string(frame.height);
+            if (tab == 0 || tab == 1) {
+                spill = std::max(spill, checkLosingRow(context, where, expected, checks));
+            }
+            if (tab == 1) {
+                checkLosingPanel(context, where, expected, checks);
+            }
+            if (tab == 5) {
+                checkLosingLogLine(context, where, losing, checks);
+            }
+        }
+    }
+    return ok;
+}
+
+// The same game again with every stop rule off: the same line on the same
+// day, and the clock runs on. Returns false when the seed no longer gets
+// there.
+bool probeRuleOff(game::App& app, const sim::Content& content, const LosingMine& stopped,
+                  Checks& checks) {
+    game::AutoPause never;
+    never.enabled.fill(false);
+    LosingMine ranOn;
+    if (!playLosingMine(app, never, ranOn)) {
+        return false;
+    }
+    std::cout << std::format(
+        "\nlosing mine, rule off: clock {} on day {}, notice logged day {}\n  log: {}\n",
+        ranOn.speed == game::Speed::Paused ? "stopped" : "running", ranOn.stopped, ranOn.noticeDay,
+        ranOn.noticeText);
+    checkNotice(app, content, ranOn, false, checks);
+    checks.same("the notice's day with the rule off", ranOn.noticeDay, stopped.noticeDay);
+    checks.same("the notice's line with the rule off", ranOn.noticeText, stopped.noticeText);
+    return true;
+}
+
+// The losing-mine pass, on an app of its own because an app keeps the
+// content it was made with. First with the stop rule as the only rule on:
+// the notice, the clock, the figures in the model and on screen in both
+// frames, then the same with a mothball order waiting, which widens the
+// tables' action column and leaves the Output column at its narrowest.
+// Then the game again with every rule off.
+int probeLosingMine(Rml::Context& context, game::App& app, LoggingSystem& system,
+                    const sim::Content& content) {
+    Checks checks("LOSING");
+    game::AutoPause rules;
+    rules.enabled.fill(false);
+    checks.expect(game::AutoPause::defaults().isEnabled(game::PauseOn::MineLosing),
+                  "the losing-mine rule is not on by default");
+    rules.set(game::PauseOn::MineLosing, true);
+    LosingMine stopped;
+    if (!playLosingMine(app, rules, stopped)) {
+        return kScenarioFailure;
+    }
+    std::cout << std::format(
+        "\nlosing mine: plot #{} opened day {}; rule on: clock {} on day {}, notice logged day "
+        "{}\n  log: {}\n  status: {}\n",
+        stopped.plot.value() + 1, stopped.opened,
+        stopped.speed == game::Speed::Paused ? "stopped" : "running", stopped.stopped,
+        stopped.noticeDay, stopped.noticeText, stopped.status);
+    checkNotice(app, content, stopped, true, checks);
+    checkExactPrices(checks);
+    const LosingFigures expected = simFigures(app.session(), stopped, checks);
+    if (expected.earns.size() != kWidestFigure) {
+        std::cout << std::format("SCENARIO (losing mine): the figure \"{}\" is not {} characters\n",
+                                 expected.earns, kWidestFigure);
+        return kScenarioFailure;
+    }
+    const auto modelFigures = [&](std::string_view when) {
+        const game::UiModel& model = app.model();
+        const auto row = std::ranges::find_if(model.owned, [&](const game::OwnedRow& owned) {
+            return owned.index == static_cast<int>(stopped.plot.value());
+        });
+        checks.expect(row != model.owned.end(), std::format("{}: the plot has no row", when));
+        if (row != model.owned.end()) {
+            checkModelFigures(std::format("{}, row", when), row->figures, expected, checks);
+        }
+        checkModelFigures(std::format("{}, panel", when), model.panel.figures, expected, checks);
+    };
+    modelFigures("losing");
+    float spill = kNothingMeasured;
+    float spillWaiting = kNothingMeasured;
+    bool laidOut =
+        probeLosingFrames(context, app, system, stopped, expected, "losing mine", checks, spill);
+    // A mothball order waiting: nothing has reached the sim, so the figures stand.
+    app.session().submit(sim::SetMineState{{}, stopped.mine, 0});
+    app.refreshNow();
+    modelFigures("mothball ordered");
+    laidOut = probeLosingFrames(context, app, system, stopped, expected,
+                                "losing mine, mothball ordered", checks, spillWaiting) &&
+              laidOut;
+    // The figure must fit its cell, with a mine order waiting too: that is
+    // where the column is narrowest (the deck frame's Plots tab).
+    std::cout << std::format(
+        "\nknife-edge: \"{}\" ({} characters) runs {:.1f}dp past the Output cell at most, "
+        "{:.1f}dp with a mine order waiting (zero or less fits)\n",
+        expected.earns, expected.earns.size(), spill, spillWaiting);
+    if (std::max(spill, spillWaiting) > kSpillTolerance) {
+        std::cout << "    the figure does not fit the Output cell\n";
+        laidOut = false;
+    }
+    if (!probeRuleOff(app, content, stopped, checks)) {
+        return kScenarioFailure;
+    }
+    if (!checks.ok()) {
+        return kLosingFailure;
+    }
+    return laidOut ? 0 : kLayoutFailure;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1170,8 +1690,25 @@ int main(int argc, char** argv) {
             code != 0) {
             exitCode = code;
         }
-        std::cout << (exitCode == 0 ? "\nLAYOUT OK\n" : "\nLAYOUT FAILURE\n");
     }
+    // The losing mine has an app of its own, made once the first is gone: an
+    // app keeps the content it was made with, and this one is the probe's
+    // copy. It has a context of its own too, because a context keeps the
+    // data types an app declared in it and warns when they are declared again.
+    Rml::RemoveContext("main");
+    context = Rml::CreateContext("losing", Rml::Vector2i(kFrames[0].width, kFrames[0].height));
+    {
+        const sim::Content losing = losingContent(*loaded.content);
+        game::App app(*context, *services, losing, assets, playtest, "probe");
+        if (!app.loadDocument()) {
+            exitCode = 2;
+        }
+        app.update(0.0);
+        if (const int code = probeLosingMine(*context, app, system, losing); code != 0) {
+            exitCode = code;
+        }
+    }
+    std::cout << (exitCode == 0 ? "\nLAYOUT OK\n" : "\nLAYOUT FAILURE\n");
     // The app, its document and data model are gone before RmlUi shuts down.
     Rml::Shutdown();
     return exitCode;
