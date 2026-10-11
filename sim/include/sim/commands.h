@@ -4,6 +4,7 @@
 // with Simulation::submit and applied at the start of the next tick in
 // (company id, submission order), so a replay is the seed plus the command
 // log. Validation failures become CommandRejected notices, never errors.
+// Once the game has ended (spec 010) every command is rejected as GameEnded.
 
 #include "sim/ids.h"
 #include "sim/money.h"
@@ -144,6 +145,7 @@ enum class RejectReason : std::uint8_t {
     ProgramNotNeeded,      // the current stage does not need that good, or not that much more
     ProgramStageNotReady,  // the stage's research or a delivery is outstanding
     ProgramComplete,       // the company has completed every stage
+    GameEnded,             // the game has ended: no order is taken any more
 };
 
 // Private notices are visible only to `company`; public ones to everyone.
@@ -185,6 +187,8 @@ enum class NoticeKind : std::uint8_t {
     ProgramDelivered,       // private: company, resource, tonnes moved from stock to the program
     ProgramStageComplete,   // public: company, amount = the stage's cost, tonnes = the stage
                             // just completed (1 for the first), tech = that stage's research
+    ProgramFounded,         // public: company = the founder; the game has ended
+    DeadlinePassed,         // public: no company; the game has ended with no program founded
 };
 
 struct Notice {

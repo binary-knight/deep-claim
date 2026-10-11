@@ -347,3 +347,6 @@ reject.program_stage_not_ready	The stage still needs its research or its deliver
 reject.program_complete	We have already completed every stage of the program.
 notice.program_delivered	Delivered {tonnes} of {resource} to the program.
 notice.program_stage_complete	{company} completed a stage of the program for {amount}.
+reject.game_ended	The game is over.
+notice.program_founded	{company} has founded the program.
+notice.deadline_passed	The deadline has passed. No program was founded.

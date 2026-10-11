@@ -205,6 +205,12 @@ void Simulation::handle(const CompleteProgramStage& c) {
 }
 
 void Simulation::dispatch(const Command& command) {
+    // A finished game takes no orders (spec 010). Checked per order, so the
+    // orders queued behind the one that founds the program are refused too.
+    if (gameEnded(state_)) {
+        reject(commandCompany(command), PlotId(), Money::zero(), RejectReason::GameEnded);
+        return;
+    }
     std::visit([this](const auto& concrete) { handle(concrete); }, command);
 }
 
@@ -214,8 +220,15 @@ const TickReport& Simulation::tick() {
     }
     report_ = TickReport{};
     report_.day = state_.day;
+    // A finished world does not change (spec 010): the day does not advance
+    // and no step runs. Orders still queued are refused, each with a notice.
+    if (gameEnded(state_)) {
+        applyCommands();
+        return report_;
+    }
     // Pipeline order is fixed (see DESIGN.md). Steps for systems that do not
-    // exist yet are absent, not stubbed.
+    // exist yet are absent, not stubbed. Step 1 can end the game (the last
+    // program stage completed); the day it ends on is still played out.
     applyCommands();                            // 1
     runPlotMarket(*content_, state_, report_);  // 2
     runSurveys(*content_, state_, report_);     // 3
@@ -225,6 +238,7 @@ const TickReport& Simulation::tick() {
     runFinance(*content_, state_, report_);     // 6
     runResearch(*content_, state_, report_);    // 7
     runEvents(*content_, state_, report_);      // 8
+    runProgram(*content_, state_, report_);     // 8b (spec 010): the deadline
     ++state_.day;                               // 9
     return report_;
 }

@@ -19,6 +19,11 @@ namespace {
 
 constexpr std::int64_t kPermille = 1000;
 
+// Stages a company must have completed to finish as a lesser partner when
+// another founds the program (spec 010, BR-006). Part of the rule, not a
+// tuning number: the spec fixes it at two of the three stages.
+constexpr std::uint32_t kLesserPartnerStages = 2;
+
 bool knownCompany(const WorldState& state, CompanyId company) {
     return company.valid() && company.index() < state.companies.size();
 }
@@ -68,6 +73,30 @@ std::optional<RejectReason> completionBlocker(const Content& content, const Worl
         return RejectReason::InsufficientFunds;
     }
     return std::nullopt;
+}
+
+// How the race ended for a company that did not found the program. Without
+// a founder nobody is a partner to anything; a bankrupt company has lost
+// whatever it had completed.
+ProgramResult resultBesideFounder(const Company& company, bool founded) {
+    const bool partner =
+        founded && company.bankrupt == 0 && company.programStage >= kLesserPartnerStages;
+    return partner ? ProgramResult::LesserPartner : ProgramResult::Lost;
+}
+
+// Sets the outcome, once: today, the founder if there is one, and a result
+// for every company.
+void endGame(WorldState& state, CompanyId founder) {
+    Outcome& outcome = state.outcome;
+    outcome.ended = 1;
+    outcome.day = state.day;
+    outcome.founder = founder;
+    outcome.results.assign(state.companies.size(), ProgramResult::Lost);
+    for (std::size_t c = 0; c < state.companies.size(); ++c) {
+        const bool isFounder = founder.valid() && founder.index() == c;
+        outcome.results[c] = isFounder ? ProgramResult::Founded
+                                       : resultBesideFounder(state.companies[c], founder.valid());
+    }
 }
 
 }  // namespace
@@ -136,6 +165,12 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
     notice.tonnes = company.programStage;
     notice.tech = stage.research;
     report.notices.push_back(notice);
+    // The first company to complete the last stage founds the program, and
+    // the game ends with this order.
+    if (company.programStage == content.program.stages.size() && !gameEnded(state)) {
+        endGame(state, command.company);
+        report.notices.push_back(makeNotice(NoticeKind::ProgramFounded, command.company, PlotId()));
+    }
 }
 
 bool programStageReady(const Content& content, const WorldState& state, CompanyId company) {
@@ -165,6 +200,18 @@ std::int64_t programProgressPermille(const Content& content, const WorldState& s
         shares += checkedMulDiv(delivered, kPermille, requirement.tonnes).value_or(kPermille);
     }
     return shares / static_cast<std::int64_t>(stage->requirements.size());
+}
+
+bool gameEnded(const WorldState& state) {
+    return state.outcome.ended != 0;
+}
+
+void runProgram(const Content& content, WorldState& state, TickReport& report) {
+    if (gameEnded(state) || state.day < content.program.deadlineDay) {
+        return;
+    }
+    endGame(state, CompanyId());
+    report.notices.push_back(makeNotice(NoticeKind::DeadlinePassed, CompanyId(), PlotId()));
 }
 
 }  // namespace sim

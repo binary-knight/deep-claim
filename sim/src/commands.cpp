@@ -80,6 +80,8 @@ const char* rejectReasonName(RejectReason reason) {
             return "program_stage_not_ready";
         case RejectReason::ProgramComplete:
             return "program_complete";
+        case RejectReason::GameEnded:
+            return "game_ended";
     }
     return "unknown";
 }
@@ -152,6 +154,10 @@ const char* noticeKindName(NoticeKind kind) {
             return "program_delivered";
         case NoticeKind::ProgramStageComplete:
             return "program_stage_complete";
+        case NoticeKind::ProgramFounded:
+            return "program_founded";
+        case NoticeKind::DeadlinePassed:
+            return "deadline_passed";
     }
     return "unknown";
 }
@@ -168,6 +174,8 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::PlotWithdrawn:
         case NoticeKind::RivalUnlockedResource:
         case NoticeKind::ProgramStageComplete:
+        case NoticeKind::ProgramFounded:
+        case NoticeKind::DeadlinePassed:
             return true;
         case NoticeKind::CommandRejected:
         case NoticeKind::AuctionLost:
