@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -77,8 +77,13 @@ std::vector<fs::path> simSourceFiles() {
 }
 
 std::string readFile(const fs::path& path) {
+    // Read through a stringstream, as view_source_test.cpp does: building the
+    // string from istreambuf_iterators trips GCC's -Wnull-dereference in
+    // optimized builds.
     std::ifstream file(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
 }
 
 // "<path relative to the repo>:<line>: <token>" for each match in the sim tree.
