@@ -4,12 +4,12 @@
 
 ## Key Components
 - `loader.h` - everything in `namespace content`:
-  - File name constants (`inline constexpr const char*`): `kResourcesFile` = `resources.json`, `kTechsFile` = `techs.json`, `kRegionsFile` = `regions.json`, `kEventsFile` = `events.json`, `kBalanceFile` = `balance.json`, `kAiFile` = `ai.json`, `kStringsFile` = `strings.json`.
+  - File name constants (`inline constexpr const char*`): `kResourcesFile` = `resources.json`, `kTechsFile` = `techs.json`, `kRegionsFile` = `regions.json`, `kEventsFile` = `events.json`, `kBalanceFile` = `balance.json`, `kAiFile` = `ai.json`, `kProgramFile` = `program.json`, `kStringsFile` = `strings.json`.
   - `struct LoadError { std::string file; std::string path; std::string message; }` - one problem, e.g. file `resources.json`, path `[2].base_price`, message `expected a number`.
-  - `struct Sources` - the JSON text of each document: `resources`, `techs`, `regions`, `events`, `balance`, `ai`, `strings`.
+  - `struct Sources` - the JSON text of each document: `resources`, `techs`, `regions`, `events`, `balance`, `ai`, `program` (the race: deadline and stages, spec 010), `strings`.
   - `struct LoadResult { std::optional<sim::Content> content; std::vector<LoadError> errors; bool ok() const; }` - `ok()` is `content.has_value()`.
   - `LoadResult loadFromStrings(const Sources&)` - parse and validate in-memory JSON text.
-  - `LoadResult loadFromDirectory(const std::filesystem::path&)` - read the seven files from a directory, then call `loadFromStrings`.
+  - `LoadResult loadFromDirectory(const std::filesystem::path&)` - read the eight files from a directory, then call `loadFromStrings`.
   - `std::string formatErrors(const std::vector<LoadError>&)` - one line per error: `file: path: message` (path segment omitted when empty).
 
 ## Dependencies
@@ -23,5 +23,5 @@
 
 ## Constraints
 - `LoadResult::content` is present only when `errors` is empty.
-- All seven documents are required; `Sources` has no optional members.
+- All eight documents are required; `Sources` has no optional members.
 - The header documents that decimals are parsed as doubles, rejected when non-finite or more precise than `sim::Fixed` / `sim::Money` can hold, then rounded to nearest.

@@ -11,7 +11,7 @@
 - `sim/` (`dc::sim`, PUBLIC): `sim/content.h`, `sim/commands.h`, `sim/fixed.h`, `sim/ids.h`, `sim/money.h`, `sim/types.h`. The loader fills `sim::Content` and uses `sim::Fixed`, `sim::Money`, `sim::noticeKindName` and `sim::rejectReasonName`.
 - `nlohmann_json` (PRIVATE, via vcpkg); not visible to consumers.
 - `dc_warnings` (PRIVATE interface target from `cmake/Warnings.cmake`).
-- Runtime input: seven files in a data directory (the repo's `data/`): `resources.json`, `techs.json`, `regions.json`, `events.json`, `balance.json`, `ai.json`, `strings.json`.
+- Runtime input: eight files in a data directory (the repo's `data/`): `resources.json`, `techs.json`, `regions.json`, `events.json`, `balance.json`, `ai.json`, `program.json`, `strings.json`.
 - Consumers (link `dc::content`): `game/` (`deep_claim`, `deep_claim_layout_probe`), `game/session/` (`deep_claim_replay`), `sim_runner/` (`sim_runner`), `tests/` (`sim_tests`). Added to the build by the root `CMakeLists.txt` via `add_subdirectory(content)`.
 
 ## Patterns
@@ -21,7 +21,8 @@
 - Strict, bounded schemas: unknown keys, out-of-range numbers, unresolved ids and missing prose keys are all load errors.
 
 ## Constraints
-- All seven data files are required. `loadFromDirectory` reports `cannot read <path>` for each unreadable file and returns without parsing any document if at least one is missing.
+- All eight data files are required. `loadFromDirectory` reports `cannot read <path>` for each unreadable file and returns without parsing any document if at least one is missing.
 - A `sim::Content` is returned only when there are zero errors; there is no partial or warning-only result.
 - Depends only on `sim/` among the repo's targets; it does not depend on `game/` or `platform/`.
 - The expected key set of `strings.json` is hard-coded in `src/loader.cpp` (`kStringKeys`) and partly derived from `sim::NoticeKind`, `sim::RejectReason` and the event and tech ids, so the catalogue, the table and the sim enums must agree for a load to succeed.
+- The loader does not compute the content fingerprint: `sim::hashContent` (`sim/src/save.cpp`, field lists in `sim/include/sim/serialize.h`) hashes everything the loader fills except `content.strings`, i.e. resources (including `mine_opex_per_day`), techs (including `requires_program_stage`), regions, events, balance, ai and program. A prose edit leaves it unchanged, but event and tech names (filled from `strings.json`) are hashed, so a name edit or any other data change moves it and invalidates saves and traces.

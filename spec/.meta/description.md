@@ -1,0 +1,26 @@
+# spec
+
+**Purpose:** The feature specifications from spec 008 onward, one PRD per feature named by slug (`spec/<slug>.md`, per `PROJECT.md`), written through the etc harness (`/spec`). Each carries the approved requirements and, once built, the build decisions, departures, reviews and the list of what is still open. Specs 001 to 007 stay in `docs/specs/`.
+
+## Key Components
+- `markets-that-bite.md` - "PRD: Markets that bite (spec 008)" (224 lines). Per-ore mine running cost, market clamps moved to data, mine margin and break-even from the sim, a losing-mine notice with an auto-pause rule, AI retune, runner bite measures over 50-seed, 20-year sweeps. BR-001 to BR-012, AC-001 to AC-013. Serves journey J-001; system 1 of `docs/design/earth-strategy.md`. Status as written: Decisions "Recorded on 2026-10-10, after the build", with owner and build decisions, a "Tuned values" table, "Reviews" (Codex, code, security, architecture, spec compliance) and a long "Open after build" list. That it is merged is stated in `PROJECT.md`, not in the file.
+- `mine-economics.md` - "PRD: Mine economics (spec 009)" (137 lines). Three mine sizes, enlarge and close orders, running cost rising with tonnes dug, a cost for depleted mines, AI sizing, gates on seeds 1 to 50 and 51 to 100. BR-001 to BR-019, AC-001 to AC-016. Serves journey J-002; system 2 of the Earth strategy. The file ends at Research Notes: it has no Decisions section and states no status of its own. Its status comes from elsewhere: `docs/design/core-loop.md` (Decisions) and `PROJECT.md` say it is folded into spec 010 and not built on its own, and `race-for-the-program.md` makes it step 3 "as approved".
+- `race-for-the-program.md` - "PRD: The race for the program (spec 010, first slice of the core loop)" (311 lines). A deadline, a three-stage program, deliveries, stage research, win and lose, the AI racing, a Program and an end screen (step 1, BR-001 to BR-014); plants and goods (step 2, BR-015 to BR-019); mine life from spec 009 (step 3, BR-020); market depth and final gates (step 4, BR-021 to BR-024); BR-025 to BR-027 throughout. AC-001 to AC-021. Serves journey J-003; implements the first slice of `docs/design/core-loop.md`. Status as written: Decisions "Recorded on 2026-10-11, after the step 1 build. Steps 2 to 4 are not built"; the owner's playtest of step 1 gates step 2 (BR-025); followed by build decisions, "Departures", "Reviews (2026-10-11, step 1)" and "Open after step 1". `PROJECT.md` places step 1 on branch `spec-010-race-step-1`.
+
+## Dependencies
+- Each spec names its journey in `docs/mvp/journeys/` and its strategy source in `docs/design/` (`earth-strategy.md` for 008 and 009, `core-loop.md` for 010); spec 010 also cites `docs/playtests/2026-10-11.md`.
+- Each spec's decision records are in `docs/adrs/` (`F-2026-10-10-markets-that-bite-*`, `F-2026-10-11-mine-economics-*`, `F-2026-10-11-first-slice-race-for-the-program-*`), and the architectural summary of each built one is a section of `docs/DESIGN.md` ("Markets that bite (spec 008)", "The race for the program (spec 010, step 1)"), which names its spec file.
+- Research Notes, gray areas and designs point into the untracked feature directories `.etc_sdlc/features/active/<feature>/` (for example `research/codebase.md`).
+- Cited from code by spec number, not path: spec 008 and spec 010 in comments across `sim/`, `content/`, `game/`, `sim_runner/main.cpp`, `sim_runner/CMakeLists.txt` and `tests/determinism_test.cpp`. The one path citation, `sim_runner/main.cpp` line 557, names `docs/specs/008-markets-that-bite.md`, which does not exist.
+- No build step, test or CI job reads any file in this directory.
+
+## Patterns
+- etc PRD format, not the `docs/process.md` template: title `# PRD: <Title> (spec NNN...)`, then Summary, Scope (In Scope, Out of Scope), Requirements as `### BR-NNN` headings, numbered Acceptance Criteria `AC-NNN`, Edge Cases, Research Notes, Decisions, and an "Open after build" (or "Open after step 1") list. No `Status:` line under the title, unlike `docs/specs/`.
+- The requirements and acceptance criteria are left as approved; where the build differs, the difference is listed under the Decisions ("Departures"), and each review finding is recorded as applied or declined with a reason.
+- Tuned numbers live in `data/*.json`; each value's reason and sweep evidence is in the spec's Decisions (spec 008's "Tuned values" table repeats the one in `docs/DESIGN.md`).
+
+## Constraints
+- `CLAUDE.md` ("Plan first"): a spec is approved by the owner before it is built; spec 010 adds an owner's gate between its steps (BR-025, decision record `first-slice-race-for-the-program-004`).
+- Numbering continues from `docs/specs/` (008, 009, 010) but files are named by slug, not number. `docs/process.md` and the "Spec-driven development" section of `docs/DESIGN.md` still say specs are `docs/specs/NNN-name.md`; `PROJECT.md` gives this directory for 008 onward.
+- Each spec states that saves and traces from earlier builds stop loading.
+- The "Open after" lists record known gaps as of the build: unpolished player-facing sentences owed an agy pass (spec 008's losing-mine notice, about 30 sentences in spec 010), provisional numbers in spec 010 step 1, and golden hashes recorded on Linux/GCC only.

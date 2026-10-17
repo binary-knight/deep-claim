@@ -116,7 +116,39 @@ The locked token block is `tokens.css` (colour, type scale 12/13/14/16/17/20
 with line-heights, spacing 4/8/12/16/20/24, 2px radii, 1px edges, 2px title
 rules, no shadows). The component inventory with exact CSS, states, the
 per-screen block order and the RmlUi translation notes is `handoff.md`.
-The client restyle (spec 003) implements them.
+The client restyle (spec 003) translated them into RCSS. The scale is the
+rule (R-004 in `ARCHITECTURE.md`); an off-scale value in `main.rcss` is a
+violation to tidy when that code is touched.
+
+## The race on screen (spec 010, 2026-10-11)
+
+Spec 010 added a seventh screen and two race displays, built in the
+Control Room material. Detail is in `docs/DESIGN.md`, "The race for the
+program (spec 010, step 1)".
+
+- **Rail.** Seven icons: Dashboard, Program, Plots, Market, Research,
+  Finance, Log. Program is second, after Dashboard.
+- **Race item.** On every tab, the status strip under the header shows
+  the time left to the deadline in years and days, or who founded the
+  program, and a chip that says Ahead, Behind or Level.
+- **Race strip.** The Dashboard opens with the race above 01 Needs you:
+  the same deadline line and verdict chip, then a row per company with
+  stages complete, a progress bar with its delivered percentage beside it,
+  and the state of its current stage's research. Who leads is a word, so
+  nothing rests on colour.
+- **Program tab.** A short intro and, when cover-costs is on, a warning.
+  01 Stages lists the three stages, each with a state chip. 02 is the
+  current stage: a table of its goods (needed, delivered, in stock, still
+  needed) with a Deliver button per good, the stage's cost and research,
+  then Start research and Complete stage. Lines under the buttons say
+  what the stage still lacks, or that it is ready. An order waiting for
+  the clock stands in for its button as a chip with Cancel.
+- **End screen.** When the game is over, an overlay covers play, header
+  included, so no order control can be reached. It gives the ending in
+  its title and body (founded, lesser partner, lost, deadline passed or
+  bankrupt), the day the game ended, each company's stages with the day
+  of each, the player's cash, mines and stages, and one button, New game.
+  The speed buttons are off.
 
 ## Inevitability gate
 

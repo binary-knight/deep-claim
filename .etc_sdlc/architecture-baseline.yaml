@@ -1,42 +1,65 @@
 schema_version: 1
 status: ratified
 ratified_by: binaryknight
-ratified_at: '2026-10-10T11:01:28+00:00'
+ratified_at: '2026-10-17T05:27:02+00:00'
 confidence:
   score: medium
   inputs:
-    claims_total: 63
-    verified: 50
-    stale: 10
-    aspirational: 0
+    claims_total: 90
+    verified: 59
+    stale: 27
+    aspirational: 1
     contradicted: 3
-    artifacts_claim_checked: README.md, docs/process.md, docs/DESIGN.md, docs/design/handoff.md,
-      docs/design/ui-design.md
-    artifacts_not_claim_checked: docs/specs/001-007, tools/prose/README.md, tools/prose/voice.md,
-      docs/HANDOFF.md, .meta/ (generated this run)
+    artifacts_claim_checked: README.md, docs/process.md, docs/DESIGN.md, docs/design/ui-design.md,
+      DOMAIN.md, PROJECT.md (2026-10-17 review); docs/design/handoff.md (2026-10-10)
+    artifacts_not_claim_checked: docs/specs/001-007, spec/*.md, docs/adrs/*, docs/design/core-loop.md,
+      docs/design/earth-strategy.md, tools/prose/*
     sampling: claims capped at 10-20 per artifact; evidence by grep and targeted reads,
       no builds or tests run
     patterns_surveyed: player-facing-strings (competing), rule-and-balance-placement
       (competing); counts are grep approximations
     seams: none (single-repo offline desktop game)
+    review: 2026-10-17 drift review after specs 008 and 010 step 1; amendments decided
+      by the owner
 inventory:
+- path: ARCHITECTURE.md
+  type: convention-doc
+  last_modified: '2026-10-10'
+- path: CLAUDE.md
+  type: agent-doc
+  last_modified: '2026-10-11'
+- path: DOMAIN.md
+  type: convention-doc
+  last_modified: '2026-10-11'
+- path: PROJECT.md
+  type: convention-doc
+  last_modified: '2026-10-10'
 - path: README.md
   type: convention-doc
   last_modified: '2026-10-08'
+- path: build.sh
+  type: generator
+  last_modified: '2026-10-11'
 - path: docs/process.md
   type: convention-doc
   last_modified: '2026-10-09'
 - path: docs/DESIGN.md
   type: convention-doc
-  last_modified: '2026-10-09'
-- path: docs/HANDOFF.md
+  last_modified: '2026-10-11'
+- path: docs/design/core-loop.md
   type: convention-doc
-  last_modified: '2026-10-10'
+  last_modified: '2026-10-11'
+- path: docs/design/earth-strategy.md
+  type: convention-doc
+  last_modified: '2026-10-11'
 - path: docs/design/handoff.md
   type: convention-doc
   last_modified: '2026-10-09'
 - path: docs/design/ui-design.md
   type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/design/tokens.css
+  type: lint-config
   last_modified: '2026-10-09'
 - path: tools/prose/README.md
   type: convention-doc
@@ -44,6 +67,66 @@ inventory:
 - path: tools/prose/voice.md
   type: convention-doc
   last_modified: '2026-10-09'
+- path: docs/adrs/F-2026-10-10-markets-that-bite-001-running-cost-per-ore.md
+  type: adr
+  last_modified: '2026-10-10'
+- path: docs/adrs/F-2026-10-10-markets-that-bite-002-margin-single-source.md
+  type: adr
+  last_modified: '2026-10-10'
+- path: docs/adrs/F-2026-10-10-markets-that-bite-003-bite-gates.md
+  type: adr
+  last_modified: '2026-10-10'
+- path: docs/adrs/F-2026-10-10-markets-that-bite-004-as-built-amendments.md
+  type: adr
+  last_modified: '2026-10-10'
+- path: docs/adrs/F-2026-10-11-first-slice-race-for-the-program-001-program-state-and-sim-owned-ending.md
+  type: adr
+  last_modified: '2026-10-11'
+- path: docs/adrs/F-2026-10-11-first-slice-race-for-the-program-002-stage-research-in-the-tree.md
+  type: adr
+  last_modified: '2026-10-11'
+- path: docs/adrs/F-2026-10-11-first-slice-race-for-the-program-003-goods-are-resources-plants-are-entities.md
+  type: adr
+  last_modified: '2026-10-11'
+- path: docs/adrs/F-2026-10-11-first-slice-race-for-the-program-004-four-steps-and-the-owners-gate.md
+  type: adr
+  last_modified: '2026-10-11'
+- path: docs/adrs/F-2026-10-11-mine-economics-001-size-and-derived-depth.md
+  type: adr
+  last_modified: '2026-10-11'
+- path: docs/adrs/F-2026-10-11-mine-economics-002-enlarge-and-close-orders.md
+  type: adr
+  last_modified: '2026-10-11'
+- path: docs/adrs/F-2026-10-11-mine-economics-003-life-projection-in-the-sim.md
+  type: adr
+  last_modified: '2026-10-11'
+- path: docs/adrs/F-2026-10-11-mine-economics-004-neutral-first-and-two-seed-ranges.md
+  type: adr
+  last_modified: '2026-10-11'
+- path: docs/adrs/README.md
+  type: adr
+  last_modified: '2026-10-10'
+- path: docs/mvp/journeys/J-001-player-rides-out-a-falling-price.md
+  type: convention-doc
+  last_modified: '2026-10-10'
+- path: docs/mvp/journeys/J-002-player-sizes-works-and-closes-a-mine.md
+  type: convention-doc
+  last_modified: '2026-10-11'
+- path: docs/mvp/journeys/J-003-player-races-a-rival-to-found-the-program.md
+  type: convention-doc
+  last_modified: '2026-10-11'
+- path: docs/playtests/2026-10-08.md
+  type: convention-doc
+  last_modified: '2026-10-08'
+- path: docs/playtests/2026-10-09.md
+  type: convention-doc
+  last_modified: '2026-10-09'
+- path: docs/playtests/2026-10-10.md
+  type: convention-doc
+  last_modified: '2026-10-10'
+- path: docs/playtests/2026-10-11.md
+  type: convention-doc
+  last_modified: '2026-10-11'
 - path: docs/specs/001-sell-policies.md
   type: convention-doc
   last_modified: '2026-10-09'
@@ -61,11 +144,23 @@ inventory:
   last_modified: '2026-10-09'
 - path: docs/specs/006-balance.md
   type: convention-doc
-  last_modified: '2026-10-10'
+  last_modified: '2026-10-09'
 - path: docs/specs/007-pending-orders.md
   type: convention-doc
   last_modified: '2026-10-10'
+- path: spec/markets-that-bite.md
+  type: convention-doc
+  last_modified: '2026-10-10'
+- path: spec/mine-economics.md
+  type: convention-doc
+  last_modified: '2026-10-11'
+- path: spec/race-for-the-program.md
+  type: convention-doc
+  last_modified: '2026-10-11'
 - path: .clang-format
+  type: lint-config
+  last_modified: '2026-10-08'
+- path: game/backends/.clang-format
   type: lint-config
   last_modified: '2026-10-08'
 - path: .clang-tidy
@@ -77,13 +172,19 @@ inventory:
 - path: cmake/Sanitizers.cmake
   type: lint-config
   last_modified: '2026-10-08'
+- path: cmake/BuildId.cmake
+  type: generator
+  last_modified: '2026-10-10'
 - path: CMakePresets.json
   type: lint-config
   last_modified: '2026-10-08'
 - path: .github/workflows/ci.yml
   type: lint-config
-  last_modified: '2026-10-08'
+  last_modified: '2026-10-11'
 - path: tools/prose/to_json.py
+  type: generator
+  last_modified: '2026-10-09'
+- path: tools/prose/polish.sh
   type: generator
   last_modified: '2026-10-09'
 - path: tools/design/tokens_to_rcss.py
@@ -91,10 +192,7 @@ inventory:
   last_modified: '2026-10-09'
 - path: tools/design/icons.py
   type: generator
-  last_modified: '2026-10-09'
-- path: docs/specs/001-prose
-  type: reference-impl
-  last_modified: '2026-10-09'
+  last_modified: '2026-10-11'
 claims:
 - id: CL-001
   source: README.md
@@ -161,18 +259,20 @@ claims:
   source: README.md
   claim: --sanity exits non-zero if any check fails; JSON summary lists outcomes,
     price statistics and sanity checks
-  classification: VERIFIED
-  evidence: sim_runner/main.cpp header comment; CTest runner_smoke uses --sanity;
-    exit path taken from comment, not traced
-  resolution: null
+  classification: STALE
+  evidence: sim_runner/main.cpp exits 3 only when a gated check fails; ungated checks
+    are informational; --sanity is accepted with --sweep and changes nothing there
+  resolution: 'update the doc (owner, 2026-10-17): README.md says a run exits non-zero
+    when a gated check fails'
 - id: CL-011
   source: docs/process.md
   claim: Specs live at docs/specs/NNN-name.md, numbered in the order opened; the first
     is 001-sell-policies
-  classification: VERIFIED
-  evidence: docs/specs/001..007 contiguous; one extra 001-prefixed dir docs/specs/001-prose
-    (not a spec file)
-  resolution: null
+  classification: STALE
+  evidence: docs/specs/ holds 001-007 only; specs 008 on are spec/<slug>.md with the
+    feature record in .etc_sdlc/features/active/<feature>/
+  resolution: 'update the doc (owner, 2026-10-17): docs/process.md describes both
+    locations'
 - id: CL-012
   source: docs/process.md
   claim: 'Every spec follows the template: Goal, Player-facing behaviour, Sim rules,
@@ -211,10 +311,10 @@ claims:
   source: docs/process.md
   claim: docs/DESIGN.md is the running record of architectural decisions; specs record
     feature decisions; playtests record what players did
-  classification: VERIFIED
-  evidence: DESIGN.md per-spec sections; every spec has Decisions; docs/playtests/
-    has 3 write-ups
-  resolution: null
+  classification: STALE
+  evidence: feature-level decisions now also live in docs/adrs/ (12 records)
+  resolution: 'update the doc (owner, 2026-10-17): docs/process.md names docs/adrs/
+    beside docs/DESIGN.md'
 - id: CL-017
   source: docs/process.md
   claim: Balance numbers live in data/*.json with their reasoning in the spec
@@ -326,18 +426,23 @@ claims:
   source: docs/DESIGN.md
   claim: Golden hash is checked on Windows/MSVC in CI and uses an in-code content
     fixture; current value 0x2a5da3177ab7c69d
-  classification: VERIFIED
-  evidence: tests/determinism_test.cpp:47 with test::makeContent(); ci.yml runs ctest
-    on windows-2022; test not run
-  resolution: null
+  classification: STALE
+  evidence: tests/determinism_test.cpp now pins kGolden 0x059a7c79213dd307, kGoldenPlayed
+    0x41192679894c4afc, kGoldenRace 0xae14b05ab3e56760; the spec 008 section of docs/DESIGN.md
+    still quotes the older values; CI passed on Windows for the current values (run
+    38129605703)
+  resolution: 'update the doc (owner, 2026-10-17): docs/DESIGN.md marks the spec 008
+    values as superseded'
 - id: CL-032
   source: docs/DESIGN.md
   claim: 'Tick pipeline in fixed order: commands -> auctions -> surveys -> mines ->
     sell policies (4b) -> markets -> finance -> research -> events -> advance day'
-  classification: VERIFIED
-  evidence: sim/src/simulation.cpp:195-204; applyCommands uses std::stable_sort (line
-    77)
-  resolution: null
+  classification: STALE
+  evidence: 'sim/src/simulation.cpp tick(): commands, program (1b), plot market, surveys,
+    mines, sell policies (4b), markets, finance, research, events, day; the Determinism
+    section list omits 1b and 4b'
+  resolution: 'update the doc (owner, 2026-10-17): docs/DESIGN.md Determinism section
+    lists every step'
 - id: CL-033
   source: docs/DESIGN.md
   claim: Hidden truth lives only in WorldState::hidden; view.cpp never mentions it
@@ -548,10 +653,11 @@ claims:
   source: docs/design/ui-design.md
   claim: Component set and dashboard order 01 Needs you .. 05 Recent; icon rail of
     six icons; five screens
-  classification: VERIFIED
-  evidence: 'main.rcss .needs, .finrow, #rail .ic.* (six icons; the sixth is Log);
-    main.rml'
-  resolution: null
+  classification: STALE
+  evidence: the rail has 7 tabs (main.rml); Program is second; the race strip and
+    end screen are not in the doc
+  resolution: 'update the doc (owner, 2026-10-17): docs/design/ui-design.md describes
+    seven screens, the race strip and the end screen'
 - id: CL-062
   source: docs/design/ui-design.md
   claim: No gradients, glass cards, pulsing dots, left accent bars or shadows; state
@@ -568,6 +674,197 @@ claims:
     deep-claim-studio.html is not in the tree (published as an external artifact)
   resolution: 'record-decision: the bench artifact is published outside the repo;
     docs/design/bench.html is its source.'
+- source: README.md
+  claim: README describes building and running only through cmake presets; build.sh
+    is not mentioned
+  classification: STALE
+  evidence: build.sh (2026-10-11) fetches the CI Windows playtest package by default;
+    --linux builds locally
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in README.md'
+  id: CL-064
+- source: README.md
+  claim: README describes an open-ended sim with no ending
+  classification: STALE
+  evidence: 'sim_runner/main.cpp and spec 010: a game ends when a company founds the
+    program or the deadline passes'
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in README.md'
+  id: CL-065
+- source: docs/process.md
+  claim: Spec output is docs/specs/NNN-name.md and the plan is chat or appended to
+    the spec
+  classification: STALE
+  evidence: 'specs 008 on run through the etc harness: spec/<slug>.md, design and
+    tasks under .etc_sdlc/features/active/<feature>/'
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in docs/process.md'
+  id: CL-066
+- source: docs/process.md
+  claim: docs/process.md is the authority for the development process
+  classification: STALE
+  evidence: it does not mention the etc harness, .etc_sdlc/features, spec/ or docs/adrs/,
+    which now carry the trail for specs 008 on
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in docs/process.md'
+  id: CL-067
+- source: docs/DESIGN.md
+  claim: 'Tick order: commands (1), program deadline check (1b), plot market, surveys,
+    mines, sell policies (4b), markets, finance, research, events, day'
+  classification: VERIFIED
+  evidence: sim/src/simulation.cpp tick()
+  resolution: null
+  id: CL-068
+- source: docs/DESIGN.md
+  claim: 'A finished world freezes: every order is refused with GameEnded and no step
+    runs or day advances'
+  classification: VERIFIED
+  evidence: sim/src/simulation.cpp dispatch and tick(); sim/src/program.cpp gameEnded
+  resolution: null
+  id: CL-069
+- source: docs/DESIGN.md
+  claim: An ended outcome's day equals the state's day, enforced by load validation
+  classification: VERIFIED
+  evidence: sim/src/save.cpp validateOutcome
+  resolution: null
+  id: CL-070
+- source: docs/DESIGN.md
+  claim: Mine cost, margin and break-even are computed only in sim/src/mines.cpp;
+    the view and the mines step call them; AI and client read the view
+  classification: VERIFIED
+  evidence: sim/src/mines.cpp, sim/src/view.cpp, sim/src/ai_controller.cpp; the runner
+    keeps its own documented base-output measure
+  resolution: null
+  id: CL-071
+- source: docs/DESIGN.md
+  claim: sim::researchOpenTo is the one rule for which research projects may start;
+    validateStartResearch and the view answer from it
+  classification: VERIFIED
+  evidence: sim/include/sim/research.h, sim/src/research.cpp, sim/src/view.cpp
+  resolution: null
+  id: CL-072
+- source: docs/DESIGN.md
+  claim: Three golden hashes kGolden, kGoldenPlayed, kGoldenRace on in-code fixture
+    content
+  classification: VERIFIED
+  evidence: tests/determinism_test.cpp
+  resolution: null
+  id: CL-073
+- source: docs/DESIGN.md
+  claim: New orders are appended to the Command variant so saved positions of older
+    orders do not move
+  classification: VERIFIED
+  evidence: sim/include/sim/commands.h
+  resolution: null
+  id: CL-074
+- source: docs/DESIGN.md
+  claim: Stage completion and the non-founder result each have one rule (completionBlocker;
+    programResultBesideFounder), shared with the save validator
+  classification: VERIFIED
+  evidence: sim/src/program.cpp, sim/include/sim/program.h, sim/src/save.cpp
+  resolution: null
+  id: CL-075
+- source: docs/DESIGN.md
+  claim: Session::gameOver is bankrupt or ended; Session::submit refuses orders once
+    the game is over
+  classification: VERIFIED
+  evidence: game/session/include/game/session.h
+  resolution: null
+  id: CL-076
+- source: docs/DESIGN.md
+  claim: 'The program is content: data/program.json holds the deadline and three stages;
+    the loader cross-checks it'
+  classification: VERIFIED
+  evidence: data/program.json, content/src/loader.cpp
+  resolution: null
+  id: CL-077
+- source: docs/DESIGN.md
+  claim: Products and plants are not yet built
+  classification: VERIFIED
+  evidence: no plant or product types under sim/include/sim
+  resolution: null
+  id: CL-078
+- source: docs/DESIGN.md
+  claim: The spec 008 section describes bite, idled-mine, cash and bankruptcy checks
+    as gated on a 20-year sweep
+  classification: STALE
+  evidence: spec 010 step 1 ungated them; runner_sweep runs --sweep 50 --years 30
+    --ai 1 --sanity
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in docs/DESIGN.md'
+  id: CL-079
+- source: docs/design/ui-design.md
+  claim: No horizontal scroll on the Steam Deck frame
+  classification: ASPIRATIONAL
+  evidence: the layout probe measures overflow per tab and passed in CI at 9f3a7e0,
+    but the doc states it as a rule without naming the check
+  resolution: 'adopt (owner, 2026-10-17): the rule stands; the layout probe is its
+    check'
+  id: CL-080
+- source: docs/design/ui-design.md
+  claim: All five screens are on a 4px grid with 16px gutters
+  classification: STALE
+  evidence: off-grid paddings and radii in main.rcss; seven screens now
+  resolution: 'record-decision (owner, 2026-10-17): the grid is the design rule; code
+    drift is fixed when a screen is touched, and the doc now names seven screens'
+  id: CL-081
+- source: DOMAIN.md
+  claim: 120 plots across three regions; four resources
+  classification: VERIFIED
+  evidence: data/regions.json, data/resources.json
+  resolution: null
+  id: CL-082
+- source: DOMAIN.md
+  claim: A ten-project research tree
+  classification: STALE
+  evidence: data/techs.json has 13 projects including program_stage_1..3
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in DOMAIN.md'
+  id: CL-083
+- source: DOMAIN.md
+  claim: A company builds one mine per plot; mine states building, operating, mothballed,
+    depleted
+  classification: VERIFIED
+  evidence: sim/include/sim/world_state.h MineState (also Closed)
+  resolution: null
+  id: CL-084
+- source: DOMAIN.md
+  claim: The daily tick runs commands, auctions, surveys, mines and sell policies,
+    markets, finance, research and events
+  classification: STALE
+  evidence: the program step (deadline) runs after commands and the world freezes
+    when the game ends
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in DOMAIN.md'
+  id: CL-085
+- source: DOMAIN.md
+  claim: Determinism, hidden information, platforms, licences and offline constraints
+    hold
+  classification: VERIFIED
+  evidence: tests/determinism_test.cpp, tests/view_source_test.cpp, ci.yml, game/assets/fonts
+    licences, vcpkg.json
+  resolution: null
+  id: CL-086
+- source: DOMAIN.md
+  claim: A whole ten-year play session
+  classification: STALE
+  evidence: data/program.json deadline_day 10800 (30 years)
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in DOMAIN.md'
+  id: CL-087
+- source: DOMAIN.md
+  claim: Product Core lists the full set of terms
+  classification: STALE
+  evidence: no rows for Program, Stage, Deadline, Outcome
+  resolution: 'update the doc (owner, 2026-10-17): correct the statement in DOMAIN.md'
+  id: CL-088
+- source: PROJECT.md
+  claim: Read order, Current Phase, Where Things Live paths, presets, CTest names
+    and three golden hashes are as stated
+  classification: VERIFIED
+  evidence: paths, CMakePresets.json, sim_runner/CMakeLists.txt, tests/determinism_test.cpp
+    (working tree 2026-10-17)
+  resolution: null
+  id: CL-089
+- source: PROJECT.md
+  claim: clang-format and clang-tidy are enforced in CI on Ubuntu and Windows
+  classification: STALE
+  evidence: the lint jobs run on ubuntu-24.04 only; Windows runs build, test and the
+    playtest package
+  resolution: 'update the doc (owner, 2026-10-17): PROJECT.md says lint runs on Ubuntu'
+  id: CL-090
 exemplars:
 - name: Keyed prose catalogue
   paths:
@@ -591,25 +888,39 @@ exemplars:
   applies_to: interface colours, type and spacing
   blessed_by: binaryknight
 do_not_copy:
-- path: game/src/ui_model.cpp (string literals at L37-59, L420-528, L1132-1143)
-  reason: player-facing labels hard-coded in C++; use the strings catalogue. Migrate
-    when touched.
-- path: game/session/src/session.cpp:127
+- path: 'game/src/ui_model.cpp (short labels and chips: status words, act labels,
+    survey flags, research chips, stage states)'
+  reason: 'player-facing labels hard-coded in C++. R-002 as ratified holds (owner,
+    2026-10-17): the spec 002 comment at ui_model.cpp:34-36 that short labels stay
+    literal is superseded; migrate to the catalogue when touched.'
+- path: game/session/src/session.cpp:306
   reason: '''Game loaded'' log text hard-coded; use the strings catalogue.'
-- path: game/src/app.cpp:157
+- path: game/src/app.cpp:167
   reason: rival company name hard-coded; belongs in data.
-- path: sim/src/ai_controller.cpp:188
+- path: sim/src/ai_controller.cpp:247
   reason: 1.3x extraction margin hard-coded; balance knobs belong in data/ai.json.
     Move when touched.
-- path: sim/include/sim/mines.h:75
+- path: sim/include/sim/mines.h:114
   reason: kRunningLowDays=30 hard-coded; belongs in data/balance.json. Move when touched.
 - path: sim/src/surveys.cpp:25
   reason: survey shift cap hard-coded; move to data when touched.
-- path: sim/src/markets.cpp:194,232
-  reason: market clamps hard-coded; move to data when touched (spec 008).
 - path: docs/design/handoff.md
   reason: 'historical record of the design sprint; six claims do not match the tree.
     Not a source of rules: use ui-design.md, tokens.css and spec 003.'
+- path: sim/src/plot_market.cpp:31-32
+  reason: unsold-ask and ask-floor multipliers (0.9, 0.5) hard-coded; move to data/balance.json
+    when touched (owner, 2026-10-17).
+- path: sim/src/worldgen.cpp:26
+  reason: initial price noise 1/5 hard-coded; move to data when touched (owner, 2026-10-17).
+- path: sim/src/events.cpp:20-21
+  reason: event multiplier bounds hard-coded; move to data when touched (owner, 2026-10-17).
+- path: sim/src/program.cpp:25
+  reason: kLesserPartnerStages = 2 hard-coded; move to data/program.json when touched
+    (owner, 2026-10-17).
+- path: game/src/ui_model.cpp:781-783
+  reason: 'R-001 violation (owner, 2026-10-17): the client decides a storage-cost
+    warning at a tenth of cash; the threshold and the warning belong in the sim view.
+    Fix in the next client task.'
 seams: []
 rules:
 - id: R-001
@@ -618,8 +929,8 @@ rules:
     from view fields, but never a rule the sim does not also enforce.'
   provenance:
     who: binaryknight
-    when: '2026-10-10T11:01:35+00:00'
-    trigger: ratification session 2026-10-10
+    when: '2026-10-17T05:16:48+00:00'
+    trigger: ratified 2026-10-10; re-appended in the 2026-10-17 amendment
   mechanizable: false
   enforced_by: human-judgment
 - id: R-002
@@ -627,8 +938,8 @@ rules:
     via text(); static headings and button labels in game/assets/ui/main.rml are exempt.
   provenance:
     who: binaryknight
-    when: '2026-10-10T11:01:35+00:00'
-    trigger: ratification session 2026-10-10
+    when: '2026-10-17T05:16:48+00:00'
+    trigger: ratified 2026-10-10; re-appended in the 2026-10-17 amendment
   mechanizable: false
   enforced_by: human-judgment
 - id: R-003
@@ -636,8 +947,8 @@ rules:
     sim::Content; do not add tuning constants to sim sources.
   provenance:
     who: binaryknight
-    when: '2026-10-10T11:01:35+00:00'
-    trigger: ratification session 2026-10-10
+    when: '2026-10-17T05:16:48+00:00'
+    trigger: ratified 2026-10-10; re-appended in the 2026-10-17 amendment
   mechanizable: false
   enforced_by: human-judgment
 - id: R-004
@@ -646,31 +957,34 @@ rules:
     touched.
   provenance:
     who: binaryknight
-    when: '2026-10-10T11:01:35+00:00'
-    trigger: ratification session 2026-10-10
+    when: '2026-10-17T05:16:48+00:00'
+    trigger: ratified 2026-10-10; re-appended in the 2026-10-17 amendment
   mechanizable: false
   enforced_by: human-judgment
 - id: R-005
-  statement: files matching sim/** must not contain unordered_
+  statement: files matching sim/** must not contain unordered_ (machine-checked by
+    tests/sim_source_rules_test.cpp, comments excluded; owner, 2026-10-17)
   provenance:
     who: binaryknight
-    when: '2026-10-10T11:01:35+00:00'
-    trigger: ratification session 2026-10-10
+    when: '2026-10-17T05:16:48+00:00'
+    trigger: ratified 2026-10-10; re-appended in the 2026-10-17 amendment
   mechanizable: true
   enforced_by: human-judgment
 - id: R-006
-  statement: files matching sim/** must not contain std::hash
+  statement: files matching sim/** must not contain std::hash (machine-checked by
+    tests/sim_source_rules_test.cpp, comments excluded; owner, 2026-10-17)
   provenance:
     who: binaryknight
-    when: '2026-10-10T11:01:35+00:00'
-    trigger: ratification session 2026-10-10
+    when: '2026-10-17T05:16:48+00:00'
+    trigger: ratified 2026-10-10; re-appended in the 2026-10-17 amendment
   mechanizable: true
   enforced_by: human-judgment
 - id: R-007
-  statement: files matching sim/** must not contain <chrono>
+  statement: files matching sim/** must not contain <chrono> (machine-checked by tests/sim_source_rules_test.cpp,
+    comments excluded; owner, 2026-10-17)
   provenance:
     who: binaryknight
-    when: '2026-10-10T11:01:35+00:00'
-    trigger: ratification session 2026-10-10
+    when: '2026-10-17T05:16:49+00:00'
+    trigger: ratified 2026-10-10; re-appended in the 2026-10-17 amendment
   mechanizable: true
   enforced_by: human-judgment

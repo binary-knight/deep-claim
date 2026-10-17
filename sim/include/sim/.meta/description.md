@@ -1,6 +1,6 @@
 # sim (public headers)
 
-**Purpose:** The 29 public headers of the `sim` library, all in `namespace sim`. They declare the value types, static content structs, command and notice vocabulary, the complete dynamic `WorldState`, per-company views, each rule system's API, the serialization visitor, and the `Simulation` facade.
+**Purpose:** The 30 public headers of the `sim` library, all in `namespace sim`. They declare the value types, static content structs, command and notice vocabulary, the complete dynamic `WorldState` (including the race for the program and its outcome), per-company views, each rule system's API, the serialization visitor, and the `Simulation` facade.
 
 ## Key Components
 
@@ -16,19 +16,20 @@ Foundation types
 - `fatal.h` — `[[noreturn]] fatal(const char*)`.
 
 Data model
-- `content.h` — static content structs: `ResourceDef`, `TechDef`/`TechEffect`/`TechEffectType`, `RegionDef`/`DepositPrior`, `EventDef`/`EventEffect`/`EventEffectType`, `BalanceParams`, `AiParams`, and `Content` with `findResource`/`findTech`/`findRegion`/`findEvent`.
+- `content.h` — static content structs: `ResourceDef` (with the per-ore `mineOpexPerDay`), `TechDef` (with `requiresProgramStage`)/`TechEffect`/`TechEffectType`, `RegionDef`/`DepositPrior`, `EventDef`/`EventEffect`/`EventEffectType`, `BalanceParams` (including the market clamps `marketRatioMin/Max`, `demandFactorMin/Max` and the losing-mine notice knobs), `AiParams` (including the four `program*` racing knobs), `ProgramRequirement`/`ProgramStage`/`ProgramDef` (deadline day and stages), and `Content` (with `program`) and `findResource`/`findTech`/`findRegion`/`findEvent`.
 - `sell_policy.h` — `SellPolicy` (enabled, reserve tonnes, floor price), shared by `BalanceParams` and `Company`.
-- `world_state.h` — `WorldState` and its entities: `Plot`, `PlotListing`, `DepositTruth`, `PlotDeposits`, `HiddenState`, `Company`, `CompanyKind`, `Market`, `Loan`, `Bid`, `Auction`, `SurveyEstimate`, `Survey`, `Mine`, `MineState`, `Research`, `ActiveEvent`.
-- `commands.h` — the ten command structs and `Command` variant (`BidOnPlot`, `CommissionSurvey`, `BuildMine`, `SetMineState`, `SellOre`, `TakeLoan`, `RepayLoan`, `StartResearch`, `SetSellPolicy`, `SetCoverCosts`), `RejectReason`, `NoticeKind`, `Notice`, `TickReport`, name and visibility helpers.
-- `view.h` — `CompanyView` and its parts (`PlotView`, `AuctionView`, `SaleView`, `SurveyView`, `MineView`, `MarketView`, `LoanView`, `ResearchView`, `ActiveEventView`, `CompanyPublicView`), `makeCompanyView`, constants `kRecentSales` (16), `kRecentPriceDays` (90), `kMajorDepositMult` (2).
+- `world_state.h` — `WorldState` and its entities: `Plot`, `PlotListing`, `DepositTruth`, `PlotDeposits`, `HiddenState`, `Company`, `CompanyKind`, `Market`, `Loan`, `Bid`, `Auction`, `SurveyEstimate`, `Survey`, `Mine` (with the losing-day counters `lossDays`, `lossAnnounced`, `lossClearDays`), `MineState`, `Research`, `ActiveEvent`, `ProgramResult`, `Outcome`; `Company` carries `programStage`, `programDelivered`, `programStageDays`.
+- `commands.h` — the twelve command structs and `Command` variant (`BidOnPlot`, `CommissionSurvey`, `BuildMine`, `SetMineState`, `SellOre`, `TakeLoan`, `RepayLoan`, `StartResearch`, `SetSellPolicy`, `SetCoverCosts`, `DeliverToProgram`, `CompleteProgramStage`), `RejectReason`, `NoticeKind`, `RejectedOrder`, `Notice`, `TickReport`, name and visibility helpers.
+- `view.h` — `CompanyView` and its parts (`PlotView`, `AuctionView`, `SaleView`, `SurveyView`, `MineView` with `operatingOpex`, `hasEarnings`, `dailyMargin`, `breakEvenPrice`, `MarketView`, `LoanView`, `ResearchView`, `ActiveEventView`, `CompanyPublicView`, and for the race `ProgramResearchState`, `ProgramRequirementView`, `ProgramStageView`, `ProgramView`, `ProgramPublicView`, `OutcomeView`); `CompanyView` also carries per-ore `mineOpexQuotes`, per-tech `researchOpen`, `deadlineDay`, `outcome`, `program` and `programs`; `makeCompanyView`, constants `kRecentSales` (16), `kRecentPriceDays` (90), `kMajorDepositMult` (2).
 
 Rule systems (tick pipeline step in parentheses)
+- `program.h` — (1 and 1b) the race for the program: `validateDeliverToProgram`/`applyDeliverToProgram`, `validateCompleteProgramStage`/`applyCompleteProgramStage`, `programStageReady`, `programProgressPermille`, `programResultBesideFounder`, `gameEnded`, `runProgram` (the deadline).
 - `plot_market.h` — (2) `listPlots`, `runPlotMarket`, `reservedCash`, `availableCash`, `validateBid`, `applyBid`.
 - `surveys.h` — (3) `surveyNoise`, `validateSurvey`, `applySurvey`, `runSurveys`.
-- `mines.h` — (4) `mineCapex`, `mineCapexQuote`, `mineDailyOpex`, `mineDailyOutput`, build and mothball validate/apply, `runMines`, `mineHasExtractable`, `warnIdleMines`, `latestOwnSurvey`, `estimatedRemainingTonnes`, `warnRunningLow`, `kRunningLowDays`.
+- `mines.h` — (4) `mineCapex`, `mineCapexQuote`, `mineRunningCost`, `mineOpexQuote`, `mineDailyMargin`, `mineBreakEvenPrice`, `mineDailyOutput`, build and mothball validate/apply, `runMines`, `mineHasExtractable`, `warnIdleMines`, `latestOwnSurvey`, `estimatedRemainingTonnes`, `warnRunningLow`, `kRunningLowDays`.
 - `markets.h` — (4b, 5) `initMarkets`, `validateSell`/`applySell`, `executeSale`, `saleTonnesWithinBounds`, sell-policy and cover-costs validate/apply, `recordAutoSale`, `runSellPolicies`, `runMarkets`.
 - `finance.h` — (6) `debitCash`, `outstandingPrincipal`, `activeLoanCount`, `monthlyStorageCost`, loan validate/apply, `runFinance`.
-- `research.h` — (7) `techCompleted`, `prerequisitesMet`, `activeResearch`, `validateStartResearch`, `applyStartResearch`, `runResearch`.
+- `research.h` — (7) `techCompleted`, `prerequisitesMet`, `activeResearch`, `researchOpenTo`, `validateStartResearch`, `applyStartResearch`, `runResearch`.
 - `events.h` — (8) `eventMultiplier`, `runEvents`.
 - `tech.h` — `techMultiplier`, `resourceUnlocked` (read by mines, surveys, finance, views).
 - `worldgen.h` — `generateWorld`, `RegionStart`, `classifyRegionAtStart`.
@@ -42,7 +43,7 @@ Orchestration and persistence
 - `save.h` — `kSaveVersion`, `hashWorld`, `hashContent`, `validateWorld`, `saveGame`, `loadGame`.
 
 ## Dependencies
-- Headers include only each other (`"sim/..."`) and the C++ standard library (`<cstdint>`, `<vector>`, `<string>`, `<string_view>`, `<map>`, `<optional>`, `<variant>`, `<span>`, `<compare>`, `<type_traits>`, `<new>`, `<algorithm>`, `<cstddef>`).
+- Headers include only each other (`"sim/..."`) and the C++ standard library (`<cstdint>`, `<vector>`, `<string>`, `<string_view>`, `<map>`, `<optional>`, `<variant>`, `<span>`, `<compare>`, `<type_traits>`, `<new>`, `<algorithm>`, `<cstddef>`, `<initializer_list>`).
 - No includes of `content/`, `platform/`, `game/` or any third-party library.
 - Layering inside the directory: `types.h`, `ids.h`, `fixed.h`, `hash.h`, `rng.h`, `fatal.h` include nothing from `sim/`; `money.h`, `math.h` build on `fixed.h`; `content.h` and `world_state.h` build on those; rule-system headers include `commands.h`, `content.h`, `world_state.h`; `simulation.h` sits on top.
 - Included by: `sim/src/*.cpp`, `content/` (loader fills `Content`), `game/session/`, `game/src/`, `sim_runner/`, `tests/`.
@@ -64,6 +65,9 @@ Orchestration and persistence
 - `HiddenState` must not be read by view code (`world_state.h`, `view.h`); hosts must show a company only `Simulation::reportFor(company)`, not the unfiltered `tick()` report.
 - `Content` must outlive the `Simulation` and never change while in use; `Content::strings` and the `description` prose fields are not part of the content hash.
 - `AiParams` is hashed into the content fingerprint, so changing an AI knob invalidates saves and traces (`content.h`).
+- A save writes a command as its index in the `Command` variant, so new orders are appended at the end and existing ones never move (`commands.h`, `serialize.h`).
+- Once `WorldState::outcome` is set the world is frozen: no tick step runs, the day does not advance, and every command is rejected as `GameEnded` (`program.h`).
+- Mine running cost, margin and break-even read only observed output and the owner's unlocks, never the plot's true deposits (`mines.h`).
 - Serialization encoding (`archive.h`): primitives little-endian at natural width, bools one byte, enums at underlying width, vectors and strings with a uint32 length prefix; reading never throws and reports failure through `failed()`.
 - Save layout (`save.h`): magic `DCSV`, uint32 version, uint64 content fingerprint, `WorldState`, queued commands; version stays 1 and saves are not compatible across commits until the first public build.
 - `fixedExp` accepts only [-29, 29]; `fixedLn` and `fixedPow` require positive arguments (`math.h`).

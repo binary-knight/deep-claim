@@ -1,14 +1,14 @@
 # .github
 
-**Purpose:** GitHub-specific repository configuration for Deep Claim. It currently holds only the continuous integration workflow that builds, tests, format-checks and lints the C++ project on every push and pull request.
+**Purpose:** GitHub-specific repository configuration for Deep Claim. It currently holds only the continuous integration workflow that builds, tests, format-checks and lints the C++ project on every push and pull request, and packages the Windows client as a downloadable artifact for playtests.
 
 ## Key Components
-- `workflows/` — GitHub Actions workflows; contains the single file `ci.yml` (workflow `CI`) with four jobs: `build` (Linux and Windows, presets `debug`/`release`/`asan`), `game` (Linux and Windows, preset `debug-game`), `format` (clang-format 18) and `tidy` (clang-tidy 18).
+- `workflows/` — GitHub Actions workflows; contains the single file `ci.yml` (workflow `CI`) with five jobs: `build` (Linux and Windows, presets `debug`/`release`/`asan`), `game` (Linux and Windows, preset `debug-game`), `playtest-package` (Windows, preset `release-game`, uploads artifact `deep-claim-windows`), `format` (clang-format 18) and `tidy` (clang-tidy 18).
 
 ## Dependencies
 - Consumes, from the repository root: `CMakePresets.json`, `CMakeLists.txt`, `vcpkg.json`, `.gitmodules`, `.clang-format`, `.clang-tidy`, and the `external/vcpkg` submodule.
-- External: GitHub-hosted runners `ubuntu-24.04` and `windows-2022`; `actions/checkout@v5` and `actions/cache@v4`; Ubuntu apt packages `clang-format-18`, `clang-tidy-18` and the SDL3 system development libraries.
-- Nothing in the repository's build (CMake targets, sources, tools) depends on this directory.
+- External: GitHub-hosted runners `ubuntu-24.04` and `windows-2022`; `actions/checkout@v5`, `actions/cache@v4` and `actions/upload-artifact@v4`; Ubuntu apt packages `clang-format-18`, `clang-tidy-18` and the SDL3 system development libraries.
+- No CMake target or source depends on this directory. The root `build.sh` does: it finds the `CI` run for a commit with `gh run list`, waits on the playtest package job, and downloads the `deep-claim-windows` artifact with `gh run download`.
 
 ## Patterns
 - One workflow file is the whole CI definition; it calls the CMake configure/build/test presets instead of duplicating compiler flags, so the presets remain the single description of each build flavor.
@@ -18,4 +18,4 @@
 ## Constraints
 - Only `workflows/ci.yml` is tracked here. There is no `dependabot.yml`, no CodeQL or secret-scanning workflow, no `CODEOWNERS`, no issue or pull request templates, and no composite actions or reusable workflows.
 - The workflow declares no `permissions:` or `concurrency:` settings and uses no repository secrets.
-- CI coverage boundaries (details in `workflows/.meta/description.md`): sanitizers on Linux only, game client in Debug only, `game/backends/` excluded from clang-format, `tests/` and the game client excluded from clang-tidy, no coverage measurement.
+- CI coverage boundaries (details in `workflows/.meta/description.md`): sanitizers on Linux only, game client tested in Debug only (Release is built on Windows for the playtest package, without ctest), `game/backends/` excluded from clang-format, `tests/` and the game client excluded from clang-tidy, no coverage measurement.

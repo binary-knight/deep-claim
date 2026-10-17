@@ -9,11 +9,11 @@ merged, and judged by play before it is called done.
 
 | Phase | Output | Gate |
 | --- | --- | --- |
-| 1. Spec | `docs/specs/NNN-name.md` (template below) | The owner approves the spec. |
-| 2. Plan | A short implementation plan in chat or appended to the spec: files touched, state and commands added, tests. | The owner says go. |
+| 1. Spec | Specs 001 to 007: `docs/specs/NNN-name.md`. From spec 008 on: the etc harness spec, copied to `spec/<slug>.md` (see below). | The owner approves the spec. |
+| 2. Plan | A short implementation plan in chat or appended to the spec: files touched, state and commands added, tests. From spec 008 on, the design and decision records written by `/architect`. | The owner says go. |
 | 3. Build | Small focused commits on a branch or worktree; balance numbers in `data/*.json` with their reasoning in the spec. | Builds in every preset; tests and lint pass locally. |
 | 4. Review | Codex review of the diff plus the spec; findings applied or declined with a reason in the spec's Decisions. | No open "real" finding. |
-| 5. Verify | CI green on Ubuntu and Windows including the sanitizer leg; the sim_runner sweep for balance changes; the layout probe for interface changes. | All green. |
+| 5. Verify | The gates, run by hand (see below): every preset touched, `ctest`, clang-format and clang-tidy 18, the sim_runner sweep for balance changes, the layout probe for interface changes. Then CI on Ubuntu and Windows, including the sanitizer leg. | All green. |
 | 6. Playtest | The owner plays with the trace on; the session is written up in `docs/playtests/`. | The spec's player-facing behaviour matches what the trace shows. |
 
 Interface work has one extra phase before Build: a Design Studio session
@@ -21,7 +21,32 @@ whose outcome is recorded in `docs/design/` (the UI design document and
 the chosen direction's tokens). Code follows the design document, never
 the other way round.
 
-## Spec template
+## Specs through the etc harness (spec 008 on)
+
+From spec 008 on, the first three phases run through the etc harness:
+
+- `/spec` writes `.etc_sdlc/features/active/<feature>/spec.md`, which is
+  not tracked. A copy is kept at `spec/<slug>.md`: `spec/markets-that-bite.md`,
+  `spec/mine-economics.md` and `spec/race-for-the-program.md`.
+- `/architect` writes a design beside the spec and decision records in
+  `docs/adrs/`.
+- `/build` breaks the work into tasks, dispatches them and verifies them.
+
+These specs use the etc format: Summary, Scope, Requirements, Acceptance
+Criteria, Edge Cases and Research Notes, with Decisions and "Open after
+build" added once the build is done. The template below is how specs 001
+to 007 were written. It is kept as history.
+
+## Verify gates
+
+The etc harness has no C++ profile, so its lint and test hooks skip these
+sources. The gates are run by hand before a build is called complete:
+build every preset touched, `ctest`, clang-format and clang-tidy 18, the
+`sim_runner` sweep for balance changes, and the layout probe at both frame
+sizes for interface changes. CI on Ubuntu and Windows then confirms.
+clang-format and clang-tidy run in CI on Ubuntu only.
+
+## Spec template (specs 001 to 007)
 
 ```
 # NNN: Title
@@ -57,12 +82,16 @@ declined and why.
 
 ## Rules of the road
 
-- The sim contains every rule; the client only sends commands and shows
-  views. A spec that puts logic in the client is wrong.
+- The sim is the only authority on game rules (R-001 in
+  `ARCHITECTURE.md`): it validates and rejects every command. The client
+  and session may derive display and button-enable state from the view,
+  never a rule the sim does not also enforce. A spec that puts a rule in
+  the client is wrong.
 - Determinism is non-negotiable: no wall clock, no floats in state, seeded
   RNG streams only. Any change to state updates the golden hash once,
   with the reason in `docs/DESIGN.md`.
 - `docs/DESIGN.md` stays the running record of architectural decisions;
+  feature-level decision records also live in `docs/adrs/` (spec 008 on);
   specs record feature decisions; playtests record what players did.
 - Numbering: specs are numbered in the order they are opened. The first
   is `001-sell-policies`.

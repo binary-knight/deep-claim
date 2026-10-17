@@ -41,7 +41,8 @@ The build order is still Earth first. [README.md; docs/DESIGN.md
 ## Core Problem
 
 The game has to make running a mining company a contest of decisions for a
-whole ten-year play session. Today it does not. Three monitored playtests
+whole game, which lasts up to 30 years and ends at the deadline at the
+latest. Today it does not. Three monitored playtests
 each ended the same way: once the first good mine is running, money stops
 being a constraint and the player has almost nothing left to decide (33
 orders in eight years in playtest 3, including 900 days without a land
@@ -97,17 +98,29 @@ demand, so companies depress the prices they sell into. Standing sell
 policies sell automatically above a floor and a reserve; manual sales and a
 cover-costs rule exist beside them. Finance covers loans with monthly
 instalments, storage charges, and bankruptcy after a grace period. A
-ten-project research tree improves surveys, extraction and logistics and
-unlocks lithium. World events shift demand and costs. [docs/DESIGN.md
+thirteen-project research tree improves surveys, extraction and logistics
+and unlocks lithium; three of the projects are the program's stage
+projects. World events shift demand and costs. [docs/DESIGN.md
 "Commodity markets", "Finance", "Research, events and the AI";
 docs/specs/001-sell-policies.md; data/techs.json; data/events.json]
 
+A game ends. The companies race to found a space program of three stages,
+each needing cash, a research project and goods delivered from the
+company's own stock. A delivery earns nothing and cannot be undone. The
+first company to complete the third stage founds the program and the game
+ends; if nobody has by the deadline on day 10,800 (the end of year 30),
+every company loses. [data/program.json; docs/DESIGN.md "The race for the
+program (spec 010, step 1)"; spec/race-for-the-program.md]
+
 One tick is one in-game day in a 360-day year. Each day the simulation
-applies queued commands, resolves auctions, advances surveys, runs mines and
-sell policies, updates markets, does month-end finance, advances research and
-events, then reports notices to each company. The player sees only a
-per-company view and a log; the interface sends commands and never touches
-world state. [docs/DESIGN.md "Determinism rules"; sim/src/simulation.cpp]
+applies queued commands, checks the program's deadline, resolves auctions,
+advances surveys, runs mines and sell policies, updates markets, does
+month-end finance, advances research and events, then reports notices to
+each company. When the game ends, in the commands step or at the deadline
+check, the world freezes: nothing later in that day runs and the day does
+not advance. The player sees only a per-company view and a log; the
+interface sends commands and never touches world state. [docs/DESIGN.md
+"Determinism rules"; sim/src/simulation.cpp]
 
 Three actors use the same simulation: the player through the SDL3 and RmlUi
 client; the built-in AI, which plays rivals and, in the headless
@@ -160,11 +173,15 @@ The non-negotiable constraints are technical and self-imposed:
 | Loan | Borrowed principal repaid monthly with interest, within a capacity. | Not equity. |
 | Tech | A research project bought once, with prerequisites. | Not repeatable. |
 | Event | A timed world condition that shifts demand or costs. | Not caused by players. |
+| Program | The space program each company races to found: three stages, each needing cash, a research project and delivered goods. | Not a market; delivered goods earn nothing. |
+| Stage | One step of the program, completed by an order once its research is done and its goods are delivered, then paid for. | Not partial; deliveries count toward the current stage only. |
+| Deadline | Day 10,800, the end of year 30; if nobody has founded the program by then, the game ends. | Not movable during a game. |
+| Outcome | Who founded the program, or nobody; it ends the game. Each company is founder, lesser partner or lost. | Not changed once set. |
 | View | What one company is allowed to know at a given day. | Not world state. |
 | Trace | The record of a play session, enough to replay it exactly. | Not a save file. |
 
-[sim/include/sim/commands.h; sim/include/sim/view.h; docs/DESIGN.md;
-game/session/include/game/trace.h]
+[sim/include/sim/commands.h; sim/include/sim/view.h; sim/include/sim/program.h;
+data/program.json; docs/DESIGN.md; game/session/include/game/trace.h]
 
 Frequently confused: "order" is the player-facing word and "command" the
 code's word for the same thing; "pending order" (spec 007) means given but

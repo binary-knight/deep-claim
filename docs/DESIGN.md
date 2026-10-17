@@ -32,9 +32,13 @@ not build SDL3 and RmlUi until the client exists.
   in CI.
 - No iteration over `std::unordered_map` during a tick.
 - Tick pipeline, fixed order: apply commands (sorted by company id, then
-  submission order) -> resolve auctions -> advance surveys -> mines extract ->
-  update markets -> month-boundary finance and bankruptcy -> research ->
-  events -> advance day and emit tick report.
+  submission order) -> program: the deadline check (1b, spec 010) ->
+  resolve auctions -> advance surveys -> mines extract -> sell policies (4b,
+  spec 001) -> update markets -> month-boundary finance and bankruptcy ->
+  research -> events -> advance day and emit tick report. The game can end
+  in the commands step or the deadline check; the world then freezes: no
+  later step runs and the day does not advance. See "The race for the
+  program (spec 010, step 1)".
 
 ## Hidden truth vs observable view
 
@@ -1171,6 +1175,8 @@ under "Reviews".
   It was recorded on Linux/GCC on 2026-10-10 and has not yet been checked
   on Windows/MSVC. No fixture mine runs at a loss in that game, so it pins
   `lossDays` and `lossAnnounced` at zero, not at a counted value.
+  (Both values were superseded by spec 010 step 1; the current ones are
+  under "Golden hashes (spec 010, step 1)".)
 - **The runner's measures.** `--sweep` adds, per ore, the permille of
   days in years 3 to 20 with price below base-output break-even and the
   lowest and highest yearly mean price over base; per company, mine-days
@@ -1200,6 +1206,10 @@ under "Reviews".
   exits 3 on a failed gate. `--sanity` is accepted together with `--sweep`
   and adds nothing, so the command the spec gives (AC-009) runs as
   written; before the review round the runner refused the pair.
+  (These gates were superseded by spec 010 step 1: the six gates listed
+  here are now reported, not gated. See "The gates now" and
+  "What is no longer gated" under "The race for the program (spec 010,
+  step 1)".)
 - **The cash baseline.** `kBaselineCashY10` = 765,667,709: company 0's
   median cash at the end of year 10, in whole currency units, from
   `sim_runner --sweep 50 --years 20 --ai 1` (seeds 1 to 50, release build)
@@ -1221,7 +1231,10 @@ under "Reviews".
   three years) checks that the summary carries the new measures, that
   each seed's row carries its idle-and-reopen spells, and that a short
   sweep reports the bite gates as not evaluated. This replaces the
-  ten-seed, eight-year `runner_sweep` of specs 005 and 006.
+  ten-seed, eight-year `runner_sweep` of specs 005 and 006. (Superseded by
+  spec 010 step 1: in an optimized build `runner_sweep` now runs 50 seeds
+over 30 years. See
+  "CTest" under "The race for the program (spec 010, step 1)".)
 - **The retune is data only.** No AI rule and no sim rule was added to
   pass a gate. The AI's valuation of a prospect now takes the dearest
   quote among the plot's unlocked ores, and its construction reserve is

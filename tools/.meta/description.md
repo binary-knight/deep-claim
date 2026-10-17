@@ -3,7 +3,7 @@
 **Purpose:** Developer-side authoring scripts and their working data, run by hand to regenerate committed assets: UI design-token and icon assets for the game client, and the player-facing prose catalogue. Nothing here is compiled, linked or executed by the CMake build or by CI.
 
 ## Key Components
-- `design/` - Two Python generators: `tokens_to_rcss.py` (`docs/design/tokens.css` -> `game/assets/ui/tokens.rcss`) and `icons.py` (procedural 6-icon sprite sheet -> `game/assets/ui/icons.tga`).
+- `design/` - Two Python generators: `tokens_to_rcss.py` (`docs/design/tokens.css` -> `game/assets/ui/tokens.rcss`) and `icons.py` (procedural 7-icon sprite sheet -> `game/assets/ui/icons.tga`).
 - `prose/` - The prose pipeline for `data/strings.json`: `draft.tsv` -> `polish.sh` (external `agy` LLM CLI plus `voice.md`) -> `polished.tsv` -> `to_json.py`; also `README.md` and the reference file `agy-raw.tsv`.
 - No files are tracked directly in `tools/`; there is no top-level README, `CMakeLists.txt` or shared module.
 
