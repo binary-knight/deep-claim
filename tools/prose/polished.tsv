@@ -80,8 +80,8 @@ status.loan_requested	Paperwork filed with the bank for a loan of {amount}.
 status.repay_prompt	Enter the amount to pay down against the debt.
 status.repayment_ordered	Repayment of {amount} ordered against the debt.
 status.research_queued	Work order filed with the engineers; research starts tomorrow if the order is accepted.
-status.delivery_queued	Delivery of {tonnes} of {resource} to the program queued for tomorrow. Once it is made it cannot be undone.
-status.stage_completion_queued	Stage completion queued; it goes ahead tomorrow for {amount} if the order is accepted.
+status.delivery_queued	We have {tonnes} of {resource} on the docket to haul to the program tomorrow. Once it leaves the yard, it does not come back.
+status.stage_completion_queued	Completing the stage is booked for tomorrow at {amount}, if the order goes through.
 status.save_write_failed	Could not write company records to {name}.
 status.save_replace_failed	Could not replace the records at {name}: {reason}.
 status.saved	Company books saved to {name}.
@@ -182,11 +182,11 @@ tech.bulk_logistics.description	Rail sidings and covered stockpiles keep the wea
 tech.lithium_processing.name	Lithium Processing
 tech.lithium_processing.description	A concentrator plant turns raw lithium ore into saleable concentrate. Without one in place, lithium cannot be mined or sold.
 tech.program_stage_1.name	Program stage one: launch site
-tech.program_stage_1.description	The engineering work for a launch site. The first stage of the program cannot be completed without it.
+tech.program_stage_1.description	Site drawings and pad footings for the launch pad. We cannot close out the first stage of the program without them.
 tech.program_stage_2.name	Program stage two: launch vehicle
-tech.program_stage_2.description	The design of a launch vehicle. Work can start once the first stage is complete, and the second stage cannot be completed without it.
+tech.program_stage_2.description	Drafting the launch vehicle itself. The shop cannot touch it until the first stage is complete, and the second stage waits on these plans.
 tech.program_stage_3.name	Program stage three: deep space payload
-tech.program_stage_3.description	The design of a deep space payload. Work can start once the second stage is complete, and the third stage cannot be completed without it.
+tech.program_stage_3.description	Blueprints for the deep-space payload. Work waits on the second stage closing out, and the third stage cannot finish until the drawings are done.
 notice.idle_mine_warning	The mine on {plot} ran all month with nothing it can extract. It still costs full opex; mothball it or research what it needs.
 notice.mine_found_nothing	No ore the crew can work on {plot}. The mine stands idle.
 ui.days_in	in {days} days
@@ -343,18 +343,18 @@ ui.mine_earns	Earns
 ui.mine_loses	Loses
 ui.mine_mothballed	Mothballed
 ui.mine_if_reopened_key	If reopened
-reject.program_not_needed	The current stage of the program does not need that delivery.
-reject.program_stage_not_ready	That stage still needs its research finished or its deliveries made.
-reject.program_complete	We have already completed every stage of the program.
-notice.program_delivered	Delivered {tonnes} of {resource} to the program.
-notice.program_stage_complete	{company} completed stage {stage} of the program for {amount}.
-reject.game_ended	The game is over and no more orders are taken.
+reject.program_not_needed	The program has no call for that load on the current stage.
+reject.program_stage_not_ready	That stage is still waiting on its research or the last of its deliveries.
+reject.program_complete	Every stage of the program is already complete and on the books.
+notice.program_delivered	Hauled {tonnes} of {resource} over to the program yard.
+notice.program_stage_complete	{company} completed stage {stage} of the program and paid out {amount}.
+reject.game_ended	The books are closed and the desk is taking no more orders.
 notice.program_founded	{company} has founded the program. The race is over.
-notice.deadline_passed	The deadline has passed. Nobody founded the program.
-reject.tech_needs_program_stage	That project cannot start until the stage before it is complete.
-notice.program_research_started	{company} has started the research for stage {stage} of the program.
-notice.mine_mothballed	The mine on {plot} has been mothballed.
-notice.mine_reopened	The mine on {plot} has been reopened.
+notice.deadline_passed	The deadline has run out and nobody founded the program.
+reject.tech_needs_program_stage	The engineers cannot start that project until the stage before it is complete.
+notice.program_research_started	{company} has started research for stage {stage} of the program.
+notice.mine_mothballed	Mothballed the mine on {plot}: crew off, gate chained.
+notice.mine_reopened	Reopened the mine on {plot}. The headframe is turning again.
 ui.pause_on.rival_program	Rival program progress
 ui.race_deadline	{years} y {days} d to the deadline
 ui.race_stage	{done} of {total} stages complete
@@ -368,7 +368,7 @@ ui.race_research_in_progress	research under way
 ui.race_research_done	research done
 ui.race_program_founded_by	{company} founded the program
 ui.program_title	The program
-ui.program_intro	Each stage needs its research finished, its goods delivered from our own stock and the cash to complete it. A delivery cannot be taken back.
+ui.program_intro	Every stage takes finished research, the full haul off our own pile, and the cash to complete it. Anything delivered to the program stays there.
 ui.program_stage_heading	Stage {number}: {name}
 ui.program_stage_1_name	Launch site
 ui.program_stage_2_name	Launch vehicle
@@ -380,31 +380,31 @@ ui.program_in_stock	In stock
 ui.program_still_needed	Still needed
 ui.program_cost	Cost {amount}
 ui.program_research_not_started	Research not started
-ui.program_research_in_progress	Research finishes day {day}
+ui.program_research_in_progress	Research due back on day {day}
 ui.program_research_done	Research done
 ui.program_deliver	Deliver
 ui.program_deliver_amount	Deliver {tonnes}
 ui.program_start_research	Start research ({amount})
 ui.program_complete_stage	Complete stage ({amount})
-ui.program_stage_ready	Research, deliveries and cash are all in place. The stage can be completed.
-ui.program_blocked_research	The research for this stage is not finished.
-ui.program_blocked_deliveries	This stage still needs deliveries.
-ui.program_blocked_cash	Completing this stage needs {amount} in spendable cash.
-ui.program_blocked_locked	{resource} needs {tech} before we can dig it.
-ui.program_nothing_to_deliver	Nothing in stock that this stage still needs.
-ui.program_cover_costs_warning	Cover costs is on. At month end it may sell stock you are holding for the program.
+ui.program_stage_ready	Research, deliveries and cash are all in place. The stage is ready to complete.
+ui.program_blocked_research	Still waiting on the lab to finish the research for this stage.
+ui.program_blocked_deliveries	The yard is still short on deliveries for this stage.
+ui.program_blocked_cash	We need {amount} in spendable cash on the ledger to close out this stage.
+ui.program_blocked_locked	We can't dig {resource} until we have {tech}.
+ui.program_nothing_to_deliver	Nothing on the pile that this stage still calls for.
+ui.program_cover_costs_warning	Cover costs is switched on. Come month-end, the clerk may sell off stock you are holding back for the program.
 ui.program_complete	Every stage of the program is complete.
 ui.end_founded_title	We founded the program
-ui.end_founded_body	We completed the last stage first, ahead of the rival and ahead of the deadline. The program is ours to run.
+ui.end_founded_body	We finished the last stage ahead of the rival and beat the deadline. The program is ours to run.
 ui.end_partner_title	A lesser partner
-ui.end_partner_body	{company} founded the program first. We had come far enough to join it as a lesser partner.
+ui.end_partner_body	{company} founded the program first. We had enough work on the ground to be cut in as a lesser partner.
 ui.end_lost_title	The race is lost
-ui.end_lost_body	{company} founded the program first. We were too far behind to be given a part in it.
+ui.end_lost_body	{company} founded the program first. We were too far behind to get a seat at the table.
 ui.end_deadline_title	The deadline has passed
-ui.end_deadline_body	Nobody founded the program in time. Both companies have lost.
+ui.end_deadline_body	Time ran out before anyone founded the program. Both companies have lost.
 ui.end_bankrupt_title	Bankrupt
-ui.end_bankrupt_body	{company} could not cover its debts for too long. The courts have closed the mines, and our part in the race ends here.
-ui.end_day	The game ended on day {day}
+ui.end_bankrupt_body	{company} stayed in the red too long to cover its debts. The courts have padlocked the gates, and our run ends here.
+ui.end_day	Books closed on day {day}
 ui.end_stage_days	Stage {number}: day {day}
 ui.end_stage_never	Stage {number}: not reached
 ui.end_your_figures	Your figures
