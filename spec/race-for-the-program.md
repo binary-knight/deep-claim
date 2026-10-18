@@ -154,7 +154,7 @@ Sources in play: code, spec, prototype; conflicts resolved per source-of-truth-c
 See `research/market-depth.md` (price arithmetic and sweep experiments), `docs/playtests/2026-10-11.md` and `docs/design/core-loop.md`. A game today ends only on bankruptcy; a company sees only a rival's name, plot count and bankruptcy; there is no way to set stock aside or give it away; research is ten one-off projects with lithium unlocked by the dearest; at spec 008's market sizes one mine is 10 to 25% of demand.
 
 ## Decisions
-Recorded on 2026-10-11, after the step 1 build. Steps 2 to 4 are not built. The requirements and acceptance criteria above are left as approved; where the build differs from their text or from the design, the difference is listed under "Departures". The architectural summary, the tick order and the reason for each golden hash move are in `docs/DESIGN.md`, "The race for the program (spec 010, step 1)". The owner has made no decision on step 1 yet: the playtest and the owner's gate (BR-025, decision record 004) are still to come. The code review and the Codex review are done and their outcomes are under "Reviews (2026-10-11, step 1)" below; entries marked "after review" were changed in that fix round. The security review and the spec-compliance check have not been run for step 1.
+Recorded on 2026-10-11, after the step 1 build. Steps 2 to 4 are not built. The requirements and acceptance criteria above are left as approved; where the build differs from their text or from the design, the difference is listed under "Departures". The architectural summary, the tick order and the reason for each golden hash move are in `docs/DESIGN.md`, "The race for the program (spec 010, step 1)". The owner played step 1 on 2026-10-18 (playtest 5) and decided under "Owner decisions" at the end of this section. The code review and the Codex review are under "Reviews (2026-10-11, step 1)" below; entries marked "after review" were changed in that fix round. The security review and the spec-compliance check followed on 2026-10-18.
 
 Build decisions (made by the implementing agents and accepted by the build conductor, not by the owner):
 - 2026-10-11: the program and the deadline are one content file, `data/program.json`, loaded into `Content::program` after resources and techs. The loader requires exactly three stages, and each stage's project must be the tech whose `requires_program_stage` equals the stage's position counting from zero.
@@ -168,7 +168,7 @@ Build decisions (made by the implementing agents and accepted by the build condu
 - 2026-10-11, after review: `Session::submit` returns a bool and refuses orders once the game is over.
 - 2026-10-11, after review: the AI delivers at least one tonne when it keeps any share, holds stock and the stage needs it, so a share that rounds down to nothing does not starve the program.
 - 2026-10-11, after review: the trace writes one `end` record per game: at the moment the game ends, when a new game replaces it, or on close.
-- 2026-10-11, after review: every `GameEnded` rejection reads "Couldn't carry out the order: the game is over and no more orders are taken.", whatever the order was.
+- 2026-10-11, after review: every `GameEnded` rejection reads the same, whatever the order was: `notice.command_rejected` with the `reject.game_ended` reason ("Couldn't carry out the order: the game is over and no more orders are taken." as drafted; polished on 2026-10-18).
 - 2026-10-11, after review: the loader refuses a stage with no requirements.
 - 2026-10-11: `sim::researchOpenTo` is the one rule for whether a project can be started, money and a busy lab aside. The view carries its answer per project (`CompanyView::researchOpen`); the AI and the client read it and keep no copy of the rule.
 - 2026-10-11: a company's stage days are saved state (`Company::programStageDays`) and are in the view for every company, so the end screen is right in a long game and after a load.
@@ -193,7 +193,8 @@ Departures (build decisions; the requirements and criteria above are not rewritt
 - 2026-10-11, edge case 1: a same-day finish is not recorded in the outcome. `Outcome` has no field for it. The lower company index is applied first and founds the program; the other's order is refused as `GameEnded`. Raised by the Codex review and declined: the first order applied wins (see "Reviews", Codex 2).
 - 2026-10-11, design, after review: the program step (the deadline check) follows the day's orders. The design put it after events. The reason is that save validation reads the state's day as a between-ticks day, so a world frozen after a full pipeline would not load.
 - 2026-10-11, BR-026 and AC-019: the golden hashes moved more than once in the step. `kGolden` moved twice and `kGoldenPlayed` four times, once for each change to state or behaviour as the tasks landed. `kGoldenRace` moved once after review, from `0x588363dbb9c693f3` to `0xae14b05ab3e56760`, when the world began to freeze on the day it ends. Each move and its reason is in `docs/DESIGN.md`.
-- 2026-10-11, BR-027 and AC-021: the new strings are in the catalogue and registered in the loader, but about 30 sentences did not go through the agy polish pass (see "Open after step 1"). Neither is met until they have.
+- 2026-10-11, BR-027 and AC-021: the new strings are in the catalogue and registered in the loader, but about 30 sentences did not go through the agy polish pass (see "Open after step 1"). Neither is met until they have. Resolved on 2026-10-18: see "Owner decisions" below.
+- 2026-10-11, BR-011: the AI's `program_ore_land_weight` ships at 1, which is neutral, so the shipped AI does not prefer land holding an ore its coming stages need. The rule is built and tested at 1.5 (AC-009); any value above 1 sent both companies after the same opening plot in seed 1 and delayed the first mine from day 47 to day 92 (F8). Listed here on 2026-10-18 after the spec-compliance check found it missing from this block.
 
 Tuned and provisional values (2026-10-11; BR-024, AC-020). Every value changed or added in step 1. All of them are provisional: step 4 sets the final market depth and gates.
 
@@ -276,13 +277,32 @@ Codex (7 findings and 1 minor):
 - Codex 7, the trace's outcome was lost on New game. Applied: one `end` record per game, written when the game ends.
 - Codex minor, the wording of a rejection after the end. Applied.
 
-Security review and spec compliance: not run for step 1.
+Security review (2026-10-18, at `90261e3`; PASS, no critical, high, medium or low findings, 3 informational):
+- `exactPrice` in `game/session/src/format.cpp` negates the cents without a guard, as `exactMoney` does. Unreachable: cash is bounded on load. Noted, no change.
+- The loader accepts programs that cannot be won (already open below). It is not a memory-safety issue: every use stays inside int64.
+- No new third-party dependency in step 1.
+Save loading, the two program orders, the content loader, trace and replay parsing and string substitution were traced end to end and found clean.
+
+Spec-compliance check (2026-10-18, at `90261e3`; NON-COMPLIANT on four points, each since resolved or decided):
+- AC-021, unpolished prose. Applied: polished through agy (`534d08b`).
+- AC-019, no recorded green run at the head (one test changed after `9f3a7e0`). Applied: rerun on 2026-10-18 after the prose polish. debug 422 of 422, debug-game 423 of 423 (the layout probe among them), release 422 of 422 (the gated sweep among them), asan 422 of 422; clang-format 18 clean on every source. No shipped source changed after `9f3a7e0`, where clang-tidy was clean; tests are outside the tidy gate, as in CI. Golden hashes unchanged.
+- The polish broke eight tests that compared notices with the drafted sentences. Applied, with the owner's approval: those checks now take the wording from the catalogue (`game::text`, `game::rejectReasonClause`) and still check the assembled line; the mothball notice keeps the word "mothballed", and the stage 3 description keeps "deep space" unhyphenated, as their string tests require.
+- BR-011, the neutral land weight was not listed as a departure. Applied: listed above; the owner keeps it neutral.
+- EC-001 and the build's departures were accepted by the conductor only. The owner accepted them on 2026-10-18.
+- Not blocking, kept under "Open after step 1": AC-002 has no assertion that delivered goods pay no storage (it holds because they leave stock); edge cases 2 (delivery and sale of the same stock on one day) and 5 (stage 3 while insolvent) have no test; the BR-012 data test allows 6% against "about 5%". The check reported edge case 3 (the Program tab warns when cover costs is on) as unverified; it is built (`game/src/ui_model.cpp`, `ui.program_cover_costs_warning`) and checked by the layout probe.
+
+Owner decisions (2026-10-18, after playtest 5, `docs/playtests/2026-10-18.md`):
+- The build decisions and departures above, edge case 1 and the repeated golden-hash moves among them, are accepted.
+- BR-011: the land weight stays neutral for now and is revisited with step 4's tuning.
+- AC-021: the step 1 prose is polished before the merge. 36 sentences went through `tools/prose/polish.sh`; where agy changed the game's terms (a "contract" or "charter" for the program, "drawings" for research, "junior" for lesser partner, a mothball notice without the word) the line was corrected by hand to match the buttons and tabs.
+- Step 2 does not start yet (BR-025). The playtest showed the race is not felt: the player did not know how far behind they were, could not find nickel, and could not tell why the clock stopped. A follow-up for step 1 comes first.
+- `spec-010-race-step-1` is merged to `main` once these reviews are recorded.
 
 ## Open after step 1
-Known on 2026-10-11 and not resolved. None of this is done.
+Known on 2026-10-11 and not resolved, except where an item says it was resolved on 2026-10-18.
 
 Prose:
-- About 30 sentences are unpolished drafts, because the agy quota is exhausted. They are owed their polish pass (BR-027, AC-021): the notices `notice.program_*`, `notice.deadline_passed`, `notice.mine_mothballed`, `notice.mine_reopened`, `notice.command_rejected.delivery` and `notice.command_rejected.stage`; the `reject.*` reasons for the program and for a game that has ended; the three `tech.program_stage_N.description`; the `ui.program_*` sentences; the `ui.end_*_body` sentences and `ui.end_day`; `status.delivery_queued` and `status.stage_completion_queued`.
+- Resolved 2026-10-18 (`534d08b`): about 30 sentences were unpolished drafts, because the agy quota was exhausted, and were owed their polish pass (BR-027, AC-021): the notices `notice.program_*`, `notice.deadline_passed`, `notice.mine_mothballed`, `notice.mine_reopened`, `notice.command_rejected.delivery` and `notice.command_rejected.stage`; the `reject.*` reasons for the program and for a game that has ended; the three `tech.program_stage_N.description`; the `ui.program_*` sentences; the `ui.end_*_body` sentences and `ui.end_day`; `status.delivery_queued` and `status.stage_completion_queued`.
 - `ui.game_over` is now unused. It is still in the catalogue and registered in the loader.
 
 Numbers:
@@ -302,10 +322,11 @@ Client:
 
 Verification and records:
 - The golden values (`kGolden` `0x059a7c79213dd307`, `kGoldenPlayed` `0x41192679894c4afc`, `kGoldenRace` `0xae14b05ab3e56760`) were recorded on Linux/GCC and are unconfirmed on Windows/MSVC until CI runs.
-- The security review and the spec-compliance check have not been run for step 1.
+- Resolved 2026-10-18: the security review and the spec-compliance check have been run (see "Reviews"). Their non-blocking gaps stay open: AC-002 has no storage assertion, edge cases 2 and 5 have no test, and the BR-012 data test allows 6%.
 - A second click on Deliver, before the clock moves, queues a delivery the sim will reject (code review; declined for now, the sim stays the authority).
 - The loader still accepts a program that cannot be won, other than a stage with no requirements (code review).
 - The `.meta/description.md` files are stale. For one, `tests/.meta/description.md` still gives `kGolden` as `0x2a5da3177ab7c69d`.
 - Spec 008's decision record 003 is superseded in effect for gating. Accepted records are not edited. Whether an amending record is written, as record 004 did for spec 008, is a question for the architect.
 - The comment in `sim_runner/CMakeLists.txt` above `runner_sweep` says the gated sweep took 8 to 9 seconds with every game ending in years 8 to 12. That was before the tuning; the tuning task reports 38 to 39 seconds and foundings in years 17 to 20.
-- Step 1 has not been playtested. The owner's playtest gates step 2 (BR-025).
+- Resolved 2026-10-18: step 1 was playtested (playtest 5, `docs/playtests/2026-10-18.md`). The owner held step 2 for a step 1 follow-up.
+- The end screen's "Mines" figure counts worked-out mines (playtest 5).
