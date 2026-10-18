@@ -1663,7 +1663,7 @@ TEST_CASE("The session stops when the deadline passes with nobody finished", "[s
     REQUIRE(why.has_value());
     CHECK(why->kind == sim::NoticeKind::DeadlinePassed);
     CHECK(textOfKind(session, sim::NoticeKind::DeadlinePassed) ==
-          "The deadline has passed. Nobody founded the program.");
+          game::text(content, "notice.deadline_passed"));
     checkNothingMovesAfterTheEnd(session, out);
 }
 
@@ -1903,7 +1903,8 @@ TEST_CASE("A rival starting a stage's research stops the clock that day", "[sess
     REQUIRE(countKind(session, sim::NoticeKind::ProgramResearchStarted) == 1);
     const game::LogEntry* line = firstOfKind(session, sim::NoticeKind::ProgramResearchStarted);
     CHECK(line->day == eve);  // logged on the day it was raised
-    CHECK(line->text == "Rival has started the research for stage 1 of the program.");
+    CHECK(line->text == game::text(content, "notice.program_research_started",
+                                   {{"company", "Rival"}, {"stage", "1"}}));
 }
 
 TEST_CASE("A rival completing a stage stops the clock that day", "[session][spec010]") {
@@ -1936,8 +1937,11 @@ TEST_CASE("A rival completing a stage stops the clock that day", "[session][spec
     const game::LogEntry* line = firstOfKind(session, sim::NoticeKind::ProgramStageComplete);
     REQUIRE(line != nullptr);
     CHECK(line->day == eve);
-    CHECK(line->text == "Rival completed stage 2 of the program for " +
-                            game::formatMoney(content.program.stages[1].cost) + ".");
+    CHECK(line->text ==
+          game::text(content, "notice.program_stage_complete",
+                     {{"company", "Rival"},
+                      {"stage", "2"},
+                      {"amount", game::formatMoney(content.program.stages[1].cost)}}));
 }
 
 TEST_CASE("The player's own program progress is logged and does not stop the clock",
@@ -1964,9 +1968,11 @@ TEST_CASE("The player's own program progress is logged and does not stop the clo
     REQUIRE(started != nullptr);
     CHECK(started->notice.company == game::Session::kPlayer);
     CHECK(started->day == eve);
-    CHECK(started->text == "Player has started the research for stage 1 of the program.");
+    CHECK(started->text == game::text(content, "notice.program_research_started",
+                                      {{"company", "Player"}, {"stage", "1"}}));
     CHECK(textOfKind(session, sim::NoticeKind::ProgramDelivered) ==
-          "Delivered " + game::formatTonnes(1'000) + " of Iron to the program.");
+          game::text(content, "notice.program_delivered",
+                     {{"tonnes", game::formatTonnes(1'000)}, {"resource", "Iron"}}));
 
     // The stage itself, once its research is in.
     editWorld(session, content, test::setup(), [&](sim::WorldState& edited) {
@@ -1985,8 +1991,11 @@ TEST_CASE("The player's own program progress is logged and does not stop the clo
     REQUIRE(done != nullptr);
     CHECK(done->notice.company == game::Session::kPlayer);
     CHECK(done->day == stageEve);
-    CHECK(done->text == "Player completed stage 1 of the program for " +
-                            game::formatMoney(content.program.stages[0].cost) + ".");
+    CHECK(done->text ==
+          game::text(content, "notice.program_stage_complete",
+                     {{"company", "Player"},
+                      {"stage", "1"},
+                      {"amount", game::formatMoney(content.program.stages[0].cost)}}));
 }
 
 TEST_CASE("The player's bankruptcy stops the clock whatever the rules say", "[session][spec010]") {
@@ -2065,14 +2074,16 @@ TEST_CASE("Mothballing and reopening a mine each say what happened and where",
     REQUIRE(countKind(session, sim::NoticeKind::MineMothballed) == 1);
     CHECK(countKind(session, sim::NoticeKind::MineReopened) == 0);
     CHECK(textOfKind(session, sim::NoticeKind::MineMothballed) ==
-          "The mine on " + where + " has been mothballed.");
+          game::text(content, "notice.mine_mothballed", {{"plot", where}}));
+    CHECK(textOfKind(session, sim::NoticeKind::MineMothballed).find(where) != std::string::npos);
 
     session.submit(sim::SetMineState{{}, sim::MineId(0), 1});
     session.stepOneDay();
     CHECK(countKind(session, sim::NoticeKind::MineMothballed) == 1);
     REQUIRE(countKind(session, sim::NoticeKind::MineReopened) == 1);
     CHECK(textOfKind(session, sim::NoticeKind::MineReopened) ==
-          "The mine on " + where + " has been reopened.");
+          game::text(content, "notice.mine_reopened", {{"plot", where}}));
+    CHECK(textOfKind(session, sim::NoticeKind::MineReopened).find(where) != std::string::npos);
 }
 
 TEST_CASE("A refused order is described as the order it was", "[session][playtest4]") {
@@ -2096,8 +2107,8 @@ TEST_CASE("A refused order is described as the order it was", "[session][playtes
     }
     SECTION("an order refused because the game is over reads the same whatever it was") {
         const std::string expected =
-            "Couldn't carry out the order: the game is over and no "
-            "more orders are taken.";
+            "Couldn't carry out the order: " +
+            game::rejectReasonClause(content, sim::RejectReason::GameEnded) + ".";
         sim::Notice refused;
         refused.kind = sim::NoticeKind::CommandRejected;
         refused.company = game::Session::kPlayer;
@@ -2120,8 +2131,8 @@ TEST_CASE("A refused order is described as the order it was", "[session][playtes
         session.submit(sim::DeliverToProgram{{}, sim::ResourceId(1), 10});
         session.stepOneDay();
         CHECK(onlyRejection(session) ==
-              "Couldn't deliver Copper to the program: the current stage of the program does "
-              "not need that delivery.");
+              "Couldn't deliver Copper to the program: " +
+                  game::rejectReasonClause(content, sim::RejectReason::ProgramNotNeeded) + ".");
     }
     SECTION("completing a stage that is not ready names the stage, not just an order") {
         session.submit(sim::CompleteProgramStage{});
@@ -2131,8 +2142,8 @@ TEST_CASE("A refused order is described as the order it was", "[session][playtes
         CHECK(entry->notice.order == sim::RejectedOrder::StageCompletion);
         CHECK(entry->notice.reason == sim::RejectReason::ProgramStageNotReady);
         CHECK(onlyRejection(session) ==
-              "Couldn't complete the program stage: that stage still needs its research "
-              "finished or its deliveries made.");
+              "Couldn't complete the program stage: " +
+                  game::rejectReasonClause(content, sim::RejectReason::ProgramStageNotReady) + ".");
     }
     SECTION("a sale is still a sale") {
         session.submit(sim::SellOre{{}, sim::ResourceId(0), 500});

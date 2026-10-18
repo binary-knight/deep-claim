@@ -80,7 +80,7 @@ std::string readFile(const fs::path& path) {
     // Read through a stringstream, as view_source_test.cpp does: building the
     // string from istreambuf_iterators trips GCC's -Wnull-dereference in
     // optimized builds.
-    std::ifstream file(path, std::ios::binary);
+    const std::ifstream file(path, std::ios::binary);
     std::stringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
@@ -130,13 +130,19 @@ TEST_CASE("source scanner resumes code after a block comment on the same line", 
 }
 
 TEST_CASE("sim sources never contain unordered_ (R-005)", "[sim][rules]") {
-    CHECK(simViolations("unordered_") == std::vector<std::string>{});
+    const std::vector<std::string> found = simViolations("unordered_");
+    CAPTURE(found);
+    CHECK(found.empty());
 }
 
 TEST_CASE("sim sources never contain std::hash (R-006)", "[sim][rules]") {
-    CHECK(simViolations("std::hash") == std::vector<std::string>{});
+    const std::vector<std::string> found = simViolations("std::hash");
+    CAPTURE(found);
+    CHECK(found.empty());
 }
 
 TEST_CASE("sim sources never contain <chrono> (R-007)", "[sim][rules]") {
-    CHECK(simViolations("<chrono>") == std::vector<std::string>{});
+    const std::vector<std::string> found = simViolations("<chrono>");
+    CAPTURE(found);
+    CHECK(found.empty());
 }

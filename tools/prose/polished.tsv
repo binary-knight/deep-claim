@@ -186,7 +186,7 @@ tech.program_stage_1.description	Site drawings and pad footings for the launch p
 tech.program_stage_2.name	Program stage two: launch vehicle
 tech.program_stage_2.description	Drafting the launch vehicle itself. The shop cannot touch it until the first stage is complete, and the second stage waits on these plans.
 tech.program_stage_3.name	Program stage three: deep space payload
-tech.program_stage_3.description	Blueprints for the deep-space payload. Work waits on the second stage closing out, and the third stage cannot finish until the drawings are done.
+tech.program_stage_3.description	Blueprints for the deep space payload. Work waits on the second stage closing out, and the third stage cannot finish until the drawings are done.
 notice.idle_mine_warning	The mine on {plot} ran all month with nothing it can extract. It still costs full opex; mothball it or research what it needs.
 notice.mine_found_nothing	No ore the crew can work on {plot}. The mine stands idle.
 ui.days_in	in {days} days
@@ -353,8 +353,8 @@ notice.program_founded	{company} has founded the program. The race is over.
 notice.deadline_passed	The deadline has run out and nobody founded the program.
 reject.tech_needs_program_stage	The engineers cannot start that project until the stage before it is complete.
 notice.program_research_started	{company} has started research for stage {stage} of the program.
-notice.mine_mothballed	Mothballed the mine on {plot}: crew off, gate chained.
-notice.mine_reopened	Reopened the mine on {plot}. The headframe is turning again.
+notice.mine_mothballed	The mine on {plot} is mothballed: crew off, gate chained.
+notice.mine_reopened	The mine on {plot} is reopened. The headframe is turning again.
 ui.pause_on.rival_program	Rival program progress
 ui.race_deadline	{years} y {days} d to the deadline
 ui.race_stage	{done} of {total} stages complete
