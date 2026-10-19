@@ -139,7 +139,8 @@ void makeBankrupt(const sim::Content& content, sim::WorldState& state, sim::Comp
 
 // Puts an edited world into a simulation the way a save would.
 void play(sim::Simulation& simulation, const sim::Content& content, const sim::WorldState& state) {
-    REQUIRE(simulation.load(sim::saveGame(state, {}, sim::hashContent(content))));
+    REQUIRE(simulation.load(
+        sim::saveGame(test::settledPace(content, state), {}, sim::hashContent(content))));
 }
 
 std::vector<sim::Notice> noticesOf(const sim::TickReport& report, Kind kind) {
@@ -311,7 +312,7 @@ TEST_CASE("Completing a stage charges the cost once, clears deliveries and advan
     CHECK(notice.tonnes == 1);  // the stage just completed, counting from one
     CHECK(notice.tech == content.program.stages[0].research);
     CHECK(sim::noticeVisibleTo(notice, kRival));
-    CHECK(loadsBack(content, state));
+    CHECK(loadsBack(content, test::settledPace(content, state)));
 
     // The next stage starts from nothing: a repeat is refused and costs nothing.
     CHECK(complete(content, state) == R::ProgramStageNotReady);
@@ -1416,7 +1417,7 @@ TEST_CASE("Two stages completed on one day share that day", "[program][stage-day
     sim::applyCompleteProgramStage(content, state, {kPlayer}, report);
     CHECK(state.companies[0].programStageDays == std::vector<sim::Day>{kRaceDay, kRaceDay});
     CHECK(state.companies[1].programStageDays.empty());
-    CHECK(loadsBack(content, state));
+    CHECK(loadsBack(content, test::settledPace(content, state)));
 }
 
 TEST_CASE("Stage days come back from a save and are part of the hash", "[program][stage-days]") {
@@ -1485,6 +1486,7 @@ TEST_CASE("A save's completed stages need their research", "[program][save]") {
     const sim::Content content = test::makeContent();
     sim::WorldState state = racingState(content);
     atStage(content, state.companies[0], 2);
+    state = test::settledPace(content, state);
     REQUIRE(loadsBack(content, state));
 
     // Without the project a stage cannot have been completed, and a save
@@ -1500,7 +1502,7 @@ TEST_CASE("A save's completed stages need their research", "[program][save]") {
     CHECK(loadsBack(content, without(content.program.stages[2].research)));
     sim::WorldState ahead = state;
     ahead.companies[0].completedTechs.push_back(content.program.stages[2].research);
-    CHECK(loadsBack(content, ahead));
+    CHECK(loadsBack(content, test::settledPace(content, ahead)));
 }
 
 namespace {
@@ -1633,7 +1635,7 @@ TEST_CASE("A save of a game still being played shows no ending", "[program][endi
     atStage(content, finished.companies[1], 3);
     CHECK_FALSE(loadsBack(content, finished));
     atStage(content, finished.companies[1], 2);
-    CHECK(loadsBack(content, finished));
+    CHECK(loadsBack(content, test::settledPace(content, finished)));
 }
 
 // The earliest founding day (spec 011, BR-001): the race paced by research
@@ -2371,4 +2373,66 @@ TEST_CASE("The pace flags are saved and hashed", "[program][pace][save]") {
     flipped = simulation.state();
     flipped.companies[1].programPastDeadline = 1;
     CHECK(sim::hashWorld(flipped) != simulation.stateHash());
+}
+
+TEST_CASE("A save whose pace flags differ from their rule is refused", "[program][pace][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    cashedRace(simulation, content);
+    simulation.submit(sim::StartResearch{kRival, stageTech(content, 0)});
+    simulation.tick();
+    const sim::WorldState behind = simulation.state();
+    REQUIRE(behind.companies[0].programBehind == 1);
+    CHECK(sim::behindLeadingRival(content, behind, kPlayer));
+    CHECK_FALSE(sim::behindLeadingRival(content, behind, kRival));
+    sim::Simulation restored(content, 7, test::setup());
+    REQUIRE(restored.load(simulation.save()));
+    CHECK(restored.stateHash() == simulation.stateHash());
+    const auto loads = [&](const sim::WorldState& from, const auto& edit) {
+        sim::WorldState edited = from;
+        edit(edited);
+        return loadsBack(content, edited);
+    };
+
+    // A save may not claim a pace the world does not show, either way.
+    CHECK_FALSE(loads(behind, [](sim::WorldState& s) { s.companies[0].programBehind = 0; }));
+    CHECK_FALSE(loads(behind, [](sim::WorldState& s) { s.companies[1].programBehind = 1; }));
+    CHECK_FALSE(loads(behind, [](sim::WorldState& s) { s.companies[0].programPastDeadline = 1; }));
+
+    sim::Content tight = content;
+    tight.program.deadlineDay = 7 + kFixtureFromStage1;
+    sim::Simulation late(tight, 1, test::setup());
+    late.tick(8);
+    const sim::WorldState past = late.state();
+    REQUIRE(past.companies[0].programPastDeadline == 1);
+    REQUIRE(loadsBack(tight, past));
+    sim::WorldState cleared = past;
+    cleared.companies[1].programPastDeadline = 0;
+    CHECK_FALSE(loadsBack(tight, cleared));
+
+    // A bankrupt company's flags are left as they stood, so are not checked,
+    // but are still flags.
+    const auto broke = [&](sim::WorldState& s) { makeBankrupt(content, s, kPlayer); };
+    REQUIRE(loads(behind, broke));
+    CHECK(loads(behind, [&](sim::WorldState& s) {
+        broke(s);
+        s.companies[0].programBehind = 0;
+        s.companies[0].programPastDeadline = 1;
+    }));
+    CHECK_FALSE(loads(behind, [&](sim::WorldState& s) {
+        broke(s);
+        s.companies[0].programBehind = 2;
+    }));
+    CHECK_FALSE(loads(behind, [&](sim::WorldState& s) {
+        broke(s);
+        s.companies[0].programPastDeadline = 2;
+    }));
+
+    // Nor does anything change in an ended game, the pace flags included.
+    const sim::WorldState founded = foundedWorld(content);
+    REQUIRE(loadsBack(content, founded));
+    CHECK(loads(founded, [](sim::WorldState& s) {
+        s.companies[1].programBehind ^= 1;
+        s.companies[1].programPastDeadline ^= 1;
+    }));
 }

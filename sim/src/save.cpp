@@ -137,7 +137,8 @@ bool validateCompany(const Content& content, const Company& company, Day today) 
     if (company.kind != CompanyKind::Player && company.kind != CompanyKind::Ai) {
         return false;
     }
-    if (company.inventoryTonnes.size() != content.resources.size() || company.bankrupt > 1) {
+    if (company.inventoryTonnes.size() != content.resources.size() || company.bankrupt > 1 ||
+        company.programBehind > 1 || company.programPastDeadline > 1) {
         return false;
     }
     if (company.cash.cents() > kMaxCashCents || company.cash.cents() < -kMaxCashCents) {
@@ -752,6 +753,28 @@ bool validateOutcome(const Content& content, const WorldState& state) {
                                    : validateDeadlinePassed(content, state);
 }
 
+// The pace flags (spec 011): in a game still being played each solvent
+// company's flags equal their rules on the state as saved, as tick step 9b
+// leaves them (runProgramPace); a bankrupt company's are left as they stood.
+// A save cannot claim a pace the world does not show.
+bool validatePace(const Content& content, const WorldState& state) {
+    if (gameEnded(state)) {
+        return true;
+    }
+    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
+        const Company& company = state.companies[c];
+        if (company.bankrupt != 0) {
+            continue;
+        }
+        const bool behind = behindLeadingRival(content, state, CompanyId(c));
+        const bool past = foundsPastDeadline(content, state, CompanyId(c));
+        if ((company.programBehind != 0) != behind || (company.programPastDeadline != 0) != past) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool validateWorldImpl(const Content& content, const WorldState& state) {
     if (state.day > kMaxDay || state.plots.size() != state.hidden.plotDeposits.size()) {
         return false;
@@ -762,7 +785,10 @@ bool validateWorldImpl(const Content& content, const WorldState& state) {
            validateAuctions(state) && validateListingQueue(state) &&
            validateSurveys(content, state) && validateMines(content, state) &&
            validateMarkets(content, state) && validateLoans(content, state) &&
-           validateResearch(content, state) && validateEvents(content, state);
+           validateResearch(content, state) && validateEvents(content, state) &&
+           // Last: the founding days it compares read research records and
+           // stage days the checks before it have bounded.
+           validatePace(content, state);
 }
 
 }  // namespace

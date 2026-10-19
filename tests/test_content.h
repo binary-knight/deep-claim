@@ -3,11 +3,14 @@
 // In-code content fixture shared by sim tests. Independent of data/*.json so
 // the golden determinism hash does not move when balance numbers are tuned.
 
+#include "sim/commands.h"
 #include "sim/content.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/money.h"
+#include "sim/program.h"
 #include "sim/simulation.h"
+#include "sim/world_state.h"
 
 #include <cstdint>
 
@@ -226,6 +229,14 @@ inline sim::GameSetup setup() {
     s.playerName = "Player";
     s.aiNames = {"Rival"};
     return s;
+}
+
+// A world edited by a test, with its pace flags as tick step 9b would leave
+// them, so that a save of it holds them as the sim's own saves do.
+inline sim::WorldState settledPace(const sim::Content& content, sim::WorldState state) {
+    sim::TickReport ignored;
+    sim::runProgramPace(content, state, ignored);
+    return state;
 }
 
 }  // namespace test

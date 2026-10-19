@@ -423,7 +423,8 @@ TEST_CASE("The view marks a stage's project open once the stage before it is com
     player.completedTechs.push_back(kStageOneProject);
     player.programDelivered[0] = content.program.stages[0].requirements[0].tonnes;
     player.cash = sim::Money::fromUnits(100'000'000);
-    REQUIRE(simulation.load(sim::saveGame(state, {}, sim::hashContent(content))));
+    REQUIRE(simulation.load(
+        sim::saveGame(test::settledPace(content, state), {}, sim::hashContent(content))));
     CHECK(openProjects(content, simulation, kPlayer) == Open{1, 0, 0, 0, 0});
     simulation.submit(sim::CompleteProgramStage{kPlayer});
     simulation.tick();

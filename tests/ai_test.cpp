@@ -1256,7 +1256,8 @@ TEST_CASE("The view offers an unlocking project only when its program stage is r
     advanced.companies[0].programStage = 1;
     advanced.companies[0].programStageDays.assign(1, 1);
     advanced.companies[0].completedTechs.push_back(content.program.stages[0].research);
-    REQUIRE(simulation.load(sim::saveGame(advanced, {}, sim::hashContent(content))));
+    REQUIRE(simulation.load(
+        sim::saveGame(test::settledPace(content, advanced), {}, sim::hashContent(content))));
     CHECK(simulation.view(sim::CompanyId(0)).unlockReady[kLithium.index()] == 1);
 }
 

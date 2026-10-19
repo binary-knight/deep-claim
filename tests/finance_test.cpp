@@ -381,7 +381,8 @@ TEST_CASE("Saves with impossible program state are rejected", "[finance][spec010
         sim::WorldState edited = simulation.state();
         edit(edited.companies[0]);
         sim::Simulation scratch(content, 2, test::setup());
-        return scratch.load(sim::saveGame(edited, {}, sim::hashContent(content)));
+        return scratch.load(
+            sim::saveGame(test::settledPace(content, edited), {}, sim::hashContent(content)));
     };
     const auto stages = static_cast<std::uint32_t>(content.program.stages.size());
     REQUIRE(stages == 3);

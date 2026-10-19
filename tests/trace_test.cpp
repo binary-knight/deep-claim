@@ -663,7 +663,7 @@ std::vector<std::uint8_t> saveWithStageInReach(const sim::Content& content, sim:
     player.completedTechs.push_back(content.program.stages[0].research);
     player.inventoryTonnes[0] = 1'500;
     player.cash = sim::Money::fromUnits(5'000'000);
-    return sim::saveGame(state, {}, sim::hashContent(content));
+    return sim::saveGame(test::settledPace(content, state), {}, sim::hashContent(content));
 }
 
 sim::Company playerOf(const sim::Content& content, const game::Session& session) {
@@ -933,7 +933,7 @@ std::vector<std::uint8_t> saveWithFoundingInReach(const sim::Content& content, s
         player.programDelivered[need.resource.index()] = need.tonnes;
     }
     player.cash = sim::Money::fromUnits(20'000'000);
-    return sim::saveGame(state, {}, sim::hashContent(content));
+    return sim::saveGame(test::settledPace(content, state), {}, sim::hashContent(content));
 }
 
 }  // namespace

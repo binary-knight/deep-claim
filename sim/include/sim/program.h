@@ -80,9 +80,16 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
 [[nodiscard]] std::optional<Day> leadingRivalFoundingDay(const Content& content,
                                                          const WorldState& state,
                                                          CompanyId company);
+// True when the company's earliest founding day is later than its leading
+// solvent rival's; false when it has no day or no such rival. The one
+// statement of that test: the pace check and a save's check both answer
+// from it.
+[[nodiscard]] bool behindLeadingRival(const Content& content, const WorldState& state,
+                                      CompanyId company);
 // True when the company's earliest founding day is after the deadline day; a
 // founding on the deadline day is in time. False when it has no day. The one
-// statement of that test: the view and the pace check both answer from it.
+// statement of that test: the view, the pace check and a save's check all
+// answer from it.
 [[nodiscard]] bool foundsPastDeadline(const Content& content, const WorldState& state,
                                       CompanyId company);
 

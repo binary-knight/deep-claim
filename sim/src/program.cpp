@@ -116,14 +116,21 @@ std::optional<RivalDay> leadingRival(const Content& content, const WorldState& s
     return leading;
 }
 
+// The one statement of being behind: behindLeadingRival and the pace check
+// both answer from it.
+bool behindOf(const std::optional<Day>& own, const std::optional<RivalDay>& leading) {
+    return own && leading && *own > leading->day;
+}
+
 // Step 9b for one solvent company.
 void checkPace(const Content& content, WorldState& state, CompanyId id, TickReport& report) {
     const std::optional<Day> own = earliestFoundingDay(content, state, id);
     const std::optional<RivalDay> leading = leadingRival(content, state, id);
-    const bool behind = own && leading && *own > leading->day;
+    const bool behind = behindOf(own, leading);
     const bool past = foundsPastDeadline(content, state, id);
     Company& company = state.companies[id.index()];
-    if (behind && company.programBehind == 0) {
+    // Behind implies a leading rival; the condition says so where it is used.
+    if (behind && leading && company.programBehind == 0) {
         Notice notice = makeNotice(NoticeKind::ProgramFellBehind, id, PlotId());
         notice.rival = leading->rival;
         notice.foundingDay = own;
@@ -293,6 +300,11 @@ std::optional<Day> leadingRivalFoundingDay(const Content& content, const WorldSt
                                            CompanyId company) {
     const std::optional<RivalDay> leading = leadingRival(content, state, company);
     return leading ? std::optional<Day>(leading->day) : std::nullopt;
+}
+
+bool behindLeadingRival(const Content& content, const WorldState& state, CompanyId company) {
+    return behindOf(earliestFoundingDay(content, state, company),
+                    leadingRival(content, state, company));
 }
 
 bool foundsPastDeadline(const Content& content, const WorldState& state, CompanyId company) {

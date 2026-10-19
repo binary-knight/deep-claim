@@ -1519,7 +1519,7 @@ void putStagesBehind(const sim::Content& content, sim::Company& company, std::ui
 // has the rival act on a chosen day.
 std::vector<std::uint8_t> raceSave(const sim::Content& content, const sim::WorldState& state,
                                    const std::vector<sim::Command>& orders = {}) {
-    return sim::saveGame(state, orders, sim::hashContent(content));
+    return sim::saveGame(test::settledPace(content, state), orders, sim::hashContent(content));
 }
 
 const game::LogEntry* firstOfKind(const game::Session& session, sim::NoticeKind kind) {
