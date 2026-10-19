@@ -2707,7 +2707,7 @@ TEST_CASE("No ore is missing once the program is founded, the game is over or th
     checkNoneMissing(missing);
 }
 
-TEST_CASE("A mine yields an ore its last operating day produced, or before output its survey shows",
+TEST_CASE("A mine yields an ore its last day produced, or one never extracted its survey shows",
           "[program][view][missing]") {
     const sim::Content content = test::makeContent();
     sim::MineView mine;
@@ -2723,9 +2723,11 @@ TEST_CASE("A mine yields an ore its last operating day produced, or before outpu
     CHECK(sim::mineYieldsOre(mine, kIron));
     CHECK_FALSE(sim::mineYieldsOre(mine, kLithium));
 
-    // Output on record: the most recent operating day decides, mothballed
-    // too (edge case 9), whatever was extracted or surveyed before.
+    // Output on record: an ore the most recent operating day produced is a
+    // source; one extracted before but not that day is worked out, whatever
+    // the survey shows. Mothballed too (edge case 9).
     mine.hasEarnings = true;
+    mine.extractedTonnes[kCopper.index()] = 20;
     mine.lastOutputTonnes[kCopper.index()] = 20;
     mine.extractedTonnes[kIron.index()] = 50;
     CHECK(sim::mineYieldsOre(mine, kCopper));
@@ -2733,6 +2735,13 @@ TEST_CASE("A mine yields an ore its last operating day produced, or before outpu
     mine.state = sim::MineState::Mothballed;
     CHECK(sim::mineYieldsOre(mine, kCopper));
     CHECK_FALSE(sim::mineYieldsOre(mine, kIron));
+
+    // An ore it has never extracted, though it has output on record of
+    // another: the survey still decides (Codex re-review, P2).
+    mine.bestEstimateTonnes[kLithium.index()] = 3'000;
+    CHECK(sim::mineYieldsOre(mine, kLithium));
+    mine.state = sim::MineState::Operating;
+    CHECK(sim::mineYieldsOre(mine, kLithium));
 
     // A worked-out or closed mine yields nothing.
     for (const sim::MineState spent : {sim::MineState::Depleted, sim::MineState::Closed}) {
@@ -2755,4 +2764,20 @@ TEST_CASE("A mine that has worked out one ore and still mines another is a sourc
     const std::vector<MO> missing = missingOres(content, state);
     CHECK(missing[kIron.index()] == MO::None);
     CHECK(missing[kCopper.index()] == MO::Soon);
+}
+
+TEST_CASE("A mothballed mine stays a source of a surveyed ore it never extracted",
+          "[program][view][missing]") {
+    // Codex's case: the plot's survey shows lithium; the mine worked copper
+    // while lithium was locked and was mothballed; lithium is then unlocked.
+    // Reopened, it would produce lithium, so lithium is not missing.
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = freshState(content);
+    addMine(content, state, kPlayer, sim::MineState::Mothballed, {0, 300, 0});
+    addSurvey(state, kPlayer, kLithium);
+    state.companies[0].completedTechs.push_back(content.resources[kLithium.index()].unlockedBy);
+    const std::vector<MO> missing = missingOres(content, state);
+    CHECK(missing[kLithium.index()] == MO::None);
+    CHECK(missing[kCopper.index()] == MO::None);
+    CHECK(missing[kIron.index()] == MO::Soon);
 }

@@ -1915,13 +1915,18 @@ or the spec, the difference is listed in the spec under "Build
     deliveries, plus every later stage's whole need) is more than stock,
     and none of the company's mines yields it. `Soon` means the current
     or the next stage needs it. A mine yields an ore when it is
-    building, operating or mothballed and, with output on record
-    (`MineView::hasEarnings`), its most recent operating day produced
-    the ore; without output on record, the owner's best survey of the
-    plot shows it. An ore a mine has worked out is no longer a source,
-    though the mine still runs on another (task 019, Codex P1); lifetime
-    extraction no longer counts. A mothballed mine is judged by its last
-    operating day (edge case 9). The rule is public,
+    building, operating or mothballed and either its most recent
+    operating day produced the ore, or it has never extracted the ore
+    and the owner's best survey of the plot shows it. An ore a mine has
+    worked out (extracted before, not on its last operating day) is no
+    longer a source, though the mine still runs on another (task 019,
+    Codex P1); lifetime extraction no longer counts. An ore the mine has
+    never extracted stays a source by its survey even when the mine has
+    output of another on record: a mine that worked copper while lithium
+    was locked, then was mothballed, is still a lithium source once
+    lithium is unlocked, since reopened it would produce lithium (task
+    021, Codex re-review P2). A mothballed mine is judged by its last
+    operating day and its survey (edge case 9). The rule is public,
     `sim::mineYieldsOre` in `sim/include/sim/view.h`, so the Plots tab
     reads it and does not copy it. A locked ore (lithium) counts like
     any other.

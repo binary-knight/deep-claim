@@ -517,11 +517,13 @@ bool mineYieldsOre(const MineView& mine, ResourceId resource) {
         mine.state != MineState::Mothballed) {
         return false;
     }
-    // Output on record says what the mine yields now: an ore it has worked
-    // out is gone from its most recent operating day. Before that, the
-    // owner's best survey of the plot says.
+    // The most recent operating day says what the mine yields now. An ore
+    // it has never extracted, the owner's best survey of the plot says,
+    // even with output of another ore on record (one locked until lately);
+    // an ore extracted before but not that day is worked out.
     const std::size_t r = resource.index();
-    return mine.hasEarnings ? mine.lastOutputTonnes[r] > 0 : mine.bestEstimateTonnes[r] > 0;
+    return mine.lastOutputTonnes[r] > 0 ||
+           (mine.extractedTonnes[r] == 0 && mine.bestEstimateTonnes[r] > 0);
 }
 
 CompanyView makeCompanyView(const Content& content, const WorldState& state, CompanyId company) {

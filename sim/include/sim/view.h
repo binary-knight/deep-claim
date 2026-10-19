@@ -333,10 +333,11 @@ struct CompanyView {
                                           CompanyId company);
 
 // One of the viewer's mines is a source of the ore (spec 011, BR-007): it is
-// building, operating or mothballed, and, with output on record
-// (MineView::hasEarnings), its most recent operating day produced the ore;
-// without, the viewer's own best survey of the plot shows it. An ore the
-// mine has worked out is no longer a source. ProgramView::missingOres counts
+// building, operating or mothballed, and either its most recent operating
+// day produced the ore, or it has never extracted the ore and the viewer's
+// own best survey of the plot shows it, even when the mine has output of
+// another ore on record. An ore it extracted before but not on that day is
+// worked out and no longer a source. ProgramView::missingOres counts
 // sources by this rule.
 [[nodiscard]] bool mineYieldsOre(const MineView& mine, ResourceId resource);
 
