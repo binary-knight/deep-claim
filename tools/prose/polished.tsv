@@ -414,52 +414,52 @@ ui.end_stages	Stages completed
 ui.end_new_game	New game
 notice.command_rejected.delivery	Couldn't deliver {resource} to the program: {reason}.
 notice.command_rejected.stage	Couldn't complete the program stage: {reason}.
-notice.program_fell_behind	{rival} can now found the program before us. Their earliest founding day is {rival_day}; ours is {day}.
-notice.program_past_deadline	At this pace we cannot found the program before the deadline. Our earliest founding day is {day}; the deadline is {deadline}.
+notice.program_fell_behind	{rival} is on track to found the program ahead of us. Their earliest day is {rival_day}; ours is {day}.
+notice.program_past_deadline	At this pace we will miss the program deadline. Our earliest founding day is {day}, and the cutoff is {deadline}.
 ui.pause_on.fell_behind	Falling behind in the race
 ui.stop_heading	Clock stopped: {rule}
-ui.stop_race_heading	Race news. Clock stopped: {rule}
+ui.stop_race_heading	Word on the race. Clock stopped: {rule}
 ui.stop_race_days	Earliest founding: us {day}, {company} {rival_day}
 ui.stop_more	+{count} more
-ui.stop_go_to	Go to {tab}
-ui.stop_for_this	Stop for this
+ui.stop_go_to	Open {tab}
+ui.stop_for_this	Stop the clock for this
 ui.stop_rule_off	Not stopping for this
-ui.log_stopped	Stopped the clock
+ui.log_stopped	Clock stopped
 ui.tab_plots	Plots
 ui.tab_research	Research
 ui.tab_finance	Finance
 ui.tab_program	Program
-ui.race_behind_by.one	Behind by {days} day
-ui.race_behind_by.many	Behind by {days} days
-ui.race_ahead_by.one	Ahead by {days} day
-ui.race_ahead_by.many	Ahead by {days} days
+ui.race_behind_by.one	{days} day behind
+ui.race_behind_by.many	{days} days behind
+ui.race_ahead_by.one	{days} day in hand
+ui.race_ahead_by.many	{days} days in hand
 ui.race_cannot_found	We cannot found the program in time
-ui.race_founding_day	earliest founding {day}
+ui.race_founding_day	earliest founding on {day}
 ui.race_research_due	research due {day}
 ui.race_rival_could_found	{company} could found the program {time}
 ui.time_from_now	in {years} y {days} d
 ui.time_from_now_days	in {days} d
 ui.time_from_now_today	today
-ui.program_last_start	Start this stage's research by {day} to keep pace.
-ui.program_last_start_passed	The last day to start this stage's research and keep pace has passed.
-ui.program_lab_busy	The lab is busy with another project. It is free on {day}.
+ui.program_last_start	Put the lab on this stage by {day} to hold pace.
+ui.program_last_start_passed	The date to start this stage's research on pace has come and gone.
+ui.program_lab_busy	The lab is tied up with other work. The bench clears on {day}.
 ui.program_where_from	Where the ore comes from
 ui.program_from_regions	{resource} may be found in {regions}.
 ui.program_from_region_item	{region} ({odds})
-ui.program_from_research	{resource} is locked until we have {tech}.
-ui.program_from_mines	Our mines yielding {resource}: {mines}.
-ui.program_from_mine_item	{plot}, {tonnes} a day
-ui.program_from_no_mines	None of our mines yields {resource}.
-ui.program_from_surveys	Our surveys show {resource} on {plots}.
-ui.need_pace_title	Start stage {number} research by {day} to keep pace.
-ui.need_pace_passed_title	The last day to start stage {number} research and keep pace has passed.
-ui.need_pace_sub	The research costs {amount}. Borrow if cash is short.
-ui.need_ore_title	The program needs {resource}, and none of our mines yields it.
-ui.need_ore_sub	It may be found in {regions}. Look for plots on the Plots tab.
+ui.program_from_research	We cannot work {resource} until we have {tech}.
+ui.program_from_mines	Workings yielding {resource}: {mines}.
+ui.program_from_mine_item	{plot}, hauling {tonnes} a day
+ui.program_from_no_mines	We have no shaft pulling {resource}.
+ui.program_from_surveys	Survey crews logged {resource} on {plots}.
+ui.need_pace_title	Get stage {number} research underway by {day} to hold the pace.
+ui.need_pace_passed_title	The date to start stage {number} research on pace has come and gone.
+ui.need_pace_sub	It takes {amount} out of the ledger. Borrow if the till is short.
+ui.need_ore_title	The program calls for {resource}, and none of our mines pulls it.
+ui.need_ore_sub	Ground in {regions} may carry the ore. Check the Plots tab.
 ui.plot_mark_may_hold	may hold {resource}
 ui.plot_mark_survey_shows	survey shows {resource}
-ui.bid_stands	Your bid stands: {amount}
-ui.bid_replaces	Replaces your bid of {amount}
+ui.bid_stands	Your bid on the board: {amount}
+ui.bid_replaces	Supersedes your {amount} bid
 ui.act_sell	Sell
 ui.act_mothball	Mothball
 ui.act_read	Read
