@@ -77,6 +77,7 @@ struct SaleRow {
     // the player's survey of it shows. Each "" when there are none.
     std::string may_hold;
     std::string survey_shows;
+    std::string bid_stands;  // "Your bid stands: $1.20M" while the player's bid stands, else ""
 };
 
 // A settled auction in the record under the for-sale table (spec 006).
@@ -158,6 +159,10 @@ struct PlotPanel {
     std::string notice;        // build risk: unsurveyed / survey out / empty / locked only
     std::string notice_class;  // "warn" or "danger"
     std::string contest;       // rival-bid warning with the repeat-bid note, or ""
+    // The player's standing bid here (spec 011, BR-013), and the label that a
+    // second bid replaces it; each "" when no bid of the player's stands.
+    std::string bid_stands;    // "Your bid stands: $1.20M"
+    std::string bid_replaces;  // "Replaces your bid of $1.20M"
     bool listed = false;
     bool owned = false;
     bool can_survey = false;

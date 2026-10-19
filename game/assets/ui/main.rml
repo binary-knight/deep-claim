@@ -273,7 +273,7 @@
                                     <td class="n" data-class-sel="s.index == selected_plot">{{s.ask}}</td>
                                     <td class="n" data-class-sel="s.index == selected_plot">{{s.bids}}</td>
                                     <td class="n" data-class-sel="s.index == selected_plot">{{s.closes}}</td>
-                                    <td data-class-sel="s.index == selected_plot">{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'" data-class-good="s.flag_class == 'good'">{{s.flag}}</span> <span class="pill accent" data-if="s.major">major deposit</span><span class="sub mark strong" data-if="s.survey_shows != ''">{{s.survey_shows}}</span><span class="sub mark" data-if="s.may_hold != ''">{{s.may_hold}}</span></td>
+                                    <td data-class-sel="s.index == selected_plot">{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'" data-class-good="s.flag_class == 'good'">{{s.flag}}</span> <span class="pill accent" data-if="s.major">major deposit</span><span class="sub mark strong" data-if="s.survey_shows != ''">{{s.survey_shows}}</span><span class="sub mark" data-if="s.may_hold != ''">{{s.may_hold}}</span><span class="sub mark" data-if="s.bid_stands != ''">{{s.bid_stands}}</span></td>
                                 </tr>
                             </table>
                             <span class="sub" data-if="no_unlisted != ''">{{no_unlisted}}</span>
@@ -317,7 +317,7 @@
                             <div data-if="panel.any">
                                 <div class="kv"><span class="k">Area</span><span class="v num">{{panel.area}}</span></div>
                                 <div class="kv" data-if="panel.listed"><span class="k">Ask</span><span class="v num">{{panel.ask}}</span></div>
-                                <div class="kv" data-if="panel.auction != ''"><span class="k">Auction</span><span class="v num">{{panel.auction}}</span></div>
+                                <div class="kv" data-if="panel.auction != ''"><span class="k">Auction</span><span class="v num"><span class="line wrapok">{{panel.auction}}</span><span class="subline wrapok" data-if="panel.bid_stands != ''">{{panel.bid_stands}}</span></span></div>
                                 <div class="kv" data-if="panel.owner != ''"><span class="k">Owner</span><span class="v">{{panel.owner}}</span></div>
                                 <div class="kv" data-if="panel.sale != ''"><span class="k">Sold</span><span class="v num"><span class="line wrapok">{{panel.sale}}</span></span></div>
                                 <div class="kv"><span class="k">Mine capex</span><span class="v num">{{panel.capex}}</span></div>
@@ -367,6 +367,8 @@
                                          control: the chip, and Cancel to take it back (spec 007). -->
                                     <div class="field" data-if="panel.listed && !panel.bid_order.pending"><label>Bid</label><input class="text" type="text" data-value="bid_input"/></div>
                                     <button class="primary" data-if="panel.listed && !panel.bid_order.pending" data-event-click="bid(panel.index)">Place bid</button>
+                                    <!-- A second bid replaces the one that stands (spec 011, BR-013). -->
+                                    <span class="sub" data-if="panel.bid_replaces != ''">{{panel.bid_replaces}}</span>
                                     <span class="hrow" data-if="panel.bid_order.pending"><span class="chip accent">{{panel.bid_order.text}}</span><span class="chip warn" data-if="panel.bid_order.not_covered">{{ui_not_covered}}</span><button data-event-click="cancel(panel.bid_order.id)">{{ui_cancel}}</button></span>
                                     <button data-if="!panel.survey_order.pending && panel.can_survey && panel.can_afford_survey" data-event-click="survey(panel.index)">{{panel.survey_label}}</button>
                                     <button class="disabled" data-if="!panel.survey_order.pending && (!panel.can_survey || !panel.can_afford_survey)">{{panel.survey_label}}</button>

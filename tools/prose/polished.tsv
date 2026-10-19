@@ -460,3 +460,7 @@ ui.plot_mark_may_hold	may hold {resource}
 ui.plot_mark_survey_shows	survey shows {resource}
 ui.bid_stands	Your bid stands: {amount}
 ui.bid_replaces	Replaces your bid of {amount}
+ui.act_sell	Sell
+ui.act_mothball	Mothball
+ui.act_read	Read
+ui.panel_title	Plot {plot} · {region}

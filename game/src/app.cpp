@@ -308,6 +308,7 @@ void App::bindModel() {
         h.RegisterMember("major", &SaleRow::major);
         h.RegisterMember("may_hold", &SaleRow::may_hold);
         h.RegisterMember("survey_shows", &SaleRow::survey_shows);
+        h.RegisterMember("bid_stands", &SaleRow::bid_stands);
     }
     if (auto h = ctor.RegisterStruct<SoldRow>()) {
         h.RegisterMember("index", &SoldRow::index);
@@ -365,6 +366,8 @@ void App::bindModel() {
         h.RegisterMember("odds", &PlotPanel::odds);
         h.RegisterMember("may_hold", &PlotPanel::may_hold);
         h.RegisterMember("survey_shows", &PlotPanel::survey_shows);
+        h.RegisterMember("bid_stands", &PlotPanel::bid_stands);
+        h.RegisterMember("bid_replaces", &PlotPanel::bid_replaces);
         h.RegisterMember("owner", &PlotPanel::owner);
         h.RegisterMember("survey_title", &PlotPanel::survey_title);
         h.RegisterMember("estimates", &PlotPanel::estimates);

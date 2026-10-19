@@ -262,6 +262,13 @@ const sim::MineView* findMine(const sim::CompanyView& view, sim::MineId id) {
     return nullptr;
 }
 
+// The player's bid standing on a listed plot (spec 011, BR-013), or "".
+std::string standingBid(const sim::Content& content, const sim::AuctionView& auction) {
+    return auction.myBid > sim::Money::zero()
+               ? text(content, "ui.bid_stands", {{"amount", formatMoney(auction.myBid)}})
+               : "";
+}
+
 // Bids on a listed plot that are not the player's.
 std::uint32_t rivalBids(const sim::AuctionView& auction) {
     return auction.bidCount - (auction.myBid > sim::Money::zero() ? 1U : 0U);
@@ -915,7 +922,7 @@ std::optional<PendingNeed> paceNeed(const sim::Content& content, const sim::Comp
         row.days = daysUntil(content, *program.lastStartDay, view.day);
     }
     row.action = 6;
-    row.act_label = "Program";
+    row.act_label = text(content, "ui.tab_program");
     return PendingNeed{days, kWarningPriority + 2, std::move(row)};
 }
 
@@ -935,13 +942,14 @@ void addOreNeeds(const sim::Content& content, const sim::CompanyView& view,
         row.title = text(content, "ui.need_ore_title", {{"resource", content.resources[r].name}});
         row.sub = regions.empty() ? "" : text(content, "ui.need_ore_sub", {{"regions", regions}});
         row.action = 7;
-        row.act_label = "Plots";
+        row.act_label = text(content, "ui.tab_plots");
         pending.push_back({0, kWarningPriority + 2, std::move(row)});
     }
 }
 
-// Standing problems: insolvency, storage above a tenth of cash, keeping pace
-// in the race, a missing ore, idle mines.
+// Standing problems: insolvency, storage the sim warns of
+// (sim::CompanyView::storageWarning), keeping pace in the race, a missing
+// ore, idle mines.
 void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
                      const Orders& orders, std::vector<PendingNeed>& pending) {
     if (view.monthsInsolvent > 0) {
@@ -950,19 +958,17 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
                          {{"months", monthsBeforeBankruptcy(content, view)}});
         row.sub = text(content, "ui.need_insolvent_sub");
         row.action = 4;
-        row.act_label = "Finance";
+        row.act_label = text(content, "ui.tab_finance");
         pending.push_back({0, kWarningPriority, std::move(row)});
     }
-    if (view.monthlyStorageCost > sim::Money::zero() &&
-        (view.cash <= sim::Money::zero() ||
-         view.monthlyStorageCost.cents() > view.cash.cents() / 10)) {
+    if (view.storageWarning) {
         NeedRow row;
         row.title = text(content, "ui.need_storage_title");
         row.sub = text(
             content, "ui.need_storage_sub",
             {{"amount", formatMoney(view.monthlyStorageCost)}, {"cash", formatMoney(view.cash)}});
         row.action = 3;
-        row.act_label = "Sell";
+        row.act_label = text(content, "ui.act_sell");
         pending.push_back({0, kWarningPriority + 1, std::move(row)});
     }
     if (std::optional<PendingNeed> pace = paceNeed(content, view)) {
@@ -978,7 +984,7 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
         row.sub = text(content, "ui.need_idle_sub");
         row.action = 2;
         row.target = static_cast<int>(mine.id.value());
-        row.act_label = "Mothball";
+        row.act_label = text(content, "ui.act_mothball");
         row.order = mineOrderMark(orders, mine.id);
         pending.push_back({0, kWarningPriority + 3, std::move(row)});
     }
@@ -1024,7 +1030,7 @@ void addDecisionNeeds(const sim::Content& content, const sim::CompanyView& view,
         row.sub = textPlural(content, "ui.need_lab_idle_sub", startable,
                              {{"count", std::to_string(startable)}});
         row.action = 5;
-        row.act_label = "Research";
+        row.act_label = text(content, "ui.tab_research");
         pending.push_back({0, kWarningPriority + 4, std::move(row)});
     }
     for (const sim::SurveyView& survey : view.surveys) {
@@ -1040,7 +1046,7 @@ void addDecisionNeeds(const sim::Content& content, const sim::CompanyView& view,
                        {{"day", std::to_string(plot.auction->closesOnDay)}});
         row.action = 1;
         row.target = static_cast<int>(plot.id.value());
-        row.act_label = "Read";
+        row.act_label = text(content, "ui.act_read");
         pending.push_back({0, kWarningPriority + 5, std::move(row)});
     }
 }
@@ -1390,6 +1396,7 @@ void fillSale(const Session& session, UiModel& model) {
         fillSurveyCell(content, view, plot, row);
         row.has_flag = !row.flag.empty();
         std::tie(row.may_hold, row.survey_shows) = plotMarks(content, view, plot);
+        row.bid_stands = standingBid(content, *plot.auction);
         model.for_sale.push_back(row);
     }
     if (view.unlistedPlotsRemaining > 0) {
@@ -1578,7 +1585,8 @@ void fillPanel(const Session& session, const Orders& orders, UiModel& model) {
     const sim::PlotView& plot = view.plots[static_cast<std::size_t>(model.selected_plot)];
     panel.index = static_cast<int>(plot.id.value());
     panel.title =
-        std::format("Plot {} · {}", plotLabel(plot.id), content.regions[plot.region.index()].name);
+        text(content, "ui.panel_title",
+             {{"plot", plotLabel(plot.id)}, {"region", content.regions[plot.region.index()].name}});
     panel.area = std::format("{} ha", plot.areaHectares);
     panel.listed = plot.listing == sim::PlotListing::Listed;
     panel.owned = plot.owner == Session::kPlayer;
@@ -1594,6 +1602,11 @@ void fillPanel(const Session& session, const Orders& orders, UiModel& model) {
         panel.auction = text(content, "ui.auction_closes",
                              {{"day", std::to_string(plot.auction->closesOnDay)},
                               {"bids", std::to_string(plot.auction->bidCount)}});
+        panel.bid_stands = standingBid(content, *plot.auction);
+        if (!panel.bid_stands.empty()) {
+            panel.bid_replaces =
+                text(content, "ui.bid_replaces", {{"amount", formatMoney(plot.auction->myBid)}});
+        }
     }
     panel.capex = formatMoney(plot.mineCapexQuote);
     panel.odds = oddsText(content, plot);
@@ -2393,7 +2406,11 @@ void fillEnd(const Session& session, UiModel& model) {
     end.cash_label = text(content, "ui.end_cash");
     end.cash = formatMoney(view.cash);
     end.mines_label = text(content, "ui.end_mines");
-    end.mines = std::to_string(view.mines.size());
+    // Open mines (spec 011, BR-012): a worked-out mine, or one shut by the
+    // owner's bankruptcy, is not counted.
+    end.mines = std::to_string(std::ranges::count_if(view.mines, [](const sim::MineView& mine) {
+        return mine.state != sim::MineState::Depleted && mine.state != sim::MineState::Closed;
+    }));
     end.stages_label = text(content, "ui.end_stages");
     end.stages = std::to_string(view.program.stagesCompleted);
     end.new_game = text(content, "ui.end_new_game");

@@ -1590,6 +1590,10 @@ constexpr auto kStringKeys = std::to_array<StringKeySpec>({
     {"ui.plot_mark_survey_shows", "resource"},
     {"ui.bid_stands", "amount"},
     {"ui.bid_replaces", "amount"},
+    {"ui.act_sell", ""},
+    {"ui.act_mothball", ""},
+    {"ui.act_read", ""},
+    {"ui.panel_title", "plot,region"},
 });
 
 // Names of the {placeholders} a template uses. Braces that do not form a

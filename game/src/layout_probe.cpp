@@ -703,6 +703,36 @@ private:
     bool ok_ = true;
 };
 
+// The Needs you rows against the view (spec 011, BR-014): the storage row
+// stands exactly when the sim's view raises its storage warning, and each
+// row's button reads its catalogue label. Returns whether the warning stood.
+bool checkNeedRows(game::App& app, std::string_view where, Checks& checks) {
+    const sim::Content& content = app.session().content();
+    const bool warned = app.session().view().storageWarning;
+    const game::UiModel& model = app.model();
+    const std::string storage = game::text(content, "ui.need_storage_title");
+    checks.same(std::format("{}: a storage row under Needs you", where),
+                std::ranges::any_of(model.needs,
+                                    [&](const game::NeedRow& row) { return row.title == storage; }),
+                warned);
+    // Action 1 is a plot's: Read, or the auction row's Bid and Raise bid.
+    const std::array<const char*, 7> keys = {"ui.act_read",    "ui.act_mothball", "ui.act_sell",
+                                             "ui.tab_finance", "ui.tab_research", "ui.tab_program",
+                                             "ui.tab_plots"};
+    for (const game::NeedRow& row : model.needs) {
+        if (row.action >= 2 && row.action <= 7) {
+            checks.same(std::format("{}: \"{}\" button", where, row.title), row.act_label,
+                        game::text(content, keys.at(static_cast<std::size_t>(row.action) - 1)));
+        } else if (row.action == 1 && row.act_label != "Bid" && row.act_label != "Raise bid") {
+            checks.same(std::format("{}: \"{}\" button", where, row.title), row.act_label,
+                        game::text(content, keys.at(0)));
+        }
+    }
+    std::cout << std::format("    {}: storage warning {}, {} needs-you rows\n", where,
+                             warned ? "raised" : "not raised", model.needs.size());
+    return warned;
+}
+
 // The text under an element as the player reads it: hidden children left out.
 std::string visibleText(Rml::Element* e) {
     std::string out;
@@ -1666,6 +1696,7 @@ int probeLosingMine(Rml::Context& context, game::App& app, LoggingSystem& system
         stopped.speed == game::Speed::Paused ? "stopped" : "running", stopped.stopped,
         stopped.noticeDay, stopped.noticeText, stopped.status);
     checkNotice(app, content, stopped, true, checks);
+    checkNeedRows(app, "losing mine", checks);
     checkExactPrices(checks);
     const LosingFigures expected = simFigures(app.session(), stopped, checks);
     if (expected.earns.size() != kWidestFigure) {
@@ -2312,6 +2343,7 @@ std::optional<std::size_t> probeOreFrames(Rml::Context& context, game::App& app,
         strong = checkPlotMarks(context, app, where, checks);
     }
     checkOreNeeds(app, label, checks);
+    checkNeedRows(app, label, checks);
     return ok ? std::optional<std::size_t>(strong) : std::nullopt;
 }
 
@@ -2334,6 +2366,82 @@ void checkNoOreMarks(game::App& app, Checks& checks) {
         std::ranges::none_of(
             model.needs, [](const game::NeedRow& need) { return need.action == kOpenPlotsAction; }),
         "a missing-ore row stands after the game is over");
+}
+
+// ---- a standing bid (spec 011, BR-013) ----
+
+constexpr int kBidFailure = 15;
+
+// A new game with the player's bid standing on the cheapest listed plot, at
+// both frames: the plot's for-sale row and its panel read the bid, the panel
+// labels a second bid as replacing it, and no other row reads a bid.
+int probeStandingBid(Rml::Context& context, game::App& app, LoggingSystem& system,
+                     const sim::Content& content) {
+    Checks checks("BID");
+    app.startGame(kScenarioSeed);
+    game::Session& session = app.session();
+    game::AutoPause never;
+    never.enabled.fill(false);
+    session.setAutoPause(never);
+    session.submit(sim::TakeLoan{{}, content.balance.loanMinPrincipal * 4});
+    const sim::PlotId target = cheapestListed(session.view());
+    if (!target.valid()) {
+        std::cout << "BID: no plot is listed on day 0\n";
+        return kScenarioFailure;
+    }
+    const sim::Money bid = session.view().plots[target.index()].askPrice;
+    session.submit(sim::BidOnPlot{{}, target, bid});
+    session.stepOneDay();
+    const sim::PlotView& plot = session.view().plots[target.index()];
+    if (!plot.auction || plot.auction->myBid != bid) {
+        std::cout << std::format("BID: the bid on plot {} does not stand on day {}\n",
+                                 target.value(), session.day());
+        return kScenarioFailure;
+    }
+    const std::string stands =
+        game::text(content, "ui.bid_stands", {{"amount", game::formatMoney(bid)}});
+    const std::string replaces =
+        game::text(content, "ui.bid_replaces", {{"amount", game::formatMoney(bid)}});
+    bool laidOut = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== standing bid, frame {}x{}{} ==\n", frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        app.selectPlot(static_cast<int>(target.value()));
+        laidOut = probeTab(context, app, system, frame, kPlotsTab, Popover::None) && laidOut;
+        app.refreshNow();
+        settle(context);
+        const std::string where = std::format("bid {}x{}", frame.width, frame.height);
+        Rml::Element* root = context.GetDocument(0)->GetElementById("content");
+        const std::vector<game::SaleRow>& rows = app.model().for_sale;
+        const std::vector<Rml::Element*> shown = visibleElements(root, "tr", "row");
+        checks.expect(shown.size() >= rows.size(), where + ": fewer rows on the tab than for sale");
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            const bool mine = rows[i].index == static_cast<int>(target.value());
+            checks.same(where + ": plot " + rows[i].name + "'s bid", rows[i].bid_stands,
+                        mine ? stands : std::string());
+            if (mine && i < shown.size()) {
+                checks.expect(visibleText(shown[i]).find(stands) != std::string::npos,
+                              where + ": the plot's row does not read \"" + stands + "\"");
+            }
+        }
+        const game::PlotPanel& panel = app.model().panel;
+        checks.same(where + ": the panel's bid", panel.bid_stands, stands);
+        checks.same(where + ": the panel's second bid", panel.bid_replaces, replaces);
+        const std::string text = visibleText(root);
+        for (const std::string& line : {stands, replaces}) {
+            checks.expect(text.find(line) != std::string::npos,
+                          where + ": the plot panel does not read \"" + line + "\"");
+        }
+    }
+    std::cout << std::format("\nstanding bid on plot {}, day {}: \"{}\"; \"{}\"\n", target.value(),
+                             session.day(), stands, replaces);
+    if (!checks.ok()) {
+        return kBidFailure;
+    }
+    return laidOut ? 0 : kLayoutFailure;
 }
 
 template <typename T, typename Matches>
@@ -3535,7 +3643,11 @@ EndExpected simEnd(const game::Session& session, const std::string& result, Chec
         }
     }
     expected.cash = game::formatMoney(view.cash);
-    expected.mines = std::to_string(view.mines.size());
+    // Open mines (spec 011, BR-012): a worked-out mine, or one shut by the
+    // owner's bankruptcy, is not counted.
+    expected.mines = std::to_string(std::ranges::count_if(view.mines, [](const sim::MineView& m) {
+        return m.state != sim::MineState::Depleted && m.state != sim::MineState::Closed;
+    }));
     expected.stages = std::to_string(view.program.stagesCompleted);
     expected.button = game::text(content, "ui.end_new_game");
     return expected;
@@ -3760,6 +3872,7 @@ int probeEndScreen(Rml::Context& context, game::App& app, LoggingSystem& system,
     checks.same("the session's ending", sessionResult(session), result);
     checks.expect(session.gameOver(), "the session does not report the game over");
     checkNoOreMarks(app, checks);
+    checkNeedRows(app, "end " + result, checks);
     if (!checks.ok()) {
         return kEndFailure;
     }
@@ -4666,6 +4779,10 @@ int run(std::span<char*> args) {
         }
         // The race (spec 010), on a game of its own.
         if (const int code = probeRace(*context, app, system, *loaded.content, dug); code != 0) {
+            exitCode = code;
+        }
+        // A standing bid (spec 011), on a game of its own.
+        if (const int code = probeStandingBid(*context, app, system, *loaded.content); code != 0) {
             exitCode = code;
         }
     }
