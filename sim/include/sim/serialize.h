@@ -339,7 +339,7 @@ void serialize(Archive& ar, BalanceParams& balance) {
        balance.priceFloorMult, balance.priceCapMult, balance.demandGrowthPerYear,
        balance.marketRatioMin, balance.marketRatioMax, balance.demandFactorMin,
        balance.demandFactorMax, balance.defaultSellPolicy, balance.defaultCoverCosts,
-       balance.mineLossNoticeMinShare, balance.mineLossRearmDays);
+       balance.mineLossNoticeMinShare, balance.mineLossRearmDays, balance.storageWarningCashShare);
 }
 
 template <class Archive>
@@ -364,7 +364,7 @@ void serialize(Archive& ar, ProgramStage& stage) {
 
 template <class Archive>
 void serialize(Archive& ar, ProgramDef& program) {
-    ar(program.deadlineDay, program.stages);
+    ar(program.deadlineDay, program.stages, program.paceWarningDays);
 }
 
 template <class Archive>

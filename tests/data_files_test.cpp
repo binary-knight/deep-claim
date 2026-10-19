@@ -137,6 +137,21 @@ TEST_CASE("Shipped program has the deadline and the three measured stages",
     }
 }
 
+TEST_CASE("Shipped pace and storage warnings are the spec's", "[content][data][spec011]") {
+    // Spec 011 (BR-004, BR-014): the pace warning comes a year before the
+    // last day to start research, since in playtest 5 cash stayed short of
+    // stage 2's research for about 1,200 days; the storage warning keeps the
+    // tenth of cash the client used before, as data (BR-015).
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& c = *result.content;
+
+    CHECK(c.program.paceWarningDays == 360);
+    CHECK(c.program.paceWarningDays == sim::kDaysPerYear);
+    CHECK(c.balance.storageWarningCashShare == sim::Fixed::fromRatio(1, 10));
+}
+
 TEST_CASE("Shipped ores break even at the chosen share of base price", "[content][data][spec008]") {
     // Spec 008 (BR-003, AC-001): the share of an ore's base price a mine at
     // base output must earn to cover its running cost (cost per day / base

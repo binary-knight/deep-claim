@@ -69,6 +69,7 @@ content::Sources goodSources() {
       "demand_factor_min": 0.01, "demand_factor_max": 1000,
       "mine_loss_notice_days": 5,
       "mine_loss_notice_min_share": 0.05, "mine_loss_rearm_days": 30,
+      "storage_warning_cash_share": 0.1,
       "default_sell_policy": {"enabled": true, "reserve_tonnes": 0, "floor_price": 0},
       "default_cover_costs": true
     })";
@@ -85,6 +86,7 @@ content::Sources goodSources() {
     })";
     s.program = R"({
       "deadline_day": 10800,
+      "program_pace_warning_days": 360,
       "stages": [
         {"id": "stage_1", "cost": 1000000, "research": "program_stage_1",
          "requires": [{"resource": "iron", "tonnes": 1000}]},
@@ -1131,4 +1133,119 @@ TEST_CASE("The in-code fixture carries a program the loader would accept", "[con
     CHECK(std::any_of(last.begin(), last.end(), [&c](const sim::ProgramRequirement& requirement) {
         return requirement.resource == c.findResource("lithium");
     }));
+}
+
+TEST_CASE("The pace warning loads and lies between 0 and the deadline", "[content][spec011]") {
+    // Spec 011 (BR-004): how many days before the last day to start research
+    // the Dashboard lists it. A warning after the deadline could never show.
+    const auto good = content::loadFromStrings(goodSources());
+    REQUIRE(good.ok());
+    CHECK(good.content->program.paceWarningDays == 360);
+
+    const auto with = [](std::string_view value) {
+        content::Sources s = goodSources();
+        s.program = replaceOnce(s.program, R"("program_pace_warning_days": 360)",
+                                R"("program_pace_warning_days": )" + std::string(value));
+        return content::loadFromStrings(s);
+    };
+    const auto none = with("0");
+    REQUIRE(none.ok());
+    CHECK(none.content->program.paceWarningDays == 0);
+    const auto whole = with("10800");
+    REQUIRE(whole.ok());
+    CHECK(whole.content->program.paceWarningDays == 10800);
+
+    const auto negative = with("-1");
+    CHECK_FALSE(negative.ok());
+    CHECK(hasError(negative, "program.json", "program_pace_warning_days", "must be between 0"));
+    const auto late = with("10801");
+    CHECK_FALSE(late.ok());
+    CHECK(hasError(late, "program.json", "program_pace_warning_days",
+                   "must not exceed deadline_day"));
+    const auto notWhole = with("2.5");
+    CHECK_FALSE(notWhole.ok());
+    CHECK(hasError(notWhole, "program.json", "program_pace_warning_days", "expected an integer"));
+
+    content::Sources missing = goodSources();
+    missing.program = replaceOnce(missing.program, R"("program_pace_warning_days": 360,)", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "program.json", "program_pace_warning_days", "missing required key"));
+
+    // A deadline already refused is not reported a second time through the
+    // warning that depends on it.
+    content::Sources noDeadline = goodSources();
+    noDeadline.program = replaceOnce(noDeadline.program, R"("deadline_day": 10800,)", "");
+    const auto orphan = content::loadFromStrings(noDeadline);
+    CHECK(hasError(orphan, "program.json", "deadline_day", "missing required key"));
+    CHECK_FALSE(hasError(orphan, "program.json", "program_pace_warning_days", ""));
+}
+
+TEST_CASE("The storage warning's share of cash loads and is above 0 and at most 1",
+          "[content][spec011]") {
+    // Spec 011 (BR-014): a month's storage above this share of cash is a
+    // problem the Dashboard lists.
+    const auto good = content::loadFromStrings(goodSources());
+    REQUIRE(good.ok());
+    CHECK(good.content->balance.storageWarningCashShare == sim::Fixed::fromRatio(1, 10));
+
+    const auto with = [](std::string_view value) {
+        content::Sources s = goodSources();
+        s.balance =
+            replaceOnce(s.balance, R"("storage_warning_cash_share": 0.1)",
+                        std::string(R"("storage_warning_cash_share": )") + std::string(value));
+        return content::loadFromStrings(s);
+    };
+    const auto least = with("0.000001");
+    REQUIRE(least.ok());
+    CHECK(least.content->balance.storageWarningCashShare == sim::Fixed::fromRaw(1));
+    const auto whole = with("1");
+    REQUIRE(whole.ok());
+    CHECK(whole.content->balance.storageWarningCashShare == sim::Fixed::one());
+
+    for (const std::string_view bad : {"0", "-0.1", "1.01"}) {
+        INFO(bad);
+        const auto result = with(bad);
+        CHECK_FALSE(result.ok());
+        CHECK(hasError(result, "balance.json", "storage_warning_cash_share", "must be between"));
+    }
+    const auto text = with(R"("a tenth")");
+    CHECK_FALSE(text.ok());
+    CHECK(hasError(text, "balance.json", "storage_warning_cash_share", "expected a number"));
+
+    content::Sources missing = goodSources();
+    missing.balance = replaceOnce(missing.balance, R"("storage_warning_cash_share": 0.1,)", "");
+    const auto absent = content::loadFromStrings(missing);
+    CHECK_FALSE(absent.ok());
+    CHECK(hasError(absent, "balance.json", "storage_warning_cash_share", "missing required key"));
+}
+
+TEST_CASE("The pace and storage warnings are part of the content fingerprint",
+          "[content][spec011]") {
+    const auto loaded = content::loadFromStrings(goodSources());
+    REQUIRE(loaded.ok());
+    const sim::Content& original = *loaded.content;
+    const std::uint64_t hash = sim::hashContent(original);
+
+    sim::Content pace = original;
+    pace.program.paceWarningDays += 1;
+    CHECK(sim::hashContent(pace) != hash);
+
+    sim::Content storage = original;
+    storage.balance.storageWarningCashShare = sim::Fixed::fromRatio(1, 5);
+    CHECK(sim::hashContent(storage) != hash);
+}
+
+TEST_CASE("A stage's research project may not require other research", "[content][spec011]") {
+    // Spec 011 (GA-009): the earliest founding day counts a stage project's
+    // time and nothing before it, so a stage project with ordinary
+    // prerequisites would make the race's figures wrong.
+    content::Sources s = goodSources();
+    s.techs =
+        replaceOnce(s.techs, R"("requires_program_stage": 1, "effects": [])",
+                    R"("requires_program_stage": 1, "requires": ["seismic_1"], "effects": [])");
+    const auto result = content::loadFromStrings(s);
+    CHECK_FALSE(result.ok());
+    CHECK(hasError(result, "program.json", "stages[1].research",
+                   "tech 'program_stage_2' must not require other research"));
 }

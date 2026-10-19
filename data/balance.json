@@ -35,6 +35,7 @@
   "mine_loss_notice_days": 5,
   "mine_loss_notice_min_share": 0.05,
   "mine_loss_rearm_days": 30,
+  "storage_warning_cash_share": 0.1,
   "default_sell_policy": { "enabled": true, "reserve_tonnes": 0, "floor_price": 0 },
   "default_cover_costs": true
 }

@@ -147,6 +147,9 @@ struct BalanceParams {
     // After a notice, the consecutive days that are not losing days a mine
     // must have before it can be told again.
     std::uint32_t mineLossRearmDays = 0;
+    // Spec 011 (BR-014): a month's storage above this share of cash is a
+    // standing problem. Above zero and at most one.
+    Fixed storageWarningCashShare;
     // Commodity market dynamics (see DESIGN.md, step 9).
     std::uint32_t marketSupplySmoothingDays = 0;  // EMA window for company supply
     std::uint32_t marketPriceAdjustDays = 0;      // days for price to close most of the gap
@@ -243,6 +246,9 @@ struct ProgramStage {
 // may leave the program empty.
 struct ProgramDef {
     Day deadlineDay = 0;
+    // Spec 011 (BR-004): days before the last day to start a stage's research
+    // from which the player is warned; from 0 up to the deadline.
+    Day paceWarningDays = 0;
     std::vector<ProgramStage> stages;
 };
 

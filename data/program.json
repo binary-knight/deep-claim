@@ -1,5 +1,6 @@
 {
   "deadline_day": 10800,
+  "program_pace_warning_days": 360,
   "stages": [
     {
       "id": "stage_1",

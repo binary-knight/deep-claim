@@ -865,6 +865,7 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
                     "mine_loss_notice_days",
                     "mine_loss_notice_min_share",
                     "mine_loss_rearm_days",
+                    "storage_warning_cash_share",
                     "plots_listed_per_month",
                     "opening_min_mineable",
                     "opening_max_locked_region",
@@ -964,6 +965,11 @@ void parseBalance(const json& document, sim::BalanceParams& balance, ErrorSink& 
     constexpr std::int64_t kMaxLossRearmDays = 3600;  // ten in-game years
     balance.mineLossRearmDays = static_cast<std::uint32_t>(
         valueOr(node.integer("mine_loss_rearm_days", true, 1, kMaxLossRearmDays), 1LL));
+    // Spec 011 (BR-014): storage above this share of cash is a standing
+    // problem. Zero would flag any storage at all.
+    balance.storageWarningCashShare = valueOr(
+        node.fixed("storage_warning_cash_share", true, sim::Fixed::fromRaw(1), sim::Fixed::one()),
+        sim::Fixed::one());
     // Spec 001: the standing sell order every company starts with.
     if (const std::optional<Node> policy = node.object("default_sell_policy", true)) {
         policy->allowKeys({"enabled", "reserve_tonnes", "floor_price"});
@@ -1087,9 +1093,15 @@ void parseStageResearch(const Node& node, const sim::Content& content,
         node.report("research", "unknown tech '" + *name + "'");
         return;
     }
-    if (position && content.techs[stage.research.index()].requiresProgramStage != *position) {
+    const sim::TechDef& tech = content.techs[stage.research.index()];
+    if (position && tech.requiresProgramStage != *position) {
         node.report("research", "tech '" + *name + "' must have requires_program_stage " +
                                     std::to_string(*position));
+    }
+    // Spec 011 (GA-009): the earliest founding day counts a stage project's
+    // own time and nothing before it.
+    if (!tech.prerequisites.empty()) {
+        node.report("research", "tech '" + *name + "' must not require other research");
     }
 }
 
@@ -1133,9 +1145,18 @@ void parseProgram(const json& document, const sim::Content& content, sim::Progra
         return;
     }
     const Node node(document, "", sink);
-    node.allowKeys({"deadline_day", "stages"});
-    program.deadlineDay =
-        static_cast<sim::Day>(valueOr(node.integer("deadline_day", true, 1, kMaxDays), 0LL));
+    node.allowKeys({"deadline_day", "program_pace_warning_days", "stages"});
+    const std::optional<std::int64_t> deadline = node.integer("deadline_day", true, 1, kMaxDays);
+    program.deadlineDay = static_cast<sim::Day>(valueOr(deadline, 0LL));
+    // Spec 011 (BR-004): a warning that starts after the deadline could never
+    // be seen. Checked against the deadline only when the deadline itself is
+    // usable, so a refused deadline is reported once.
+    const std::optional<std::int64_t> pace =
+        node.integer("program_pace_warning_days", true, 0, kMaxDays);
+    if (pace && deadline && *pace > *deadline) {
+        node.report("program_pace_warning_days", "must not exceed deadline_day");
+    }
+    program.paceWarningDays = static_cast<sim::Day>(valueOr(pace, 0LL));
     const auto stages = node.objectArray("stages", true);
     if (!stages) {
         return;
