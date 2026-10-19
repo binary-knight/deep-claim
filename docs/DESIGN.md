@@ -1819,7 +1819,10 @@ or the spec, the difference is listed in the spec under "Build
     stage's completion order applies the day after, and the next
     stage's project can start that same day.
   - A lab busy with another project takes the stage's project the day
-    after that project ends.
+    after that project ends. The same holds once the stage's research is
+    done (task 019, Codex P1): the completion order applies today, but
+    the next stage's project starts the day the lab is free. On the
+    last stage nothing more needs the lab, so the founding day is today.
   - `foundingDayIfStartedOn(content, stage, startDay)` is that
     arithmetic: the start day plus, for the stage and each later one,
     the project's duration and one day. On the shipped data, three
@@ -1829,8 +1832,11 @@ or the spec, the difference is listed in the spec under "Build
   - It reads research records, stages and their days, and bankruptcy,
     never cash or deliveries. No research can be sped up, so the day
     never moves earlier.
-  - `leadingRivalFoundingDay` is the earliest day among the company's
-    solvent rivals; on a tie the lowest company index leads.
+  - `leadingRival` (public in `sim/include/sim/program.h` since task
+    019) names the company's solvent rival that could found soonest,
+    with that day; on a tie the lowest company index leads.
+    `leadingRivalFoundingDay` is its day. The pace check, the view and
+    `lastStartDay` all answer from it.
   - Two tests have one statement each, and every caller answers from
     it. `behindLeadingRival`: the company's day is later than its
     leading solvent rival's. `foundsPastDeadline`: the company's day is
@@ -1864,7 +1870,13 @@ or the spec, the difference is listed in the spec under "Build
   `ProgramFellBehind` (naming the lowest-indexed rival on the leading day,
   with both days) or `ProgramPastDeadline`; drawing level or ahead clears
   `programBehind` with no notice. A bankrupt company's flags are left as
-  they stood. Both flags are saved and hashed. See
+  they stood. Both flags are saved and hashed.
+  - The `Simulation` constructor runs the same check once the companies
+    are made (task 019, Codex P2), so the flags hold their rule from
+    day 0 and a save before the first tick loads. A world that starts
+    past the deadline (or, in principle, behind) raises its notices in
+    the day-0 report, beside the plots listed at the start. Fresh
+    companies are level, so none starts behind. See
   `docs/adrs/F-2026-10-18-reading-the-race-002-pace-check-tick-step-and-flags.md`.
   - Both flags are recomputed every tick. The design made
     `programPastDeadline` stick once set; recomputing it gives the same
@@ -1883,6 +1895,10 @@ or the spec, the difference is listed in the spec under "Build
   - `ProgramPublicView`, for every company: `earliestFoundingDay`,
     `researchDueDay` (the stage project's finish day while it is under
     way) and `pastDeadline` (`foundsPastDeadline`).
+  - `ProgramView`, the viewer's own, always: `leadingRival` and
+    `leadingRivalFoundingDay`, from `sim::leadingRival` (invalid and
+    empty with no solvent rival), so the client names the leader and
+    does not rank rivals itself (task 019).
   - `ProgramView`, the viewer's own, while its stage project has not
     started and the game is open: `lastStartDay`, the last day to start
     it and still found no later than the target. The target is the
@@ -1899,8 +1915,13 @@ or the spec, the difference is listed in the spec under "Build
     deliveries, plus every later stage's whole need) is more than stock,
     and none of the company's mines yields it. `Soon` means the current
     or the next stage needs it. A mine yields an ore when it is
-    building, operating or mothballed and its extracted or best-estimate
-    tonnes of that ore are above zero. The rule is public,
+    building, operating or mothballed and, with output on record
+    (`MineView::hasEarnings`), its most recent operating day produced
+    the ore; without output on record, the owner's best survey of the
+    plot shows it. An ore a mine has worked out is no longer a source,
+    though the mine still runs on another (task 019, Codex P1); lifetime
+    extraction no longer counts. A mothballed mine is judged by its last
+    operating day (edge case 9). The rule is public,
     `sim::mineYieldsOre` in `sim/include/sim/view.h`, so the Plots tab
     reads it and does not copy it. A locked ore (lithium) counts like
     any other.
@@ -1995,6 +2016,9 @@ confirmed for Windows/MSVC only when CI runs.
   the sim runner's company 0, whose cover costs are on, so its effect on
   balance is in the gated sweep's before and after figures, not here.
   It is pinned by the cover-costs tests in `tests/finance_test.cpp`.
+- **The review fixes (task 019) moved none of them.** The busy lab
+  after research, `mineYieldsOre`, the leading rival in the view and
+  the flags settled at construction left all three values as they were.
 - **Once, not twice.** The spec (BR-016) and the design expected a
   second move for cover costs. It did not come, for the reason above.
   The spec lists this under "Build (2026-10-19)".

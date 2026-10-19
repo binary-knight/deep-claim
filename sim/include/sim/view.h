@@ -148,6 +148,12 @@ struct ProgramView {
     // (Company::programStageDays): stagesCompleted of them.
     std::vector<Day> stageDays;
     std::optional<ProgramStageView> stage;  // the current stage; empty when complete
+    // The solvent rival that could found the program soonest, and that day
+    // (sim::leadingRival; on a tie the lowest company index, the rival the
+    // pace check names). Invalid and empty when the viewer has no solvent
+    // rival. Filled whatever the viewer's own state.
+    CompanyId leadingRival;
+    std::optional<Day> leadingRivalFoundingDay;
     // Keeping pace (spec 011, BR-004), while the current stage's project has
     // not started and the game is being played: the last day it can start
     // and still found the program no later than the leading solvent rival
@@ -163,9 +169,8 @@ struct ProgramView {
     // The last day to start has passed or is no more than
     // ProgramDef::paceWarningDays from today.
     bool paceWarning = false;
-    // Per ore, indexed by ResourceId. A mine yields an ore while it is
-    // building, operating or mothballed and shows it in extractedTonnes or
-    // bestEstimateTonnes. All None once the program is complete, the game
+    // Per ore, indexed by ResourceId; a mine yields an ore by
+    // sim::mineYieldsOre. All None once the program is complete, the game
     // has ended or the viewer is bankrupt.
     std::vector<MissingOre> missingOres;
 };
@@ -327,9 +332,12 @@ struct CompanyView {
 [[nodiscard]] CompanyView makeCompanyView(const Content& content, const WorldState& state,
                                           CompanyId company);
 
-// One of the viewer's mines is a source of the ore (spec 011, BR-007): it can
-// still produce, and it has produced the ore or the viewer's own survey shows
-// it there. ProgramView::missingOres counts sources by this rule.
+// One of the viewer's mines is a source of the ore (spec 011, BR-007): it is
+// building, operating or mothballed, and, with output on record
+// (MineView::hasEarnings), its most recent operating day produced the ore;
+// without, the viewer's own best survey of the plot shows it. An ore the
+// mine has worked out is no longer a source. ProgramView::missingOres counts
+// sources by this rule.
 [[nodiscard]] bool mineYieldsOre(const MineView& mine, ResourceId resource);
 
 }  // namespace sim

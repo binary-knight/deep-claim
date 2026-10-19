@@ -93,29 +93,6 @@ void endGame(WorldState& state, CompanyId founder) {
     }
 }
 
-struct RivalDay {
-    CompanyId rival;
-    Day day = 0;
-};
-
-// The solvent rival that could found the program soonest, with its earliest
-// founding day; on a tie, the lowest company index. The one statement of who
-// leads: leadingRivalFoundingDay and the pace check both answer from it.
-std::optional<RivalDay> leadingRival(const Content& content, const WorldState& state,
-                                     CompanyId company) {
-    std::optional<RivalDay> leading;
-    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
-        if (CompanyId(c) == company) {
-            continue;
-        }
-        const std::optional<Day> day = earliestFoundingDay(content, state, CompanyId(c));
-        if (day && (!leading || *day < leading->day)) {
-            leading = RivalDay{CompanyId(c), *day};
-        }
-    }
-    return leading;
-}
-
 // The one statement of being behind: behindLeadingRival and the pace check
 // both answer from it.
 bool behindOf(const std::optional<Day>& own, const std::optional<RivalDay>& leading) {
@@ -268,20 +245,19 @@ std::optional<Day> earliestFoundingDay(const Content& content, const WorldState&
         return racer.programStageDays.back();
     }
     const std::uint32_t current = racer.programStage;
-    if (techCompleted(racer, stage->research)) {
-        return foundingDayIfStartedOn(content, current + 1, state.day);
-    }
+    // The lab frees the day after its project ends; free now when idle.
     const std::optional<ResearchId> active = activeResearch(state, company);
-    if (!active) {
-        return foundingDayIfStartedOn(content, current, state.day);
+    const Day labFree = active ? state.research[active->index()].completesDay + 1 : state.day;
+    if (techCompleted(racer, stage->research)) {
+        // The completion order applies today; the next stage's project, if
+        // there is one, starts once the lab is free.
+        const bool last = current + 1 >= content.program.stages.size();
+        return foundingDayIfStartedOn(content, current + 1, last ? state.day : labFree);
     }
-    // The lab frees the day after its project ends: the stage's own, whose
-    // completion order applies then, or another, after which the stage's
-    // project can start.
-    const Research& project = state.research[active->index()];
-    const Day labFree = project.completesDay + 1;
-    return project.tech == stage->research ? foundingDayIfStartedOn(content, current + 1, labFree)
-                                           : foundingDayIfStartedOn(content, current, labFree);
+    // The stage's own project under way: its completion order applies the
+    // day the lab frees. Otherwise the stage's project starts that day.
+    const bool ownUnderWay = active && state.research[active->index()].tech == stage->research;
+    return foundingDayIfStartedOn(content, ownUnderWay ? current + 1 : current, labFree);
 }
 
 Day foundingDayIfStartedOn(const Content& content, std::uint32_t stage, Day startDay) {
@@ -294,6 +270,21 @@ Day foundingDayIfStartedOn(const Content& content, std::uint32_t stage, Day star
         fatal("foundingDayIfStartedOn: day out of range");
     }
     return static_cast<Day>(day);
+}
+
+std::optional<RivalDay> leadingRival(const Content& content, const WorldState& state,
+                                     CompanyId company) {
+    std::optional<RivalDay> leading;
+    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
+        if (CompanyId(c) == company) {
+            continue;
+        }
+        const std::optional<Day> day = earliestFoundingDay(content, state, CompanyId(c));
+        if (day && (!leading || *day < leading->day)) {
+            leading = RivalDay{CompanyId(c), *day};
+        }
+    }
+    return leading;
 }
 
 std::optional<Day> leadingRivalFoundingDay(const Content& content, const WorldState& state,

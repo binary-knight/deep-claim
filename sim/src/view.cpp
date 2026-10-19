@@ -452,6 +452,10 @@ void addOwnProgram(const Content& content, const WorldState& state, CompanyId vi
     view.program.stagesCompleted = self.programStage;
     view.program.complete = stage == nullptr;
     view.program.stageDays = self.programStageDays;
+    if (const std::optional<RivalDay> leading = leadingRival(content, state, viewer)) {
+        view.program.leadingRival = leading->rival;
+        view.program.leadingRivalFoundingDay = leading->day;
+    }
     addMissingOres(content, state, self, view);
     if (stage == nullptr) {
         return;
@@ -513,8 +517,11 @@ bool mineYieldsOre(const MineView& mine, ResourceId resource) {
         mine.state != MineState::Mothballed) {
         return false;
     }
+    // Output on record says what the mine yields now: an ore it has worked
+    // out is gone from its most recent operating day. Before that, the
+    // owner's best survey of the plot says.
     const std::size_t r = resource.index();
-    return mine.extractedTonnes[r] > 0 || mine.bestEstimateTonnes[r] > 0;
+    return mine.hasEarnings ? mine.lastOutputTonnes[r] > 0 : mine.bestEstimateTonnes[r] > 0;
 }
 
 CompanyView makeCompanyView(const Content& content, const WorldState& state, CompanyId company) {

@@ -56,6 +56,10 @@ Simulation::Simulation(const Content& content, Seed seed, const GameSetup& setup
     state_.outcome.results.assign(state_.companies.size(), ProgramResult::None);
     report_.day = 0;
     listPlots(content, state_, content.balance.plotsListedAtStart, report_);
+    // Spec 011: the pace flags hold their rule from day 0, so a save before
+    // the first tick loads. A world that starts behind or past the deadline
+    // says so in the day-0 report, as the plots listed at the start do.
+    runProgramPace(content, state_, report_);
 }
 
 void Simulation::submit(const Command& command) {

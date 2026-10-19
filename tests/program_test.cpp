@@ -1769,6 +1769,27 @@ TEST_CASE("A lab busy with another project takes the stage's the day after it en
     CHECK(earliest(content, state, kRival) == 130 + kShippedFromStage3);
 }
 
+TEST_CASE("Stage research done with the lab busy starts the next stage the day the lab is free",
+          "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(kRaceDay);
+    sim::WorldState state = simulation.state();
+
+    // The stage can be completed today, but the next stage's project waits
+    // for the lab, free the day after the other project ends.
+    completeStageResearch(content, state.companies[0]);
+    startOtherResearch(content, state, kPlayer, kSurveyTech);
+    REQUIRE(state.research.back().completesDay == 39 + 90);
+    CHECK(earliest(content, state, kPlayer) == 130 + kShippedFromStage2);
+
+    // The last stage needs no lab after its research: founding is today.
+    atStage(content, state.companies[1], 2);
+    completeStageResearch(content, state.companies[1]);
+    startOtherResearch(content, state, kRival, kSurveyTech);
+    CHECK(earliest(content, state, kRival) == kRaceDay);
+}
+
 TEST_CASE("A founded program's founding day is the day of its last stage", "[program][founding]") {
     const sim::Content content = shippedContent();
     sim::Simulation simulation(content, 1, test::setup());
@@ -1821,6 +1842,37 @@ TEST_CASE("The leading rival is the solvent rival that could found soonest",
 
     makeBankrupt(content, state, third);
     CHECK(sim::leadingRivalFoundingDay(content, state, kPlayer) == kRaceDay + kShippedFromStage1);
+}
+
+TEST_CASE("The view names the leading solvent rival and its founding day by the sim's rule",
+          "[program][view][founding]") {
+    const sim::Content content = shippedContent();
+    sim::GameSetup three = test::setup();
+    three.aiNames = {"Rival", "Third"};
+    sim::Simulation simulation(content, 1, three);
+    simulation.tick(kRaceDay);
+    sim::WorldState state = simulation.state();
+    const sim::CompanyId third(2);
+    const auto leading = [&](sim::CompanyId viewer) {
+        const sim::ProgramView program = sim::makeCompanyView(content, state, viewer).program;
+        return std::pair{program.leadingRival, program.leadingRivalFoundingDay};
+    };
+
+    // Level: the lowest-indexed rival leads, as the pace check names it.
+    CHECK(leading(kPlayer) ==
+          std::pair{kRival, std::optional<sim::Day>(kRaceDay + kShippedFromStage1)});
+    CHECK(leading(kRival) ==
+          std::pair{kPlayer, std::optional<sim::Day>(kRaceDay + kShippedFromStage1)});
+
+    startStageResearch(content, state, third);
+    CHECK(leading(kPlayer) == std::pair{third, std::optional<sim::Day>(520 + kShippedFromStage2)});
+    CHECK(leading(kPlayer).second == sim::leadingRivalFoundingDay(content, state, kPlayer));
+
+    // With no solvent rival there is none to name.
+    makeBankrupt(content, state, kRival);
+    makeBankrupt(content, state, third);
+    CHECK_FALSE(leading(kPlayer).first.valid());
+    CHECK_FALSE(leading(kPlayer).second.has_value());
 }
 
 TEST_CASE("The founding day does not change when only cash or deliveries change",
@@ -2343,6 +2395,28 @@ TEST_CASE("A company is told once the day its founding falls past the deadline",
     CHECK(simulation.state().companies[0].programPastDeadline == 1);
 }
 
+TEST_CASE("A world that starts past the deadline says so on day 0 and saves before its first tick",
+          "[program][pace][save]") {
+    sim::Content content = test::makeContent();
+    // A fresh company could found on day kFixtureFromStage1: one day late.
+    content.program.deadlineDay = kFixtureFromStage1 - 1;
+    const sim::Simulation simulation(content, 1, test::setup());
+    REQUIRE(simulation.state().day == 0);
+    const std::vector<sim::Notice> past =
+        noticesOf(simulation.lastReport(), Kind::ProgramPastDeadline);
+    REQUIRE(past.size() == 2);
+    for (std::uint32_t c = 0; c < 2; ++c) {
+        CHECK(past[c].company == sim::CompanyId(c));
+        CHECK(past[c].foundingDay == kFixtureFromStage1);
+        CHECK(simulation.state().companies[c].programPastDeadline == 1);
+        CHECK(simulation.state().companies[c].programBehind == 0);
+    }
+
+    sim::Simulation restored(content, 7, test::setup());
+    REQUIRE(restored.load(simulation.save()));
+    CHECK(restored.stateHash() == simulation.stateHash());
+}
+
 TEST_CASE("The pace check does nothing once the game has ended", "[program][pace]") {
     const sim::Content content = test::makeContent();
     sim::WorldState state = foundedWorld(content);
@@ -2463,7 +2537,22 @@ void addMine(const sim::Content& content, sim::WorldState& state, sim::CompanyId
     mine.extractedTonnes = extracted;
     mine.lastDayTonnes.assign(content.resources.size(), 0);
     mine.lastOutputTonnes.assign(content.resources.size(), 0);
+    // A mine that has run has output on record: what it extracted, as its
+    // most recent operating day's.
+    if (mineState == sim::MineState::Operating || mineState == sim::MineState::Mothballed) {
+        mine.lastOutputTonnes = extracted;
+    }
     state.mines.push_back(mine);
+}
+
+// The company's completed survey of plot 0, showing one ore.
+void addSurvey(sim::WorldState& state, sim::CompanyId company, sim::ResourceId resource) {
+    sim::Survey survey;
+    survey.company = company;
+    survey.plot = sim::PlotId(0);
+    survey.complete = 1;
+    survey.estimates.push_back({resource, 40'000, sim::Fixed::fromRatio(1, 10)});
+    state.surveys.push_back(survey);
 }
 
 void checkNoneMissing(const std::vector<MO>& missing) {
@@ -2518,8 +2607,7 @@ TEST_CASE("A mine that yields the ore is a source, mothballed or not", "[program
     const sim::WorldState base = freshState(content);
     const std::vector<std::int64_t> iron = {500, 0, 0};
 
-    for (const sim::MineState yielding :
-         {sim::MineState::Building, sim::MineState::Operating, sim::MineState::Mothballed}) {
+    for (const sim::MineState yielding : {sim::MineState::Operating, sim::MineState::Mothballed}) {
         sim::WorldState state = base;
         addMine(content, state, kPlayer, yielding, iron);
         const std::vector<MO> missing = missingOres(content, state);
@@ -2527,6 +2615,12 @@ TEST_CASE("A mine that yields the ore is a source, mothballed or not", "[program
         // It yields iron, not copper.
         CHECK(missing[kCopper.index()] == MO::Soon);
     }
+    // A mine still building yields what its owner's survey shows.
+    sim::WorldState building = base;
+    addMine(content, building, kPlayer, sim::MineState::Building, {0, 0, 0});
+    addSurvey(building, kPlayer, kIron);
+    CHECK(missingOres(content, building)[kIron.index()] == MO::None);
+    CHECK(missingOres(content, building)[kCopper.index()] == MO::Soon);
 
     // A worked-out or closed mine is no source.
     for (const sim::MineState spent : {sim::MineState::Depleted, sim::MineState::Closed}) {
@@ -2613,24 +2707,52 @@ TEST_CASE("No ore is missing once the program is founded, the game is over or th
     checkNoneMissing(missing);
 }
 
-TEST_CASE("A mine yields an ore while it can produce and has produced it or been surveyed with it",
+TEST_CASE("A mine yields an ore its last operating day produced, or before output its survey shows",
           "[program][view][missing]") {
     const sim::Content content = test::makeContent();
     sim::MineView mine;
     mine.extractedTonnes.assign(content.resources.size(), 0);
+    mine.lastOutputTonnes.assign(content.resources.size(), 0);
     mine.bestEstimateTonnes.assign(content.resources.size(), 0);
     CHECK_FALSE(sim::mineYieldsOre(mine, kIron));
 
+    // No output on record, building or operating: the survey decides.
     mine.bestEstimateTonnes[kIron.index()] = 1'000;
     CHECK(sim::mineYieldsOre(mine, kIron));
-    mine.state = sim::MineState::Mothballed;
+    mine.state = sim::MineState::Operating;
     CHECK(sim::mineYieldsOre(mine, kIron));
     CHECK_FALSE(sim::mineYieldsOre(mine, kLithium));
 
-    mine.bestEstimateTonnes[kIron.index()] = 0;
+    // Output on record: the most recent operating day decides, mothballed
+    // too (edge case 9), whatever was extracted or surveyed before.
+    mine.hasEarnings = true;
+    mine.lastOutputTonnes[kCopper.index()] = 20;
     mine.extractedTonnes[kIron.index()] = 50;
-    mine.state = sim::MineState::Operating;
-    CHECK(sim::mineYieldsOre(mine, kIron));
-    mine.state = sim::MineState::Depleted;
+    CHECK(sim::mineYieldsOre(mine, kCopper));
     CHECK_FALSE(sim::mineYieldsOre(mine, kIron));
+    mine.state = sim::MineState::Mothballed;
+    CHECK(sim::mineYieldsOre(mine, kCopper));
+    CHECK_FALSE(sim::mineYieldsOre(mine, kIron));
+
+    // A worked-out or closed mine yields nothing.
+    for (const sim::MineState spent : {sim::MineState::Depleted, sim::MineState::Closed}) {
+        mine.state = spent;
+        mine.hasEarnings = false;
+        CHECK_FALSE(sim::mineYieldsOre(mine, kCopper));
+        CHECK_FALSE(sim::mineYieldsOre(mine, kIron));
+    }
+}
+
+TEST_CASE("A mine that has worked out one ore and still mines another is a source of that one only",
+          "[program][view][missing]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = freshState(content);
+    // Copper and iron extracted over its life; its last day produced iron
+    // alone, though the owner's survey still shows copper.
+    addMine(content, state, kPlayer, sim::MineState::Operating, {500, 300, 0});
+    state.mines.back().lastOutputTonnes = {20, 0, 0};
+    addSurvey(state, kPlayer, kCopper);
+    const std::vector<MO> missing = missingOres(content, state);
+    CHECK(missing[kIron.index()] == MO::None);
+    CHECK(missing[kCopper.index()] == MO::Soon);
 }

@@ -63,7 +63,9 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
 // order given now applies: a project started on day D finishes on D plus its
 // duration, its stage's completion order applies the day after, and the next
 // stage's project can start on that same day; a lab busy with another
-// project takes the stage's the day after that project ends. A founded
+// project takes the stage's the day after that project ends, and when the
+// stage's research is already done, the next stage's project starts then
+// (the last stage needs no lab: its completion order founds today). A founded
 // program's day is the day of its last stage. No research can be sped up, so
 // the day never moves earlier. Pure: it reads research records, the stages
 // completed and their days, and bankruptcy, never cash or deliveries. Empty
@@ -74,6 +76,17 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
 // starts on startDay: startDay plus, over that stage and every later one,
 // the project's duration and a day for the completion order.
 [[nodiscard]] Day foundingDayIfStartedOn(const Content& content, std::uint32_t stage, Day startDay);
+// A rival and the earliest day it could found the program.
+struct RivalDay {
+    CompanyId rival;
+    Day day = 0;
+};
+// The company's solvent rival that could found the program soonest, with its
+// earliest founding day; on a tie, the lowest company index. Empty when it
+// has no solvent rival. The one statement of who leads: the pace check, the
+// view and leadingRivalFoundingDay all answer from it.
+[[nodiscard]] std::optional<RivalDay> leadingRival(const Content& content, const WorldState& state,
+                                                   CompanyId company);
 // The earliest founding day among the company's solvent rivals; empty when
 // it has none. On a tie the lowest company index leads, which the pace
 // check names.
@@ -120,7 +133,8 @@ void runProgram(const Content& content, WorldState& state, TickReport& report);
 // day, with both days; drawing level or ahead clears it with no notice.
 // Company::programPastDeadline becomes foundsPastDeadline, and a change from
 // 0 to 1 raises a private ProgramPastDeadline. A bankrupt company's flags
-// are left as they stood.
+// are left as they stood. The Simulation constructor runs it once too, so
+// the flags hold their rule from day 0; its notices go in the day-0 report.
 void runProgramPace(const Content& content, WorldState& state, TickReport& report);
 
 }  // namespace sim
