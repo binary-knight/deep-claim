@@ -13,8 +13,10 @@
 #include "sim/world_state.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace sim {
@@ -55,28 +57,49 @@ Notice saleNotice(NoticeKind kind, CompanyId company, ResourceId resource, std::
     return notice;
 }
 
-// Spec 001: with the flag set and cash below zero after the month's
-// charges, sell just enough stock to reach zero, most valuable stock first.
-void coverCosts(const Content& content, WorldState& state, CompanyId companyId,
-                TickReport& report) {
-    Company& company = state.companies[companyId.index()];
-    if (company.coverCosts == 0) {
-        return;
+// Spec 011 (BR-011): tonnes of each good the current stage still needs, its
+// requirement less what has been delivered; none once the program is
+// complete.
+std::vector<std::int64_t> stageStillNeeds(const Content& content, const Company& company) {
+    std::vector<std::int64_t> need(company.inventoryTonnes.size(), 0);
+    const std::vector<ProgramStage>& stages = content.program.stages;
+    if (company.programStage >= stages.size()) {
+        return need;
     }
-    // Unlocked resources with stock, by stock value descending; ties keep
-    // the lower id first.
-    std::vector<std::uint32_t> order;
-    for (std::uint32_t r = 0; r < state.markets.size(); ++r) {
-        if (company.inventoryTonnes[r] > 0 && resourceUnlocked(content, company, ResourceId(r))) {
-            order.push_back(r);
+    for (const ProgramRequirement& requirement : stages[company.programStage].requirements) {
+        const std::size_t r = requirement.resource.index();
+        need[r] = std::max<std::int64_t>(0, requirement.tonnes - company.programDelivered[r]);
+    }
+    return need;
+}
+
+// The two tiers cover costs sells in turn: the stock above the stage's need,
+// then the stock the stage still needs.
+enum class CoverTier : std::uint8_t { Free, Needed };
+
+std::int64_t tierTonnes(CoverTier tier, std::int64_t stock, std::int64_t need) {
+    const std::int64_t free = std::max<std::int64_t>(0, stock - need);
+    return tier == CoverTier::Free ? free : stock - free;
+}
+
+// One pass of cover costs over a tier: just enough to reach zero, by the
+// value of the tier's tonnes descending; ties keep the lower id first.
+void sellTier(const std::vector<std::uint32_t>& eligible, const std::vector<std::int64_t>& need,
+              CoverTier tier, WorldState& state, CompanyId companyId, TickReport& report) {
+    Company& company = state.companies[companyId.index()];
+    std::vector<std::pair<std::uint32_t, std::int64_t>> order;  // resource, tier tonnes
+    for (const std::uint32_t r : eligible) {
+        const std::int64_t tonnes = tierTonnes(tier, company.inventoryTonnes[r], need[r]);
+        if (tonnes > 0) {
+            order.emplace_back(r, tonnes);
         }
     }
-    // Exact comparison: price times stock can exceed 64 bits.
-    std::stable_sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
-        return compareProducts(state.markets[a].price.cents(), company.inventoryTonnes[a],
-                               state.markets[b].price.cents(), company.inventoryTonnes[b]) > 0;
+    // Exact comparison: price times tonnes can exceed 64 bits.
+    std::stable_sort(order.begin(), order.end(), [&](const auto& a, const auto& b) {
+        return compareProducts(state.markets[a.first].price.cents(), a.second,
+                               state.markets[b.first].price.cents(), b.second) > 0;
     });
-    for (const std::uint32_t r : order) {
+    for (const auto& [r, inTier] : order) {
         if (company.cash >= Money::zero()) {
             break;
         }
@@ -85,7 +108,7 @@ void coverCosts(const Content& content, WorldState& state, CompanyId companyId,
             continue;
         }
         const std::int64_t shortfall = -company.cash.cents();
-        const std::int64_t wanted = (shortfall + price - 1) / price;
+        const std::int64_t wanted = std::min((shortfall + price - 1) / price, inTier);
         const std::int64_t tonnes = saleTonnesWithinBounds(state, companyId, ResourceId(r), wanted);
         if (tonnes <= 0) {
             continue;
@@ -96,6 +119,29 @@ void coverCosts(const Content& content, WorldState& state, CompanyId companyId,
         report.notices.push_back(
             saleNotice(NoticeKind::CoverCostsSale, companyId, ResourceId(r), tonnes, proceeds));
     }
+}
+
+// Spec 001: with the flag set and cash below zero after the month's
+// charges, sell just enough stock to reach zero, most valuable stock first.
+// Spec 011 (BR-011): of each good, the stock above what the current stage
+// still needs goes before any of the stock it needs. A good sold in both
+// tiers gets a sale notice for each.
+void coverCosts(const Content& content, WorldState& state, CompanyId companyId,
+                TickReport& report) {
+    const Company& company = state.companies[companyId.index()];
+    if (company.coverCosts == 0) {
+        return;
+    }
+    // Unlocked resources with stock.
+    std::vector<std::uint32_t> eligible;
+    for (std::uint32_t r = 0; r < state.markets.size(); ++r) {
+        if (company.inventoryTonnes[r] > 0 && resourceUnlocked(content, company, ResourceId(r))) {
+            eligible.push_back(r);
+        }
+    }
+    const std::vector<std::int64_t> need = stageStillNeeds(content, company);
+    sellTier(eligible, need, CoverTier::Free, state, companyId, report);
+    sellTier(eligible, need, CoverTier::Needed, state, companyId, report);
 }
 
 // Spec 001: one log line per resource the policies sold this month.

@@ -1,6 +1,7 @@
 #include "sim/finance.h"
 
 #include "sim/commands.h"
+#include "sim/content.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/money.h"
@@ -540,4 +541,129 @@ TEST_CASE("Saves with an impossible outcome are rejected", "[finance][spec010][s
     CHECK_FALSE(loads(1, today, kPlayer, {Result::Lost, Result::Lost}));
     CHECK_FALSE(loads(1, today, kPlayer, {Result::Founded, Result::Founded}));
     CHECK_FALSE(loads(1, today, nobody, {Result::Founded, Result::Lost}));
+}
+
+namespace {
+
+const sim::ResourceId kIron(0);    // the fixture's stage 1 needs 1,000 t
+const sim::ResourceId kCopper(1);  // no stage 1 need
+
+// A world at a month end with the player's cover costs on, round prices
+// (iron 60, copper 900) and no storage charge, so the shortfall is exactly
+// the cash set and every sale can be counted.
+struct CoverCostsWorld {
+    sim::Content content;
+    sim::WorldState state;
+    sim::TickReport report;
+
+    CoverCostsWorld() : content(withoutStorage()), state(startState(content)) {
+        state.day = sim::kDaysPerMonth;
+        state.markets[kIron.index()].price = sim::Money::fromUnits(60);
+        state.markets[kCopper.index()].price = sim::Money::fromUnits(900);
+        player().coverCosts = 1;
+    }
+
+    sim::Company& player() { return state.companies[kPlayer.index()]; }
+
+    void stock(std::int64_t iron, std::int64_t copper, sim::Money cash) {
+        player().inventoryTonnes[kIron.index()] = iron;
+        player().inventoryTonnes[kCopper.index()] = copper;
+        player().cash = cash;
+    }
+
+    void monthEnd() { sim::runFinance(content, state, report); }
+
+    // The cover-costs sales in the order they were made.
+    std::vector<std::pair<sim::ResourceId, std::int64_t>> sales() const {
+        std::vector<std::pair<sim::ResourceId, std::int64_t>> made;
+        for (const sim::Notice& notice : report.notices) {
+            if (notice.kind == sim::NoticeKind::CoverCostsSale) {
+                made.emplace_back(notice.resource, notice.tonnes);
+            }
+        }
+        return made;
+    }
+
+    std::int64_t summarized(sim::ResourceId resource) const {
+        for (const sim::Notice& notice : report.notices) {
+            if (notice.kind == sim::NoticeKind::AutoSaleSummary && notice.resource == resource) {
+                return notice.tonnes;
+            }
+        }
+        return 0;
+    }
+
+private:
+    static sim::Content withoutStorage() {
+        sim::Content content = test::makeContent();
+        for (sim::ResourceDef& resource : content.resources) {
+            resource.storageCostPerTonneMonth = sim::Money::zero();
+        }
+        return content;
+    }
+
+    static sim::WorldState startState(const sim::Content& content) {
+        return sim::Simulation(content, 11, test::setup()).state();
+    }
+};
+
+using Sale = std::pair<sim::ResourceId, std::int64_t>;
+
+}  // namespace
+
+TEST_CASE("Cover costs sells free stock before stock the stage still needs", "[finance][spec011]") {
+    CoverCostsWorld world;
+
+    SECTION("a shortfall free stock covers leaves the needed stock alone") {
+        // Iron, all of it needed, is worth 60,000; copper, all free, 36,000.
+        world.stock(1'000, 40, sim::Money::fromUnits(-20'000));
+        world.monthEnd();
+        CHECK(world.sales() == std::vector<Sale>{{kCopper, 23}});
+        CHECK(world.player().inventoryTonnes[kIron.index()] == 1'000);
+        CHECK(world.player().inventoryTonnes[kCopper.index()] == 17);
+        CHECK(world.player().cash >= sim::Money::zero());
+    }
+    SECTION("each tier is ordered by the value of its own tonnes") {
+        // Iron's whole stock (120,000) outweighs copper's (90,000), but its
+        // free half is worth only 60,000.
+        world.stock(2'000, 100, sim::Money::fromUnits(-10'000));
+        world.monthEnd();
+        CHECK(world.sales() == std::vector<Sale>{{kCopper, 12}});
+        CHECK(world.player().inventoryTonnes[kIron.index()] == 2'000);
+    }
+    SECTION("a larger shortfall takes every good's free stock before any needed stock") {
+        // 400 t of iron delivered, so the stage still needs 600: of 1,100 t
+        // held, 500 are free (30,000) and 600 needed (36,000). Copper's 200 t
+        // are free (180,000).
+        world.player().programDelivered[kIron.index()] = 400;
+        world.stock(1'100, 200, sim::Money::fromUnits(-225'000));
+        world.monthEnd();
+        CHECK(world.sales() == std::vector<Sale>{{kCopper, 200}, {kIron, 500}, {kIron, 250}});
+        CHECK(world.player().inventoryTonnes[kIron.index()] == 350);
+        CHECK(world.player().inventoryTonnes[kCopper.index()] == 0);
+        CHECK(world.player().cash == sim::Money::zero());
+        // The month's summary counts both of iron's sales.
+        CHECK(world.summarized(kIron) == 750);
+        CHECK(world.summarized(kCopper) == 200);
+    }
+}
+
+TEST_CASE("Cover costs keeps the old order when the program needs nothing", "[finance][spec011]") {
+    CoverCostsWorld world;
+    world.stock(1'000, 40, sim::Money::fromUnits(-20'000));
+
+    SECTION("the stage's iron is delivered in full") {
+        world.player().programDelivered[kIron.index()] = 1'000;
+    }
+    SECTION("the program is complete") {
+        world.player().programStage =
+            static_cast<std::uint32_t>(world.content.program.stages.size());
+    }
+    SECTION("the content has no program") {
+        world.content.program.stages.clear();
+    }
+    world.monthEnd();
+    // Most valuable stock first, as before spec 011.
+    CHECK(world.sales() == std::vector<Sale>{{kIron, 334}});
+    CHECK(world.player().inventoryTonnes[kCopper.index()] == 40);
 }

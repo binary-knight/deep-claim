@@ -1828,3 +1828,11 @@ confirmed for Windows/MSVC only when CI runs.
     `0xae14b05ab3e56760` to `0xf576ea4384386ae7`. The rival starts 45
     days after the player, falls behind on the first day and never draws
     level. The test now checks both companies' `programBehind`.
+- **Cover costs sells free stock first (BR-011)** moved none of them.
+  The new order changes behaviour only where the month-end cover-costs
+  sale runs, and it runs in none of the three: the fixture leaves
+  `defaultCoverCosts` off, the competitor never gives `SetCoverCosts`,
+  and the race world turns it on for neither company. The rule reaches
+  the sim runner's company 0, whose cover costs are on, so its effect on
+  balance is in the gated sweep's before and after figures, not here.
+  It is pinned by the cover-costs tests in `tests/finance_test.cpp`.

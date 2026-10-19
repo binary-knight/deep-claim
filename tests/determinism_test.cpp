@@ -168,6 +168,9 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // set by the new tick step 9b. Nobody gives an order here, so both
     // companies stay level, far from the deadline, and the flags are hashed
     // as zero.
+    // Spec 011's cover-costs order (BR-011) did not move it: no company here
+    // has cover costs on (the fixture leaves defaultCoverCosts off), so the
+    // month-end sale never runs.
     constexpr std::uint64_t kGolden = 0xc7cc092323bf84f7ULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
@@ -214,6 +217,9 @@ TEST_CASE("Golden state hash of a played game is stable across platforms", "[det
     // ends the run behind, so a flag is hashed as one. The competitor reads
     // only the view, which the step does not change, so the game it plays
     // is the same.
+    // Spec 011's cover-costs order (BR-011) did not move it: the competitor
+    // never turns cover costs on and the fixture leaves it off, so the
+    // month-end sale never runs.
     constexpr std::uint64_t kGoldenPlayed = 0x43349088476870b5ULL;
     constexpr sim::Day kDays = sim::kDaysPerYear * 3;
     const sim::Content content = test::makeContent();
@@ -269,6 +275,9 @@ TEST_CASE("Golden state hash of a played race is stable across platforms", "[det
     // the pace check's two flags, set by the new tick step 9b. The rival,
     // starting later, falls behind on the first day and stays behind; the
     // orders and the race are the same.
+    // Spec 011's cover-costs order (BR-011) did not move it: the race world
+    // turns cover costs on for neither company, so the month-end sale never
+    // runs.
     constexpr std::uint64_t kGoldenRace = 0xf576ea4384386ae7ULL;
     constexpr sim::Day kRivalStartsDay = 45;
     constexpr sim::Day kLongestRace = sim::kDaysPerYear * 2;
