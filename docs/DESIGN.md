@@ -1792,6 +1792,68 @@ been run for step 1. The code review and the Codex review are done
 
 ## Reading the race (spec 011)
 
+The spec is `spec/reading-the-race.md`. Its decision records are
+`docs/adrs/F-2026-10-18-reading-the-race-001` to `-004`. Recorded on
+2026-10-19, after the build on branch `spec-011-reading-the-race`, which
+is not merged. Where the build differs from the design
+(`.etc_sdlc/features/active/F-2026-10-18-reading-the-race/design.md`)
+or the spec, the difference is listed in the spec under "Build
+(2026-10-19)", with the commit. Four of them wait for the owner.
+
+- **What it adds.** Playtest 5 (`docs/playtests/2026-10-18.md`) lost
+  the race without the player seeing it. This spec makes the race
+  readable without changing its pace. Each company has an earliest
+  founding day, worked out by the sim; the verdict, the status strip,
+  the race strip and the Program tab lead with it. Falling behind is a
+  notice and a clock stop. The Program tab says where each ore the
+  program needs comes from, and the Plots tab marks land that may hold a
+  missing one. A clock stop keeps its reason on screen until the clock
+  starts again. No balance number changed (BR-015).
+- **The earliest founding day** (`sim::earliestFoundingDay` in
+  `sim/include/sim/program.h`, decision record 001). The earliest day a
+  company could found the program were every remaining stage project
+  started as soon as the rules allow and goods and cash never held it
+  up. It counts from `WorldState::day`, the day an order given now
+  applies.
+  - A project started on day D finishes on D plus its duration. Its
+    stage's completion order applies the day after, and the next
+    stage's project can start that same day.
+  - A lab busy with another project takes the stage's project the day
+    after that project ends.
+  - `foundingDayIfStartedOn(content, stage, startDay)` is that
+    arithmetic: the start day plus, for the stage and each later one,
+    the project's duration and one day. On the shipped data, three
+    stages not started give today plus 4,683.
+  - A founded program's day is its last stage day. The day is empty for
+    a bankrupt company or content with no program.
+  - It reads research records, stages and their days, and bankruptcy,
+    never cash or deliveries. No research can be sped up, so the day
+    never moves earlier.
+  - `leadingRivalFoundingDay` is the earliest day among the company's
+    solvent rivals; on a tie the lowest company index leads.
+  - Two tests have one statement each, and every caller answers from
+    it. `behindLeadingRival`: the company's day is later than its
+    leading solvent rival's. `foundsPastDeadline`: the company's day is
+    after the deadline day; a founding on the deadline day is in time.
+  - A rival's busy lab is counted, so the day its non-program project
+    ends is public (owner, GA-008). The privacy comment in
+    `sim/src/view.cpp` says so.
+- **Content.** Two keys, both required and both in the content
+  fingerprint, so saves and traces from earlier builds are refused.
+  - `program_pace_warning_days` in `data/program.json`, 360, loads into
+    `ProgramDef::paceWarningDays`. The loader takes an integer from 0
+    and refuses one above `deadline_day`.
+  - `storage_warning_cash_share` in `data/balance.json`, 0.1, loads into
+    `BalanceParams::storageWarningCashShare`. The loader takes a decimal
+    above 0 and up to 1.
+  - The loader refuses a stage project that requires other research
+    (owner, GA-009), so the earliest founding day counts a stage's own
+    time and nothing before it.
+- **Two notices.** `ProgramFellBehind` and `ProgramPastDeadline` are
+  appended to `NoticeKind`, both private to their company. `Notice`
+  gained `rival` and the two days `foundingDay` and `rivalFoundingDay`,
+  as `std::optional<Day>` because day 0 is a real day. Every older kind
+  leaves them empty.
 - **Tick step 9b, the pace check.** `runProgramPace` runs after the day
   advances, the one step that does, so it compares the earliest founding
   days the next view shows. While the game is open, for each solvent
@@ -1804,6 +1866,103 @@ been run for step 1. The code review and the Codex review are done
   `programBehind` with no notice. A bankrupt company's flags are left as
   they stood. Both flags are saved and hashed. See
   `docs/adrs/F-2026-10-18-reading-the-race-002-pace-check-tick-step-and-flags.md`.
+  - Both flags are recomputed every tick. The design made
+    `programPastDeadline` stick once set; recomputing it gives the same
+    answer, because the earliest founding day never moves earlier.
+  - The step is the last in the tick and changes only its own flags.
+    The pipeline comment in `sim/src/simulation.cpp` and "Determinism
+    rules" above name it.
+- **A save cannot claim a pace the world does not show.**
+  `validatePace` in `sim/src/save.cpp` runs last in load validation,
+  after the checks that bound the research records and stage days it
+  reads. In a game still being played, each solvent company's flags
+  must equal `behindLeadingRival` and `foundsPastDeadline` on the saved
+  state. A bankrupt company and an ended game are not checked.
+- **The view carries every figure and decision** (R-001). The client
+  formats them and works out no part of the race.
+  - `ProgramPublicView`, for every company: `earliestFoundingDay`,
+    `researchDueDay` (the stage project's finish day while it is under
+    way) and `pastDeadline` (`foundsPastDeadline`).
+  - `ProgramView`, the viewer's own, while its stage project has not
+    started and the game is open: `lastStartDay`, the last day to start
+    it and still found no later than the target. The target is the
+    leading solvent rival's earliest day or the deadline day, whichever
+    is earlier; with no solvent rival it is the deadline. It is worked
+    out in signed days, since against a rival close to founding it can
+    fall before day 0. When it is before today, `lastStartPassed` is set
+    and `lastStartDay` is empty. `labFreeDay` is the day after another
+    project ends. `paceWarning` is set once the day has passed, or from
+    `program_pace_warning_days` before it.
+  - `ProgramView::missingOres`, one `MissingOre` per resource: `None`,
+    `Later` or `Soon`. An ore is missing when what the stages not yet
+    complete still need of it (the current stage's need less its
+    deliveries, plus every later stage's whole need) is more than stock,
+    and none of the company's mines yields it. `Soon` means the current
+    or the next stage needs it. A mine yields an ore when it is
+    building, operating or mothballed and its extracted or best-estimate
+    tonnes of that ore are above zero. The rule is public,
+    `sim::mineYieldsOre` in `sim/include/sim/view.h`, so the Plots tab
+    reads it and does not copy it. A locked ore (lithium) counts like
+    any other.
+  - `CompanyView::storageWarning`: the monthly storage cost is above
+    zero and either cash is at or below zero or the cost is above
+    `storage_warning_cash_share` of cash. The threshold was `cash / 10`
+    in `game/src/ui_model.cpp`; this clears that do-not-copy item.
+- **Cover costs sells free stock first** (BR-011, decision record 003).
+  `coverCosts` in `sim/src/finance.cpp` sells in two passes over the
+  same goods, those unlocked and in stock: first the free stock, of each
+  good the stock above what the current stage still needs (its
+  requirement less its deliveries); then the stock the stage still
+  needs. Each pass is ordered by the value of its own tonnes, most valuable
+  first, with ties to the lower resource id. Each sale is capped by
+  `saleTonnesWithinBounds` and by the tier's tonnes, and stops once
+  cash reaches zero. A good sold in both passes gets a sale notice for
+  each. With no program need the first pass is all the stock, so the
+  order is the old one. It is an order, not a reserve: a company short
+  of cash with only program stock still sells it, last.
+- **The session keeps the day's stops** (decision record 004).
+  `Session::stopsToday()` replaces `takePausedBy()`, which handed over
+  one notice once. It returns the day's notices that matched an enabled
+  Stops rule, in log order. It is cleared when the clock leaves Paused,
+  on load, and at the start of each tick, so it always holds the day's
+  own stops. On the day the game ends, the notice that ended it comes
+  first. The spec 010 section above describes the older hand-over.
+  - `LogEntry::stoppedClock` marks each line that stopped the clock.
+    The line of the notice that ended the game is marked too, though it
+    matches no rule, since the end stops the clock under any rule set.
+  - `PauseOn::FellBehind`, key `fell_behind`, is appended and on by
+    default. It covers both new notices, for the player only. A settings
+    file without the key keeps the default.
+  - `isRaceStop` is true for `RivalProgram` and `FellBehind`.
+  - None of this is saved. A loaded game shows no stop; its clock is
+    stopped anyway.
+- **The client.** All read from the view and the session.
+  - The verdict: "cannot found the program in time" when the view's
+    `pastDeadline` says so; otherwise the gap in days to the leading
+    rival's earliest founding day, behind or in hand, and Level on the
+    same day. Stages and share delivered decide only when a day is
+    missing.
+  - The status strip names the leading rival and the time before it
+    could found the program ("in 6 y 120 d") when that comes before the
+    deadline. The race strip gives each company's earliest founding day
+    and its research's due day. Other dates use the existing formatter
+    ("Y17 M5 D3").
+  - The Program tab gives the last day to start the stage's research,
+    or says it has passed, and names a busy lab with the day it is
+    free. It says where each needed ore comes from: regions and odds,
+    the research that unlocks it, the player's mines that yield it, and
+    plots whose surveys show it.
+  - Needs you gains a pace row and a row for each `Soon` missing ore.
+    The Plots tab marks a listed plot with "may hold" or, where the
+    player's survey shows the ore, "survey shows". The storage row reads
+    `storageWarning`.
+  - The stop panel, from `stopsToday()`, replaces the "Paused: …" status
+    line and its real-time timer. It gives the rule as the Stops menu
+    names it, the first stop's line, "+N more", a button to the tab
+    where the player acts, and a button that switches the rule off. A
+    race stop has its own heading and both earliest founding days.
+  - The end screen counts open mines, leaving out worked-out and closed
+    ones. A standing bid shows in the plot panel and the plot's row.
 
 ### Golden hashes (spec 011)
 
@@ -1836,3 +1995,48 @@ confirmed for Windows/MSVC only when CI runs.
   the sim runner's company 0, whose cover costs are on, so its effect on
   balance is in the gated sweep's before and after figures, not here.
   It is pinned by the cover-costs tests in `tests/finance_test.cpp`.
+- **Once, not twice.** The spec (BR-016) and the design expected a
+  second move for cover costs. It did not come, for the reason above.
+  The spec lists this under "Build (2026-10-19)".
+
+### Gated sweep (spec 011)
+
+Release preset, `sim_runner --sweep 50 --years 30 --ai 1 --sanity`,
+run before the spec at `786e9bd` and after it at `6de2775`.
+
+| Seeds | Gated checks, before and after | Seconds before | Seconds after |
+| --- | --- | --- | --- |
+| 1 to 50 | all passed | 37.51 | 37.47 |
+| 51 to 100 | all passed | 42.02 | 38.13 |
+
+The JSON output of both sweeps is byte-identical before and after. No
+figure moved, so the two-tier cover costs changed no sale in the
+runner's 100 games, and BR-015 (no balance change) holds. The running
+time is within the design's 5% budget.
+
+### Departures and what is open (spec 011)
+
+The full list, with commits, is in the spec under "Build (2026-10-19)".
+Those that change what this section describes:
+
+- **One golden hash move**, not two (above).
+- **The day's stops also clear at the start of each tick**, and the
+  game-ending line is marked though it matches no rule (above).
+- **`programPastDeadline` is recomputed**, not sticky (above).
+- **The notice's days are `std::optional<Day>`**, not `Day`.
+- **`sim::mineYieldsOre` is public**, so the client does not copy the
+  rule.
+
+Four departures wait for the owner: Level on equal days even when
+deliveries differ (BR-002 against edge case 5); dates as "Y17 M5 D3";
+the pace warning showing from day 0, while neither company has started
+its stage research; and a player who starts other research while the
+rival's lab is free falling behind that day.
+
+Still open: the monitored playtest 6 (AC-012) and the Codex review;
+the golden values on Windows/MSVC; `kLesserPartnerStages` in code
+(GA-010); the unused `status.paused_by` string; the `.meta`
+descriptions, which still name `takePausedBy` and lack `validatePace`
+and `mineYieldsOre`. Eight clang-tidy findings the spec added to
+`game/src/layout_probe.cpp`, outside CI's tidy gate, were fixed by
+remediation 018 (`9a1b04d`).

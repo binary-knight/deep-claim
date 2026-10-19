@@ -1,6 +1,6 @@
 # PRD: Reading the race (spec 011, the follow-up to spec 010 step 1)
 
-Status: approved by the owner, 2026-10-18. Not yet designed or built.
+Status: approved by the owner, 2026-10-18; designed and built on branch spec-011-reading-the-race, not merged; awaiting review and playtest 6.
 
 ## Summary
 Playtest 5 (`docs/playtests/2026-10-18.md`) played spec 010's race to its end and lost it without the player knowing they were in one. The sim's race works; the screen does not tell it. Three things went wrong. The player read "Behind" and "29 years left" as plenty of time, when the race had been decided on research time by day 2406 (finding 1). Stage 2 needed nickel, and the player could not find out where it comes from (finding 2). And the clock stopped 58 times without saying why, the rival's six race stops looking like the 52 routine ones (finding 4).
@@ -139,7 +139,40 @@ Owner, 2026-10-18, on approving the draft:
 - Stop defaults are unchanged: every stop stays on and each explains itself. In playtest 5 the 58 stops included 20 surveys and 12 research projects. Spec 004 turned those two on because an unseen report or an idle lab cost the player more than a stop.
 - Earliest founding days are shown as time from now in the status strip ("in 6 y 120 d") and as dates ("Y17 M5") on the Dashboard and the Program tab, as the game gives dates elsewhere.
 
+## Build (2026-10-19)
+Built on branch `spec-011-reading-the-race`, tasks 001 to 016 and remediations 017 and 018, commits `5b03b46` to `9a1b04d` and this record on base `786e9bd`. Not merged. The requirements and acceptance criteria above are left as approved; where the build differs from them or from the design (`.etc_sdlc/features/active/F-2026-10-18-reading-the-race/design.md`), the difference is listed under "Departures". The architecture, tick step 9b, the golden hash move and the gated sweep's figures are in `docs/DESIGN.md`, "Reading the race (spec 011)". The decision records are `docs/adrs/F-2026-10-18-reading-the-race-001` to `-004`. The departures were accepted by the build conductor, not by the owner; four are marked for the owner to confirm.
+
+Verification at `6de2775`:
+- Tests: debug 475 of 475, debug-game 476 of 476 (the layout probe at 1366x820 and 1280x800 among them), release 475 of 475.
+- Golden hashes: moved once, in task 004 (`6f6a81d`), for the two pace flags on every company. `kGolden` `0x059a7c79213dd307` to `0xc7cc092323bf84f7`, `kGoldenPlayed` `0x41192679894c4afc` to `0x43349088476870b5`, `kGoldenRace` `0xae14b05ab3e56760` to `0xf576ea4384386ae7`. Recorded on Linux/GCC; CI confirms Windows.
+- Gated sweep, release preset, `sim_runner --sweep 50 --years 30 --ai 1 --sanity`, before at `786e9bd` and after at `6de2775`. Seeds 1 to 50: every gated check passed before and after; 37.51 s before, 37.47 s after. Seeds 51 to 100: every gated check passed before and after; 42.02 s before, 38.13 s after. The JSON output of both sweeps is byte-identical before and after. No figure moved, so BR-015 holds, and the running time is within the 5% budget.
+
+Departures (build decisions; the requirements and criteria above are not rewritten):
+- 2026-10-19, BR-016 and the design: the golden hashes moved once, not twice. The cover-costs change (task 006) moved none of them, because cover costs never runs in the three golden games. Its effect is measured by the gated sweep instead, where nothing moved.
+- 2026-10-19, design: `Session::stopsToday` is also cleared at the start of each tick, not only when the clock starts and on load, so it always holds the day's own stops (task 009, `e0eebfe`).
+- 2026-10-19, BR-009: the game-ending log line is marked `stoppedClock` though it matches no Stops rule. BR-009 marks "every line that stopped the clock", and the end of the game stops it under any rule set (task 009, `e0eebfe`).
+- 2026-10-19, BR-002 and edge case 5: the verdict reads Level on equal earliest founding days even when deliveries differ. BR-002's "then by stages complete and share delivered" conflicts with edge case 5. Level was made binding; stages and share decide only when a day is missing (task 010, `1f99872`). For the owner to confirm.
+- 2026-10-19, owner's decision on dates: dates use the game's existing formatter, "Y17 M5 D3", where the decision gave "Y17 M5" as the example (task 008, `df1f517`). For the owner to confirm.
+- 2026-10-19, BR-004: the pace warning shows from day 0 of every game. While neither company has started its stage research, the last day to start and keep pace is today. This is BR-004 as written. Playtest 6 will show whether it reads as noise (task 011, `cb953ca`). For the owner to confirm.
+- 2026-10-19, BR-001 and BR-005: a player who starts a project outside the program while the rival's lab is free falls behind that day and gets the race stop. This is BR-001 and BR-005 as written. For the owner to confirm.
+- 2026-10-19, design: `Notice::foundingDay` and `Notice::rivalFoundingDay` are `std::optional<Day>`, not `Day`, because day 0 is a real day (task 003, `2e8481d`).
+- 2026-10-19, BR-012: the end screen's open mines leave out closed mines as well as worked-out ones (task 014, `9689b39`).
+- 2026-10-19, BR-008: plot marks are lines of words ("may hold nickel", "survey shows nickel"), not pills. A surveyed plot whose survey shows none of a missing ore still carries "may hold", BR-008 read plainly (task 012, `5844377`).
+- 2026-10-19, design: `programPastDeadline` is recomputed each tick rather than made sticky. The two are equivalent, because the earliest founding day never moves earlier (task 004, `6f6a81d`).
+- 2026-10-19, design: the layout probe's "Behind by N days" scenario runs on a copy of the content in which the rival delivers nothing, since the shipped game never produces that state at the probe's day (task 010, `1f99872`).
+- 2026-10-19, build: a release-only GCC null-dereference warning in `Session::markEnding` was fixed (remediation 017, `6de2775`).
+- 2026-10-19, design: the rule for a mine yielding an ore is public in the sim, `sim::mineYieldsOre` in `sim/include/sim/view.h`, so the client's Plots tab marks do not copy it (task 012, `5844377`).
+
+Open after build:
+- AC-012: the monitored playtest (playtest 6) has not been played. The spec is not done until it has.
+- The Codex review of the built spec has not been run.
+- The golden values are unconfirmed on Windows/MSVC until CI runs.
+- `kLesserPartnerStages` stays in code, on the do-not-copy list, for spec 010 step 4 (GA-010).
+- `status.paused_by` is unused. It is kept in the catalogue.
+- The `.meta` descriptions are behind the code: `game/session/include/game/.meta/description.md` still names `takePausedBy`, and the sim's descriptions do not mention `validatePace` or `mineYieldsOre`.
+- Fixed after the departures were listed: the spec had added eight clang-tidy findings to `game/src/layout_probe.cpp`, which CI's tidy gate (shipped sources only) does not cover. Remediation 018 (`9a1b04d`) fixed them; the probe is tidy-clean.
+
 ## Open questions
 For the architect, in the design:
-- Where the earliest founding day is worked out. This draft puts it in the sim, as a function beside `programProgressPermille` that fills the view, so that the client, the AI and the runner read one rule (R-001). It is not a rule the sim enforces, so the client could derive it from the view and the content instead.
-- How BR-005 remembers that it has already spoken. A per-company flag in saved state is the plain answer, and it moves the golden hash.
+- Answered by the design (2026-10-19): in the sim, `sim::earliestFoundingDay` in `sim/include/sim/program.h`, carried in the view (ADR 001). Where the earliest founding day is worked out. This draft puts it in the sim, as a function beside `programProgressPermille` that fills the view, so that the client, the AI and the runner read one rule (R-001). It is not a rule the sim enforces, so the client could derive it from the view and the content instead.
+- Answered by the design (2026-10-19): per-company flags in saved state, `Company::programBehind` and `programPastDeadline`, set by tick step 9b (ADR 002). How BR-005 remembers that it has already spoken. A per-company flag in saved state is the plain answer, and it moves the golden hash.
