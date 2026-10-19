@@ -313,6 +313,8 @@ void App::bindModel() {
         h.RegisterMember("flag_class", &SaleRow::flag_class);
         h.RegisterMember("has_flag", &SaleRow::has_flag);
         h.RegisterMember("major", &SaleRow::major);
+        h.RegisterMember("may_hold", &SaleRow::may_hold);
+        h.RegisterMember("survey_shows", &SaleRow::survey_shows);
     }
     if (auto h = ctor.RegisterStruct<SoldRow>()) {
         h.RegisterMember("index", &SoldRow::index);
@@ -368,6 +370,8 @@ void App::bindModel() {
         h.RegisterMember("auction", &PlotPanel::auction);
         h.RegisterMember("capex", &PlotPanel::capex);
         h.RegisterMember("odds", &PlotPanel::odds);
+        h.RegisterMember("may_hold", &PlotPanel::may_hold);
+        h.RegisterMember("survey_shows", &PlotPanel::survey_shows);
         h.RegisterMember("owner", &PlotPanel::owner);
         h.RegisterMember("survey_title", &PlotPanel::survey_title);
         h.RegisterMember("estimates", &PlotPanel::estimates);
@@ -1049,6 +1053,9 @@ void App::onNeedAction(int action, int target) {
             return;
         case 6:  // the Program tab
             onSetTab(6);
+            return;
+        case 7:  // a missing ore: the Plots tab
+            onSetTab(1);
             return;
         default:
             return;

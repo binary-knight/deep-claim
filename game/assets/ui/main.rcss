@@ -400,6 +400,11 @@ tr:hover td.sel { background-color: #163058; }
 .chip.danger, .pill.danger { color: #ff6e6e; border-color: #ff6e6e; }
 .chip.muted { color: #8fa0ba; border-color: #8fa0ba; }
 td .pill.accent { margin-right: 4dp; }
+/* The marks for an ore the program lacks (spec 011, BR-008): a line each
+   under the survey cell or in the plot panel. The words set the survey's
+   mark apart; its colour and weight only repeat them. */
+td .sub.mark { white-space: normal; }
+.mark.strong { color: #5fd98a; font-weight: 600; }
 
 /* ---- Key/value rows ---- */
 .kv { display: flex; flex-direction: row; align-items: flex-start; min-height: 24dp; margin-bottom: 4dp; }

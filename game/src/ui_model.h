@@ -50,7 +50,7 @@ struct NeedRow {
     std::string days;  // "in 30 days" or ""
     // What the action button does: 0 none, 1 open the plot (Plots tab),
     // 2 mothball the mine, 3 open the Market tab, 4 open the Finance tab,
-    // 5 open the Research tab, 6 open the Program tab.
+    // 5 open the Research tab, 6 open the Program tab, 7 open the Plots tab.
     int action = 0;
     int target = -1;  // plot index or mine index for actions 1 and 2
     std::string act_label;
@@ -72,6 +72,11 @@ struct SaleRow {
     std::string flag_class;  // chip class: "warn", "danger", "" (neutral)
     bool has_flag = false;
     bool major = false;  // the survey reports a major deposit of ore the player can mine
+    // The missing ores the plot's region can hold (spec 011, BR-008):
+    // "may hold nickel", and the stronger "survey shows nickel" for those
+    // the player's survey of it shows. Each "" when there are none.
+    std::string may_hold;
+    std::string survey_shows;
 };
 
 // A settled auction in the record under the for-sale table (spec 006).
@@ -143,6 +148,8 @@ struct PlotPanel {
     std::string auction;  // "closes day 1380 · 2 bids" or ""
     std::string capex;
     std::string odds;          // "copper 70% · iron 60%"
+    std::string may_hold;      // as SaleRow's, while the plot is listed
+    std::string survey_shows;  // as SaleRow's, while the plot is listed
     std::string owner;         // "Yours", rival name, or ""
     std::string sale;          // "day 45, $1.14M, 16% over the ask" once sold, else ""
     std::string survey_title;  // "Survey, day 1136" or "No survey yet"

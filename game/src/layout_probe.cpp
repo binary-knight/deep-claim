@@ -2038,15 +2038,9 @@ struct ProgramExpected {
     std::vector<WhereLine> where;
 };
 
-// Where one good comes from, built here from the content and the view as the
-// player would read them off the data files and their own company.
-WhereLine simWhere(const game::Session& session, sim::ResourceId resource) {
-    const sim::Content& content = session.content();
-    const sim::CompanyView& view = session.view();
-    const std::size_t r = resource.index();
-    const sim::ResourceDef& good = content.resources[r];
-    WhereLine line;
-    line.good = good.name;
+// The regions that can hold a good, each with its odds, as data/regions.json
+// gives them.
+std::vector<std::string> simRegionOdds(const sim::Content& content, sim::ResourceId resource) {
     std::vector<std::string> regions;
     for (const sim::RegionDef& region : content.regions) {
         for (const sim::DepositPrior& prior : region.deposits) {
@@ -2058,6 +2052,19 @@ WhereLine simWhere(const game::Session& session, sim::ResourceId resource) {
             }
         }
     }
+    return regions;
+}
+
+// Where one good comes from, built here from the content and the view as the
+// player would read them off the data files and their own company.
+WhereLine simWhere(const game::Session& session, sim::ResourceId resource) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const std::size_t r = resource.index();
+    const sim::ResourceDef& good = content.resources[r];
+    WhereLine line;
+    line.good = good.name;
+    const std::vector<std::string> regions = simRegionOdds(content, resource);
     if (!regions.empty()) {
         line.regions = game::text(content, "ui.program_from_regions",
                                   {{"resource", good.name}, {"regions", joined(regions, ", ")}});
@@ -2134,6 +2141,185 @@ void checkPaceNeed(game::App& app, const std::string& where, Checks& checks) {
     checks.same(where + ": the pace row under Needs you", row != nullptr ? row->title : "", title);
     std::cout << std::format("    {}: pace row \"{}\"{}\n", where, title,
                              row != nullptr ? " / " + row->sub : "");
+}
+
+// ---- a missing ore (spec 011, BR-007, BR-008) ----
+
+constexpr int kPlotsTab = 1;
+constexpr int kOpenPlotsAction = 7;
+
+// The marks a listed plot carries, built here from the view and
+// data/regions.json: each missing ore the plot's region can hold, as
+// "survey shows" when the player's latest complete survey of the plot shows
+// it there and "may hold" otherwise.
+struct PlotMarks {
+    std::string mayHold;
+    std::string surveyShows;
+};
+
+PlotMarks simPlotMarks(const game::Session& session, const sim::PlotView& plot) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const sim::RegionDef& region = content.regions[plot.region.index()];
+    const sim::SurveyView* latest = nullptr;
+    for (const sim::SurveyView& survey : view.surveys) {
+        if (survey.complete && survey.plot == plot.id) {
+            latest = &survey;
+        }
+    }
+    std::vector<std::string> may;
+    std::vector<std::string> shows;
+    for (std::size_t r = 0; r < view.program.missingOres.size(); ++r) {
+        const sim::ResourceId resource(static_cast<std::uint32_t>(r));
+        const bool canHold =
+            std::ranges::any_of(region.deposits, [&](const sim::DepositPrior& prior) {
+                return prior.resource == resource && prior.presenceProb.raw() > 0;
+            });
+        if (view.program.missingOres[r] == sim::MissingOre::None || !canHold) {
+            continue;
+        }
+        const bool shown =
+            latest != nullptr &&
+            std::ranges::any_of(latest->estimates, [&](const sim::SurveyEstimateView& e) {
+                return e.resource == resource && e.tonnesEstimate > 0;
+            });
+        (shown ? shows : may).push_back(content.resources[r].name);
+    }
+    PlotMarks marks;
+    if (!may.empty()) {
+        marks.mayHold =
+            game::text(content, "ui.plot_mark_may_hold", {{"resource", joined(may, ", ")}});
+    }
+    if (!shows.empty()) {
+        marks.surveyShows =
+            game::text(content, "ui.plot_mark_survey_shows", {{"resource", joined(shows, ", ")}});
+    }
+    return marks;
+}
+
+// One Needs you row for each ore the view marks Soon, and its button opens
+// the Plots tab.
+void checkOreNeeds(game::App& app, const std::string& where, Checks& checks) {
+    const sim::Content& content = app.session().content();
+    const std::vector<sim::MissingOre>& missing = app.session().view().program.missingOres;
+    std::vector<std::string> expected;
+    for (std::size_t r = 0; r < missing.size(); ++r) {
+        if (missing[r] == sim::MissingOre::Soon) {
+            const sim::ResourceId resource(static_cast<std::uint32_t>(r));
+            expected.push_back(
+                game::text(content, "ui.need_ore_title",
+                           {{"resource", content.resources[r].name}}) +
+                " / " +
+                game::text(content, "ui.need_ore_sub",
+                           {{"regions", joined(simRegionOdds(content, resource), ", ")}}));
+        }
+    }
+    std::vector<std::string> shown;
+    for (const game::NeedRow& need : app.model().needs) {
+        if (need.action == kOpenPlotsAction) {
+            shown.push_back(need.title + " / " + need.sub);
+        }
+    }
+    checks.same(where + ": the missing-ore rows under Needs you", joined(shown, " | "),
+                joined(expected, " | "));
+    std::cout << std::format("    {}: {} missing-ore rows\n", where, shown.size());
+}
+
+// Every for-sale row's marks, in the model and on the laid-out Plots tab,
+// against simPlotMarks; then the panel of a marked plot, the strongest
+// first. Returns how many rows carry the stronger mark.
+std::size_t checkPlotMarks(Rml::Context& context, game::App& app, const std::string& where,
+                           Checks& checks) {
+    const game::Session& session = app.session();
+    app.setTab(kPlotsTab);
+    app.refreshNow();
+    settle(context);
+    const std::vector<game::SaleRow>& rows = app.model().for_sale;
+    const std::vector<Rml::Element*> shown =
+        visibleElements(context.GetDocument(0)->GetElementById("content"), "tr", "row");
+    checks.expect(shown.size() >= rows.size(), where + ": fewer rows on the tab than for sale");
+    std::size_t marked = 0;
+    std::size_t strong = 0;
+    int pick = -1;
+    for (std::size_t i = 0; i < rows.size() && i < shown.size(); ++i) {
+        const PlotMarks marks =
+            simPlotMarks(session, session.view().plots[static_cast<std::size_t>(rows[i].index)]);
+        const std::string plot = where + ": plot " + rows[i].name;
+        checks.same(plot + ": may hold", rows[i].may_hold, marks.mayHold);
+        checks.same(plot + ": survey shows", rows[i].survey_shows, marks.surveyShows);
+        const std::string text = visibleText(shown[i]);
+        for (const std::string& mark : {marks.mayHold, marks.surveyShows}) {
+            checks.expect(text.find(mark) != std::string::npos,
+                          plot + ": its row does not read \"" + mark + "\"");
+        }
+        marked += marks.mayHold.empty() && marks.surveyShows.empty() ? 0U : 1U;
+        strong += marks.surveyShows.empty() ? 0U : 1U;
+        if (!marks.surveyShows.empty() || (pick < 0 && !marks.mayHold.empty())) {
+            pick = rows[i].index;
+        }
+    }
+    if (pick >= 0) {
+        app.selectPlot(pick);
+        app.refreshNow();
+        settle(context);
+        const PlotMarks marks =
+            simPlotMarks(session, session.view().plots[static_cast<std::size_t>(pick)]);
+        const game::PlotPanel& panel = app.model().panel;
+        checks.same(where + ": the panel's may hold", panel.may_hold, marks.mayHold);
+        checks.same(where + ": the panel's survey shows", panel.survey_shows, marks.surveyShows);
+        const std::string text = visibleText(context.GetDocument(0)->GetElementById("content"));
+        for (const std::string& mark : {marks.mayHold, marks.surveyShows}) {
+            checks.expect(text.find(mark) != std::string::npos,
+                          where + ": the plot panel does not read \"" + mark + "\"");
+        }
+    }
+    std::cout << std::format("    {}: {} of {} plots for sale marked, {} by a survey\n", where,
+                             marked, rows.size(), strong);
+    return strong;
+}
+
+// The Plots tab at both frames with its marks checked in each, and the
+// Needs you rows for the ores missing soon. Returns how many rows carry the
+// stronger mark, or nothing when a frame did not lay out.
+std::optional<std::size_t> probeOreFrames(Rml::Context& context, game::App& app,
+                                          LoggingSystem& system, const char* label,
+                                          Checks& checks) {
+    bool ok = true;
+    std::size_t strong = 0;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== {}, frame {}x{}{} ==\n", label, frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        ok = probeTab(context, app, system, frame, kPlotsTab, Popover::None) && ok;
+        const std::string where =
+            "plots " + std::to_string(frame.width) + 'x' + std::to_string(frame.height);
+        strong = checkPlotMarks(context, app, where, checks);
+    }
+    checkOreNeeds(app, label, checks);
+    return ok ? std::optional<std::size_t>(strong) : std::nullopt;
+}
+
+// Nothing is marked and no ore row stands once the game is over (edge case
+// 10): the view's missing ores are all None.
+void checkNoOreMarks(game::App& app, Checks& checks) {
+    app.refreshNow();
+    const game::UiModel& model = app.model();
+    checks.expect(std::ranges::all_of(app.session().view().program.missingOres,
+                                      [](sim::MissingOre m) { return m == sim::MissingOre::None; }),
+                  "the view marks an ore missing after the game is over");
+    checks.expect(std::ranges::all_of(model.for_sale,
+                                      [](const game::SaleRow& row) {
+                                          return row.may_hold.empty() && row.survey_shows.empty();
+                                      }),
+                  "a plot for sale is marked after the game is over");
+    checks.expect(model.panel.may_hold.empty() && model.panel.survey_shows.empty(),
+                  "the plot panel carries a mark after the game is over");
+    checks.expect(
+        std::ranges::none_of(
+            model.needs, [](const game::NeedRow& need) { return need.action == kOpenPlotsAction; }),
+        "a missing-ore row stands after the game is over");
 }
 
 template <typename T, typename Matches>
@@ -2635,7 +2821,12 @@ int probeProgramSurveyed(Rml::Context& context, game::App& app, LoggingSystem& s
     }
     const bool laidOut =
         probeProgramFrames(context, app, system, "program, survey report in", checks);
-    return programResult(checks, laidOut);
+    // The report on a plot still at auction shows an ore the program lacks:
+    // the plot carries the stronger mark.
+    const std::optional<std::size_t> strong =
+        probeOreFrames(context, app, system, "plots, survey report in", checks);
+    checks.expect(!strong || *strong > 0, "no plot for sale carries the survey's mark");
+    return programResult(checks, laidOut && strong.has_value());
 }
 
 // A new game: nothing delivered, the research not started, and the stage's
@@ -2676,8 +2867,15 @@ int probeProgramFresh(Rml::Context& context, game::App& app, LoggingSystem& syst
                   "a new game is not missing both its research and its deliveries");
     checkResearchStartable(context, app, "new game", checks);
     checkPaceNeed(app, "new game", checks);
+    // No mines yet: every ore the program needs is missing, and the land
+    // that can hold one is marked.
+    checks.expect(std::ranges::any_of(view.program.missingOres,
+                                      [](sim::MissingOre m) { return m == sim::MissingOre::Soon; }),
+                  "a new game misses no ore soon");
+    const std::optional<std::size_t> strong =
+        probeOreFrames(context, app, system, "plots, new game", checks);
     const bool laidOut = probeProgramFrames(context, app, system, "program, new game", checks);
-    return programResult(checks, laidOut);
+    return programResult(checks, laidOut && strong.has_value());
 }
 
 // One delivery given through the tab, to compare with the sim a day later.
@@ -3321,6 +3519,7 @@ int probeEndScreen(Rml::Context& context, game::App& app, LoggingSystem& system,
     app.refreshNow();
     checks.same("the session's ending", sessionResult(session), result);
     checks.expect(session.gameOver(), "the session does not report the game over");
+    checkNoOreMarks(app, checks);
     if (!checks.ok()) {
         return kEndFailure;
     }

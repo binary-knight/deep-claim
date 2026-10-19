@@ -327,4 +327,9 @@ struct CompanyView {
 [[nodiscard]] CompanyView makeCompanyView(const Content& content, const WorldState& state,
                                           CompanyId company);
 
+// One of the viewer's mines is a source of the ore (spec 011, BR-007): it can
+// still produce, and it has produced the ore or the viewer's own survey shows
+// it there. ProgramView::missingOres counts sources by this rule.
+[[nodiscard]] bool mineYieldsOre(const MineView& mine, ResourceId resource);
+
 }  // namespace sim

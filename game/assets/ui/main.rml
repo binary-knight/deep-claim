@@ -256,7 +256,7 @@
                                     <td class="n" data-class-sel="s.index == selected_plot">{{s.ask}}</td>
                                     <td class="n" data-class-sel="s.index == selected_plot">{{s.bids}}</td>
                                     <td class="n" data-class-sel="s.index == selected_plot">{{s.closes}}</td>
-                                    <td data-class-sel="s.index == selected_plot">{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'" data-class-good="s.flag_class == 'good'">{{s.flag}}</span> <span class="pill accent" data-if="s.major">major deposit</span></td>
+                                    <td data-class-sel="s.index == selected_plot">{{s.survey}} <span class="muted num" data-if="s.error != ''">{{s.error}}</span> <span class="pill" data-if="s.has_flag" data-class-warn="s.flag_class == 'warn'" data-class-danger="s.flag_class == 'danger'" data-class-good="s.flag_class == 'good'">{{s.flag}}</span> <span class="pill accent" data-if="s.major">major deposit</span><span class="sub mark strong" data-if="s.survey_shows != ''">{{s.survey_shows}}</span><span class="sub mark" data-if="s.may_hold != ''">{{s.may_hold}}</span></td>
                                 </tr>
                             </table>
                             <span class="sub" data-if="no_unlisted != ''">{{no_unlisted}}</span>
@@ -318,6 +318,13 @@
                                     <span class="v num"><span class="line" data-class-warn="panel.figures.reopen_loss">{{panel.figures.reopen}}</span><span class="subline">{{panel.figures.note}}</span><span class="subline">{{panel.figures.break_even}}</span></span>
                                 </div>
                                 <div class="kv"><span class="k">Region odds</span><span class="v num"><span class="line wrapok">{{panel.odds}}</span></span></div>
+                                <!-- The ores the program lacks that this plot's region can
+                                     hold (spec 011, BR-008). The words carry the difference:
+                                     "survey shows" is the stronger mark, "may hold" the odds. -->
+                                <div class="kv" data-if="panel.survey_shows != '' || panel.may_hold != ''">
+                                    <span class="k">For the program</span>
+                                    <span class="v"><span class="line wrapok mark strong" data-if="panel.survey_shows != ''">{{panel.survey_shows}}</span><span class="line wrapok mark" data-if="panel.may_hold != ''">{{panel.may_hold}}</span></span>
+                                </div>
                                 <h2 style="margin-top: 4dp;"><span class="idx">04</span>{{panel.survey_title}}</h2>
                                 <!-- The row's class binding sits one level below the data-for
                                      element: a binding on the repeated element itself is

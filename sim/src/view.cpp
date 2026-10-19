@@ -416,16 +416,6 @@ std::vector<std::int64_t> remainingNeedTonnes(const Content& content, const Comp
     return need;
 }
 
-// One of the viewer's mines is a source of the ore: it can still produce,
-// and it has produced the ore or the viewer's own survey shows it there.
-bool yieldsOre(const MineView& mine, std::size_t r) {
-    if (mine.state != MineState::Building && mine.state != MineState::Operating &&
-        mine.state != MineState::Mothballed) {
-        return false;
-    }
-    return mine.extractedTonnes[r] > 0 || mine.bestEstimateTonnes[r] > 0;
-}
-
 // The ores the viewer's program lacks (spec 011, BR-007), from the viewer's
 // stock and its own mines as the view shows them. A locked ore counts like
 // any other: no mine yields it (edge case 8).
@@ -439,12 +429,13 @@ void addMissingOres(const Content& content, const WorldState& state, const Compa
     }
     const std::vector<std::int64_t> need = remainingNeedTonnes(content, self);
     for (std::size_t r = 0; r < need.size(); ++r) {
+        const ResourceId resource(static_cast<std::uint32_t>(r));
         if (need[r] <= self.inventoryTonnes[r] ||
-            std::ranges::any_of(view.mines,
-                                [r](const MineView& mine) { return yieldsOre(mine, r); })) {
+            std::ranges::any_of(view.mines, [resource](const MineView& mine) {
+                return mineYieldsOre(mine, resource);
+            })) {
             continue;
         }
-        const ResourceId resource(static_cast<std::uint32_t>(r));
         const bool soon = stageNeeds(content.program.stages[stage], resource) ||
                           (stage + 1 < content.program.stages.size() &&
                            stageNeeds(content.program.stages[stage + 1], resource));
@@ -516,6 +507,15 @@ void addRace(const Content& content, const WorldState& state, CompanyView& view)
 }
 
 }  // namespace
+
+bool mineYieldsOre(const MineView& mine, ResourceId resource) {
+    if (mine.state != MineState::Building && mine.state != MineState::Operating &&
+        mine.state != MineState::Mothballed) {
+        return false;
+    }
+    const std::size_t r = resource.index();
+    return mine.extractedTonnes[r] > 0 || mine.bestEstimateTonnes[r] > 0;
+}
 
 CompanyView makeCompanyView(const Content& content, const WorldState& state, CompanyId company) {
     CompanyView view;

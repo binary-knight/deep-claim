@@ -2612,3 +2612,25 @@ TEST_CASE("No ore is missing once the program is founded, the game is over or th
     CHECK(missing.size() == content.resources.size());
     checkNoneMissing(missing);
 }
+
+TEST_CASE("A mine yields an ore while it can produce and has produced it or been surveyed with it",
+          "[program][view][missing]") {
+    const sim::Content content = test::makeContent();
+    sim::MineView mine;
+    mine.extractedTonnes.assign(content.resources.size(), 0);
+    mine.bestEstimateTonnes.assign(content.resources.size(), 0);
+    CHECK_FALSE(sim::mineYieldsOre(mine, kIron));
+
+    mine.bestEstimateTonnes[kIron.index()] = 1'000;
+    CHECK(sim::mineYieldsOre(mine, kIron));
+    mine.state = sim::MineState::Mothballed;
+    CHECK(sim::mineYieldsOre(mine, kIron));
+    CHECK_FALSE(sim::mineYieldsOre(mine, kLithium));
+
+    mine.bestEstimateTonnes[kIron.index()] = 0;
+    mine.extractedTonnes[kIron.index()] = 50;
+    mine.state = sim::MineState::Operating;
+    CHECK(sim::mineYieldsOre(mine, kIron));
+    mine.state = sim::MineState::Depleted;
+    CHECK_FALSE(sim::mineYieldsOre(mine, kIron));
+}

@@ -20,6 +20,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -391,6 +392,56 @@ std::string oddsText(const sim::Content& content, const sim::PlotView& plot) {
                             formatPercent(prior.presenceProb));
     }
     return odds;
+}
+
+// The regions that can hold a good, each with its odds (data/regions.json):
+// "Northern Shield (40%), Copper Belt (5%)", or "" when none can.
+std::string regionOddsList(const sim::Content& content, sim::ResourceId resource) {
+    std::string regions;
+    for (const sim::RegionDef& region : content.regions) {
+        for (const sim::DepositPrior& prior : region.deposits) {
+            if (prior.resource == resource && prior.presenceProb > sim::Fixed{}) {
+                regions +=
+                    (regions.empty() ? "" : ", ") +
+                    text(content, "ui.program_from_region_item",
+                         {{"region", region.name}, {"odds", formatPercent(prior.presenceProb)}});
+            }
+        }
+    }
+    return regions;
+}
+
+// The marks a listed plot carries for the ores the program lacks (spec 011,
+// BR-008): each missing ore its region can hold, as "survey shows" where the
+// player's latest survey of the plot shows it and "may hold" elsewhere.
+// Which ores are missing is the sim's (sim::ProgramView::missingOres).
+std::pair<std::string, std::string> plotMarks(const sim::Content& content,
+                                              const sim::CompanyView& view,
+                                              const sim::PlotView& plot) {
+    const sim::SurveyView* latest = findSurvey(view, plot.id).latest;
+    std::string may;
+    std::string shows;
+    const std::vector<sim::MissingOre>& missing = view.program.missingOres;
+    const sim::RegionDef& region = content.regions[plot.region.index()];
+    for (std::size_t r = 0; r < missing.size(); ++r) {
+        const sim::ResourceId resource(static_cast<std::uint32_t>(r));
+        const bool canHold =
+            std::ranges::any_of(region.deposits, [&](const sim::DepositPrior& prior) {
+                return prior.resource == resource && prior.presenceProb > sim::Fixed{};
+            });
+        if (missing[r] == sim::MissingOre::None || !canHold) {
+            continue;
+        }
+        const bool shown =
+            latest != nullptr &&
+            std::ranges::any_of(latest->estimates, [&](const sim::SurveyEstimateView& e) {
+                return e.resource == resource && e.tonnesEstimate > 0;
+            });
+        std::string& list = shown ? shows : may;
+        list += (list.empty() ? "" : ", ") + content.resources[r].name;
+    }
+    return {may.empty() ? "" : text(content, "ui.plot_mark_may_hold", {{"resource", may}}),
+            shows.empty() ? "" : text(content, "ui.plot_mark_survey_shows", {{"resource", shows}})};
 }
 
 std::string monthsBeforeBankruptcy(const sim::Content& content, const sim::CompanyView& view) {
@@ -868,8 +919,29 @@ std::optional<PendingNeed> paceNeed(const sim::Content& content, const sim::Comp
     return PendingNeed{days, kWarningPriority + 2, std::move(row)};
 }
 
+// An ore the program lacks that the current or the next stage needs (spec
+// 011, BR-007): where it may be found, and a button to the Plots tab. Which
+// ores are missing, and how soon, is the sim's (sim::ProgramView::missingOres).
+void addOreNeeds(const sim::Content& content, const sim::CompanyView& view,
+                 std::vector<PendingNeed>& pending) {
+    const std::vector<sim::MissingOre>& missing = view.program.missingOres;
+    for (std::size_t r = 0; r < missing.size(); ++r) {
+        if (missing[r] != sim::MissingOre::Soon) {
+            continue;
+        }
+        const sim::ResourceId resource(static_cast<std::uint32_t>(r));
+        const std::string regions = regionOddsList(content, resource);
+        NeedRow row;
+        row.title = text(content, "ui.need_ore_title", {{"resource", content.resources[r].name}});
+        row.sub = regions.empty() ? "" : text(content, "ui.need_ore_sub", {{"regions", regions}});
+        row.action = 7;
+        row.act_label = "Plots";
+        pending.push_back({0, kWarningPriority + 2, std::move(row)});
+    }
+}
+
 // Standing problems: insolvency, storage above a tenth of cash, keeping pace
-// in the race, idle mines.
+// in the race, a missing ore, idle mines.
 void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
                      const Orders& orders, std::vector<PendingNeed>& pending) {
     if (view.monthsInsolvent > 0) {
@@ -896,6 +968,7 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
     if (std::optional<PendingNeed> pace = paceNeed(content, view)) {
         pending.push_back(std::move(*pace));
     }
+    addOreNeeds(content, view, pending);
     for (const sim::MineView& mine : view.mines) {
         if (!mineIdle(mine, view.day)) {
             continue;
@@ -1316,6 +1389,7 @@ void fillSale(const Session& session, UiModel& model) {
         row.closes = dayLabel(plot.auction->closesOnDay);
         fillSurveyCell(content, view, plot, row);
         row.has_flag = !row.flag.empty();
+        std::tie(row.may_hold, row.survey_shows) = plotMarks(content, view, plot);
         model.for_sale.push_back(row);
     }
     if (view.unlistedPlotsRemaining > 0) {
@@ -1523,6 +1597,9 @@ void fillPanel(const Session& session, const Orders& orders, UiModel& model) {
     }
     panel.capex = formatMoney(plot.mineCapexQuote);
     panel.odds = oddsText(content, plot);
+    if (panel.listed) {
+        std::tie(panel.may_hold, panel.survey_shows) = plotMarks(content, view, plot);
+    }
     const SurveyLookup found = findSurvey(view, plot.id);
     const bool anyExtractable = fillPanelSurvey(content, view, found, panel);
     fillPanelNotice(content, view, plot, found, anyExtractable, panel);
@@ -1840,31 +1917,9 @@ void fillProgramPace(const sim::Content& content, const sim::ProgramView& progra
     }
 }
 
-// One of the player's mines is a source of the ore as sim::ProgramView::
-// missingOres counts one: it can still produce, and it has produced the ore
-// or the player's own survey shows it there.
-bool mineYields(const sim::MineView& mine, std::size_t r) {
-    if (mine.state != sim::MineState::Building && mine.state != sim::MineState::Operating &&
-        mine.state != sim::MineState::Mothballed) {
-        return false;
-    }
-    return (r < mine.extractedTonnes.size() && mine.extractedTonnes[r] > 0) ||
-           (r < mine.bestEstimateTonnes.size() && mine.bestEstimateTonnes[r] > 0);
-}
-
 // The regions that can hold a good, with their odds (data/regions.json).
 std::string regionsLine(const sim::Content& content, sim::ResourceId resource) {
-    std::string regions;
-    for (const sim::RegionDef& region : content.regions) {
-        for (const sim::DepositPrior& prior : region.deposits) {
-            if (prior.resource == resource && prior.presenceProb > sim::Fixed{}) {
-                regions +=
-                    (regions.empty() ? "" : ", ") +
-                    text(content, "ui.program_from_region_item",
-                         {{"region", region.name}, {"odds", formatPercent(prior.presenceProb)}});
-            }
-        }
-    }
+    const std::string regions = regionOddsList(content, resource);
     const std::string& name = content.resources[resource.index()].name;
     return regions.empty() ? ""
                            : text(content, "ui.program_from_regions",
@@ -1878,7 +1933,7 @@ std::string minesLine(const sim::Content& content, const sim::CompanyView& view,
     const std::size_t r = resource.index();
     std::string mines;
     for (const sim::MineView& mine : view.mines) {
-        if (!mineYields(mine, r)) {
+        if (!sim::mineYieldsOre(mine, resource)) {
             continue;
         }
         const std::int64_t daily = r < mine.lastOutputTonnes.size() ? mine.lastOutputTonnes[r] : 0;
