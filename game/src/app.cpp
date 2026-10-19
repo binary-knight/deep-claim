@@ -478,6 +478,14 @@ void App::bindModel() {
         h.RegisterMember("order", &ProgramNeedRow::order);
     }
     ctor.RegisterArray<std::vector<ProgramNeedRow>>();
+    if (auto h = ctor.RegisterStruct<WhereFromRow>()) {
+        h.RegisterMember("good", &WhereFromRow::good);
+        h.RegisterMember("regions", &WhereFromRow::regions);
+        h.RegisterMember("research", &WhereFromRow::research);
+        h.RegisterMember("mines", &WhereFromRow::mines);
+        h.RegisterMember("surveys", &WhereFromRow::surveys);
+    }
+    ctor.RegisterArray<std::vector<WhereFromRow>>();
     if (auto h = ctor.RegisterStruct<ProgramPanel>()) {
         h.RegisterMember("title", &ProgramPanel::title);
         h.RegisterMember("intro", &ProgramPanel::intro);
@@ -507,6 +515,11 @@ void App::bindModel() {
         h.RegisterMember("blocked_research", &ProgramPanel::blocked_research);
         h.RegisterMember("blocked_deliveries", &ProgramPanel::blocked_deliveries);
         h.RegisterMember("blocked_cash", &ProgramPanel::blocked_cash);
+        h.RegisterMember("pace_line", &ProgramPanel::pace_line);
+        h.RegisterMember("pace_warning", &ProgramPanel::pace_warning);
+        h.RegisterMember("lab_line", &ProgramPanel::lab_line);
+        h.RegisterMember("where_heading", &ProgramPanel::where_heading);
+        h.RegisterMember("where_from", &ProgramPanel::where_from);
     }
     if (auto h = ctor.RegisterStruct<EndStageLine>()) {
         h.RegisterMember("text", &EndStageLine::text);
@@ -1033,6 +1046,9 @@ void App::onNeedAction(int action, int target) {
             return;
         case 5:  // the Research tab
             onSetTab(3);
+            return;
+        case 6:  // the Program tab
+            onSetTab(6);
             return;
         default:
             return;

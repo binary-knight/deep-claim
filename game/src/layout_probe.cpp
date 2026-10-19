@@ -623,6 +623,8 @@ constexpr int kLayoutFailure = 3;
 constexpr int kScenarioFailure = 5;
 
 // The played game, stage by stage, each laid out before the next is played.
+int probeProgramSurveyed(Rml::Context& context, game::App& app, LoggingSystem& system);
+
 // Returns 0, or the exit code of the first stage that failed. The game's
 // last stage, the land run out, is probeEndgame's.
 int probeScenarios(Rml::Context& context, game::App& app, LoggingSystem& system,
@@ -639,7 +641,7 @@ int probeScenarios(Rml::Context& context, game::App& app, LoggingSystem& system,
     if (!probeFrames(context, app, system, "survey in", Popover::None)) {
         return kLayoutFailure;
     }
-    return 0;
+    return probeProgramSurveyed(context, app, system);
 }
 
 // The shipped content with a last stage no company can pay for, so that no
@@ -1982,6 +1984,23 @@ struct NeedLine {
     bool waiting = false;          // a delivery of this good is waiting for the clock
 };
 
+// Where one good comes from on the Program tab (spec 011, BR-006).
+struct WhereLine {
+    std::string good;
+    std::string regions;
+    std::string research;
+    std::string mines;
+    std::string surveys;
+};
+
+std::string joined(const std::vector<std::string>& parts, std::string_view between) {
+    std::string out;
+    for (const std::string& part : parts) {
+        out += (out.empty() ? "" : std::string(between)) + part;
+    }
+    return out;
+}
+
 // What the Program tab must read, worked out here from the sim's view, the
 // session's queue and the catalogue, independently of the client's model.
 struct ProgramExpected {
@@ -2010,7 +2029,112 @@ struct ProgramExpected {
     std::string researchChip;
     std::string completeChip;
     std::string cancel;
+    // Keeping pace (spec 011, BR-004), as the catalogue words the view.
+    std::string pace;  // the last day to start the research, that it has passed, or ""
+    bool paceWarning = false;
+    std::string lab;  // the lab is busy elsewhere and free on a day, or ""
+    // Where each good an incomplete stage needs comes from (BR-006).
+    std::string whereHeading;
+    std::vector<WhereLine> where;
 };
+
+// Where one good comes from, built here from the content and the view as the
+// player would read them off the data files and their own company.
+WhereLine simWhere(const game::Session& session, sim::ResourceId resource) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const std::size_t r = resource.index();
+    const sim::ResourceDef& good = content.resources[r];
+    WhereLine line;
+    line.good = good.name;
+    std::vector<std::string> regions;
+    for (const sim::RegionDef& region : content.regions) {
+        for (const sim::DepositPrior& prior : region.deposits) {
+            if (prior.resource == resource && prior.presenceProb.raw() > 0) {
+                const std::string odds =
+                    std::to_string(prior.presenceProb.raw() / (sim::Fixed::kScale / 100)) + "%";
+                regions.push_back(game::text(content, "ui.program_from_region_item",
+                                             {{"region", region.name}, {"odds", odds}}));
+            }
+        }
+    }
+    if (!regions.empty()) {
+        line.regions = game::text(content, "ui.program_from_regions",
+                                  {{"resource", good.name}, {"regions", joined(regions, ", ")}});
+    }
+    if (good.unlockedBy.valid() &&
+        std::ranges::find(view.completedTechs, good.unlockedBy) == view.completedTechs.end()) {
+        line.research = game::text(
+            content, "ui.program_from_research",
+            {{"resource", good.name}, {"tech", content.techs[good.unlockedBy.index()].name}});
+    }
+    // A source as the view's missing-ore rule counts one (sim/src/view.cpp).
+    std::vector<std::string> mines;
+    for (const sim::MineView& mine : view.mines) {
+        const bool open = mine.state == sim::MineState::Building ||
+                          mine.state == sim::MineState::Operating ||
+                          mine.state == sim::MineState::Mothballed;
+        if (open && (mine.extractedTonnes[r] > 0 || mine.bestEstimateTonnes[r] > 0)) {
+            mines.push_back(game::text(content, "ui.program_from_mine_item",
+                                       {{"plot", std::format("#{}", mine.plot.value() + 1)},
+                                        {"tonnes", game::formatTonnes(mine.lastOutputTonnes[r])}}));
+        }
+    }
+    line.mines = mines.empty()
+                     ? game::text(content, "ui.program_from_no_mines", {{"resource", good.name}})
+                     : game::text(content, "ui.program_from_mines",
+                                  {{"resource", good.name}, {"mines", joined(mines, "; ")}});
+    // The latest complete survey of each plot.
+    std::vector<std::string> plots;
+    for (std::size_t i = 0; i < view.surveys.size(); ++i) {
+        const sim::SurveyView& survey = view.surveys[i];
+        const bool latest = survey.complete &&
+                            std::none_of(view.surveys.begin() + static_cast<std::ptrdiff_t>(i) + 1,
+                                         view.surveys.end(), [&](const sim::SurveyView& later) {
+                                             return later.complete && later.plot == survey.plot;
+                                         });
+        if (latest && std::ranges::any_of(survey.estimates, [&](const sim::SurveyEstimateView& e) {
+                return e.resource == resource && e.tonnesEstimate > 0;
+            })) {
+            plots.push_back(std::format("#{}", survey.plot.value() + 1));
+        }
+    }
+    if (!plots.empty()) {
+        line.surveys = game::text(content, "ui.program_from_surveys",
+                                  {{"resource", good.name}, {"plots", joined(plots, ", ")}});
+    }
+    return line;
+}
+
+// The Needs you row for keeping pace (spec 011, AC-005): its title while the
+// view warns, else "".
+std::string simPaceNeed(const game::Session& session) {
+    const sim::Content& content = session.content();
+    const sim::ProgramView& program = session.view().program;
+    if (!program.paceWarning || !program.stage) {
+        return {};
+    }
+    const std::string number = std::to_string(program.stage->index + 1);
+    return program.lastStartDay
+               ? game::text(content, "ui.need_pace_title",
+                            {{"number", number}, {"day", game::formatDay(*program.lastStartDay)}})
+               : game::text(content, "ui.need_pace_passed_title", {{"number", number}});
+}
+
+// The pace row stands under Needs you exactly while the view warns, and its
+// button goes to the Program tab.
+void checkPaceNeed(game::App& app, const std::string& where, Checks& checks) {
+    const std::string title = simPaceNeed(app.session());
+    const game::NeedRow* row = nullptr;
+    for (const game::NeedRow& need : app.model().needs) {
+        if (need.action == 6) {
+            row = &need;
+        }
+    }
+    checks.same(where + ": the pace row under Needs you", row != nullptr ? row->title : "", title);
+    std::cout << std::format("    {}: pace row \"{}\"{}\n", where, title,
+                             row != nullptr ? " / " + row->sub : "");
+}
 
 template <typename T, typename Matches>
 bool orderWaiting(const game::Session& session, Matches matches) {
@@ -2155,6 +2279,27 @@ ProgramExpected simProgram(game::App& app) {
         expected.readyLine = game::text(content, "ui.program_stage_ready");
     } else {
         expected.blocked = simBlocked(content, view, stage);
+    }
+    if (program.lastStartDay) {
+        expected.pace = game::text(content, "ui.program_last_start",
+                                   {{"day", game::formatDay(*program.lastStartDay)}});
+    } else if (program.lastStartPassed) {
+        expected.pace = game::text(content, "ui.program_last_start_passed");
+    }
+    expected.paceWarning = program.paceWarning;
+    if (program.labFreeDay) {
+        expected.lab = game::text(content, "ui.program_lab_busy",
+                                  {{"day", game::formatDay(*program.labFreeDay)}});
+    }
+    expected.whereHeading = game::text(content, "ui.program_where_from");
+    std::vector<sim::ResourceId> goods;
+    for (std::size_t i = program.stagesCompleted; i < content.program.stages.size(); ++i) {
+        for (const sim::ProgramRequirement& need : content.program.stages[i].requirements) {
+            if (std::ranges::find(goods, need.resource) == goods.end()) {
+                goods.push_back(need.resource);
+                expected.where.push_back(simWhere(session, need.resource));
+            }
+        }
     }
     return expected;
 }
@@ -2327,6 +2472,38 @@ void checkProgramTab(Rml::Context& context, const std::string& where,
     for (Rml::Element* cell : cells) {
         checkInside(cell, where + ": stages", checks);
     }
+    const std::vector<Rml::Element*> pace = visibleElements(tab, "span", "pace");
+    checks.same(where + ": the last day to start", joinedText(pace), expected.pace);
+    for (Rml::Element* line : pace) {
+        checks.same(where + ": the pace line is a warning", line->IsClassSet("warn"),
+                    expected.paceWarning);
+    }
+    checks.same(where + ": the busy lab", joinedText(visibleElements(tab, "span", "labbusy")),
+                expected.lab);
+    checks.same(where + ": where-from heading", onlyText(tab, "span", "wheading"),
+                expected.whereHeading);
+    const std::vector<Rml::Element*> sources = visibleElements(tab, "div", "wfrom");
+    checks.same(where + ": where-from goods", sources.size(), expected.where.size());
+    std::string from;
+    for (std::size_t i = 0; i < sources.size() && i < expected.where.size(); ++i) {
+        const WhereLine& line = expected.where[i];
+        const std::string at = where + ": where " + line.good;
+        checks.same(at + ": good", onlyText(sources[i], "span", "wgood"), line.good);
+        checks.same(at + ": regions", joinedText(visibleElements(sources[i], "span", "regions")),
+                    line.regions);
+        checks.same(at + ": research", joinedText(visibleElements(sources[i], "span", "wresearch")),
+                    line.research);
+        checks.same(at + ": mines", joinedText(visibleElements(sources[i], "span", "wmines")),
+                    line.mines);
+        checks.same(at + ": surveys", joinedText(visibleElements(sources[i], "span", "wsurveys")),
+                    line.surveys);
+        checkInside(sources[i], at, checks);
+        from += std::format("\n      {}: {} {} {} {}", line.good, line.regions, line.research,
+                            line.mines, line.surveys);
+    }
+    std::cout << std::format("    {}: pace \"{}\"{}{}{}\n", where, expected.pace,
+                             expected.paceWarning ? " (warning)" : "",
+                             expected.lab.empty() ? "" : "; " + expected.lab, from);
     std::cout << std::format(
         "    {}: {}{}\n      {}; {}; research: {}; completion: {}\n      {}{}\n", where, shown,
         expected.cover.empty() ? "" : "\n      warning: " + expected.cover, expected.cost,
@@ -2445,6 +2622,22 @@ int programResult(const Checks& checks, bool laidOut) {
     return laidOut ? 0 : kLayoutFailure;
 }
 
+// With a survey report in and a mine dug (spec 011, BR-006): the Program
+// tab's "where from" lines name the plot the survey shows a good on, and the
+// mine with its daily output.
+int probeProgramSurveyed(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    Checks checks("PROGRAM");
+    const ProgramExpected expected = simProgram(app);
+    if (std::ranges::none_of(expected.where,
+                             [](const WhereLine& line) { return !line.surveys.empty(); })) {
+        std::cout << "SCENARIO (program): the survey report shows no good the program needs\n";
+        return kScenarioFailure;
+    }
+    const bool laidOut =
+        probeProgramFrames(context, app, system, "program, survey report in", checks);
+    return programResult(checks, laidOut);
+}
+
 // A new game: nothing delivered, the research not started, and the stage's
 // completion off with what is missing said.
 int probeProgramFresh(Rml::Context& context, game::App& app, LoggingSystem& system) {
@@ -2482,6 +2675,7 @@ int probeProgramFresh(Rml::Context& context, game::App& app, LoggingSystem& syst
                           std::string::npos,
                   "a new game is not missing both its research and its deliveries");
     checkResearchStartable(context, app, "new game", checks);
+    checkPaceNeed(app, "new game", checks);
     const bool laidOut = probeProgramFrames(context, app, system, "program, new game", checks);
     return programResult(checks, laidOut);
 }
@@ -3721,6 +3915,46 @@ sim::Content nearDeadlineContent(const sim::Content& shipped) {
     return content;
 }
 
+// The last day to start the stage's research passed on day 0 (spec 011,
+// AC-005): with another project put in the lab, the Program tab says the day
+// has passed and names the day the lab is free, and Needs you lists it.
+int probePacePassed(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    game::Session& session = app.session();
+    const sim::Content& content = session.content();
+    sim::TechId other;
+    {
+        const sim::CompanyView& view = session.view();
+        for (std::uint32_t i = 0; i < content.techs.size() && view.program.stage; ++i) {
+            if (i != view.program.stage->research.index() && i < view.researchOpen.size() &&
+                view.researchOpen[i] != 0 &&
+                content.techs[i].cost <= view.cash - view.reservedCash) {
+                other = sim::TechId(i);
+                break;
+            }
+        }
+    }
+    if (!other.valid()) {
+        std::cout << "SCENARIO (program): no project but the stage's can start on day 0\n";
+        return kScenarioFailure;
+    }
+    session.submit(sim::StartResearch{{}, other});
+    session.stepOneDay();
+    app.refreshNow();
+    const sim::ProgramView& program = session.view().program;
+    if (!program.lastStartPassed || !program.labFreeDay || !program.paceWarning) {
+        std::cout << std::format(
+            "SCENARIO (program): with {} in the lab the view does not say the last day to start "
+            "has passed and when the lab is free (day {})\n",
+            content.techs[other.index()].name, session.view().day);
+        return kScenarioFailure;
+    }
+    Checks checks("PROGRAM");
+    checkPaceNeed(app, "pace passed, lab busy", checks);
+    const bool laidOut =
+        probeProgramFrames(context, app, system, "program, pace passed, lab busy", checks);
+    return programResult(checks, laidOut);
+}
+
 int probeDeadline(Rml::Context& context, game::App& app, LoggingSystem& system) {
     app.startGame(kScenarioSeed);
     game::Session& session = app.session();
@@ -3744,6 +3978,9 @@ int probeDeadline(Rml::Context& context, game::App& app, LoggingSystem& system) 
     }
     if (!laidOut) {
         return kLayoutFailure;
+    }
+    if (const int code = probePacePassed(context, app, system); code != 0) {
+        return code;
     }
     for (sim::Day day = 0; day <= kNearDeadline + 1 && !session.gameOver(); ++day) {
         session.stepOneDay();

@@ -842,7 +842,34 @@ struct PendingNeed {
 constexpr int kWarningPriority = 0;
 constexpr int kDatedPriority = 10;
 
-// Standing problems: insolvency, storage above a tenth of cash, idle mines.
+// Keeping pace (spec 011, BR-004): from ProgramDef::paceWarningDays before
+// the last day to start the current stage's research, and once it has
+// passed. Whether to warn is the sim's (sim::ProgramView::paceWarning).
+std::optional<PendingNeed> paceNeed(const sim::Content& content, const sim::CompanyView& view) {
+    const sim::ProgramView& program = view.program;
+    if (!program.paceWarning || !program.stage || !program.stage->research.valid()) {
+        return std::nullopt;
+    }
+    const sim::ProgramStageView& stage = *program.stage;
+    const std::string number = std::to_string(stage.index + 1);
+    NeedRow row;
+    row.title = program.lastStartDay
+                    ? text(content, "ui.need_pace_title",
+                           {{"number", number}, {"day", formatDay(*program.lastStartDay)}})
+                    : text(content, "ui.need_pace_passed_title", {{"number", number}});
+    row.sub = text(content, "ui.need_pace_sub",
+                   {{"amount", formatMoney(content.techs[stage.research.index()].cost)}});
+    const sim::Day days = program.lastStartDay ? daysLeft(*program.lastStartDay, view.day) : 0;
+    if (program.lastStartDay) {
+        row.days = daysUntil(content, *program.lastStartDay, view.day);
+    }
+    row.action = 6;
+    row.act_label = "Program";
+    return PendingNeed{days, kWarningPriority + 2, std::move(row)};
+}
+
+// Standing problems: insolvency, storage above a tenth of cash, keeping pace
+// in the race, idle mines.
 void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
                      const Orders& orders, std::vector<PendingNeed>& pending) {
     if (view.monthsInsolvent > 0) {
@@ -866,6 +893,9 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
         row.act_label = "Sell";
         pending.push_back({0, kWarningPriority + 1, std::move(row)});
     }
+    if (std::optional<PendingNeed> pace = paceNeed(content, view)) {
+        pending.push_back(std::move(*pace));
+    }
     for (const sim::MineView& mine : view.mines) {
         if (!mineIdle(mine, view.day)) {
             continue;
@@ -877,7 +907,7 @@ void addWarningNeeds(const sim::Content& content, const sim::CompanyView& view,
         row.target = static_cast<int>(mine.id.value());
         row.act_label = "Mothball";
         row.order = mineOrderMark(orders, mine.id);
-        pending.push_back({0, kWarningPriority + 2, std::move(row)});
+        pending.push_back({0, kWarningPriority + 3, std::move(row)});
     }
 }
 
@@ -922,7 +952,7 @@ void addDecisionNeeds(const sim::Content& content, const sim::CompanyView& view,
                              {{"count", std::to_string(startable)}});
         row.action = 5;
         row.act_label = "Research";
-        pending.push_back({0, kWarningPriority + 3, std::move(row)});
+        pending.push_back({0, kWarningPriority + 4, std::move(row)});
     }
     for (const sim::SurveyView& survey : view.surveys) {
         const sim::PlotView& plot = view.plots[survey.plot.index()];
@@ -938,7 +968,7 @@ void addDecisionNeeds(const sim::Content& content, const sim::CompanyView& view,
         row.action = 1;
         row.target = static_cast<int>(plot.id.value());
         row.act_label = "Read";
-        pending.push_back({0, kWarningPriority + 4, std::move(row)});
+        pending.push_back({0, kWarningPriority + 5, std::move(row)});
     }
 }
 
@@ -1793,6 +1823,129 @@ void fillProgramCompletion(const sim::Content& content, const sim::CompanyView& 
     }
 }
 
+// Keeping pace (spec 011, BR-004): the lines say what sim::ProgramView
+// holds; it is empty once the stage's research has started.
+void fillProgramPace(const sim::Content& content, const sim::ProgramView& program,
+                     ProgramPanel& panel) {
+    if (program.lastStartDay) {
+        panel.pace_line =
+            text(content, "ui.program_last_start", {{"day", formatDay(*program.lastStartDay)}});
+    } else if (program.lastStartPassed) {
+        panel.pace_line = text(content, "ui.program_last_start_passed");
+    }
+    panel.pace_warning = program.paceWarning;
+    if (program.labFreeDay) {
+        panel.lab_line =
+            text(content, "ui.program_lab_busy", {{"day", formatDay(*program.labFreeDay)}});
+    }
+}
+
+// One of the player's mines is a source of the ore as sim::ProgramView::
+// missingOres counts one: it can still produce, and it has produced the ore
+// or the player's own survey shows it there.
+bool mineYields(const sim::MineView& mine, std::size_t r) {
+    if (mine.state != sim::MineState::Building && mine.state != sim::MineState::Operating &&
+        mine.state != sim::MineState::Mothballed) {
+        return false;
+    }
+    return (r < mine.extractedTonnes.size() && mine.extractedTonnes[r] > 0) ||
+           (r < mine.bestEstimateTonnes.size() && mine.bestEstimateTonnes[r] > 0);
+}
+
+// The regions that can hold a good, with their odds (data/regions.json).
+std::string regionsLine(const sim::Content& content, sim::ResourceId resource) {
+    std::string regions;
+    for (const sim::RegionDef& region : content.regions) {
+        for (const sim::DepositPrior& prior : region.deposits) {
+            if (prior.resource == resource && prior.presenceProb > sim::Fixed{}) {
+                regions +=
+                    (regions.empty() ? "" : ", ") +
+                    text(content, "ui.program_from_region_item",
+                         {{"region", region.name}, {"odds", formatPercent(prior.presenceProb)}});
+            }
+        }
+    }
+    const std::string& name = content.resources[resource.index()].name;
+    return regions.empty() ? ""
+                           : text(content, "ui.program_from_regions",
+                                  {{"resource", name}, {"regions", regions}});
+}
+
+// The player's mines that yield a good, with their output on the last day
+// they worked; or that none does.
+std::string minesLine(const sim::Content& content, const sim::CompanyView& view,
+                      sim::ResourceId resource) {
+    const std::size_t r = resource.index();
+    std::string mines;
+    for (const sim::MineView& mine : view.mines) {
+        if (!mineYields(mine, r)) {
+            continue;
+        }
+        const std::int64_t daily = r < mine.lastOutputTonnes.size() ? mine.lastOutputTonnes[r] : 0;
+        mines += (mines.empty() ? "" : "; ") +
+                 text(content, "ui.program_from_mine_item",
+                      {{"plot", plotLabel(mine.plot)}, {"tonnes", formatTonnes(daily)}});
+    }
+    const std::string& name = content.resources[r].name;
+    return mines.empty()
+               ? text(content, "ui.program_from_no_mines", {{"resource", name}})
+               : text(content, "ui.program_from_mines", {{"resource", name}, {"mines", mines}});
+}
+
+// The plots the player's latest survey of each shows a good on, or "".
+std::string surveysLine(const sim::Content& content, const sim::CompanyView& view,
+                        sim::ResourceId resource) {
+    std::string plots;
+    for (const sim::SurveyView& survey : view.surveys) {
+        if (findSurvey(view, survey.plot).latest == &survey &&
+            std::ranges::any_of(survey.estimates, [&](const sim::SurveyEstimateView& e) {
+                return e.resource == resource && e.tonnesEstimate > 0;
+            })) {
+            plots += (plots.empty() ? "" : ", ") + plotLabel(survey.plot);
+        }
+    }
+    return plots.empty()
+               ? ""
+               : text(content, "ui.program_from_surveys",
+                      {{"resource", content.resources[resource.index()].name}, {"plots", plots}});
+}
+
+// Where one good comes from (spec 011, BR-006): the regions that can hold it
+// with their odds, the project that unlocks it, the player's mines that
+// yield it and the plots the player's latest surveys show it on.
+WhereFromRow makeWhereFromRow(const sim::Content& content, const sim::CompanyView& view,
+                              sim::ResourceId resource) {
+    const sim::ResourceDef& good = content.resources[resource.index()];
+    WhereFromRow row;
+    row.good = good.name;
+    row.regions = regionsLine(content, resource);
+    if (resourceLocked(content, view, resource)) {
+        row.research =
+            text(content, "ui.program_from_research",
+                 {{"resource", good.name}, {"tech", content.techs[good.unlockedBy.index()].name}});
+    }
+    row.mines = minesLine(content, view, resource);
+    row.surveys = surveysLine(content, view, resource);
+    return row;
+}
+
+// Every good a stage not yet complete needs, in the order the stages first
+// ask for it.
+void fillWhereFrom(const sim::Content& content, const sim::CompanyView& view, ProgramPanel& panel) {
+    panel.where_heading = text(content, "ui.program_where_from");
+    std::vector<sim::ResourceId> goods;
+    for (std::size_t i = view.program.stagesCompleted; i < content.program.stages.size(); ++i) {
+        for (const sim::ProgramRequirement& need : content.program.stages[i].requirements) {
+            if (std::ranges::find(goods, need.resource) == goods.end()) {
+                goods.push_back(need.resource);
+            }
+        }
+    }
+    for (const sim::ResourceId resource : goods) {
+        panel.where_from.push_back(makeWhereFromRow(content, view, resource));
+    }
+}
+
 // Runs after fillTechs and fillFinance: Start research is the stage
 // project's own row on the Research tab, and the cover-costs warning follows
 // the switch as it will stand once a waiting order for it is given.
@@ -1833,6 +1986,8 @@ void fillProgram(const Session& session, const Orders& orders, UiModel& model) {
         panel.research_order = project.order;
     }
     fillProgramCompletion(content, view, orders, stage, panel);
+    fillProgramPace(content, view.program, panel);
+    fillWhereFrom(content, view, panel);
     model.program = std::move(panel);
 }
 

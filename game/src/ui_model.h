@@ -50,7 +50,7 @@ struct NeedRow {
     std::string days;  // "in 30 days" or ""
     // What the action button does: 0 none, 1 open the plot (Plots tab),
     // 2 mothball the mine, 3 open the Market tab, 4 open the Finance tab,
-    // 5 open the Research tab.
+    // 5 open the Research tab, 6 open the Program tab.
     int action = 0;
     int target = -1;  // plot index or mine index for actions 1 and 2
     std::string act_label;
@@ -284,6 +284,17 @@ struct ProgramNeedRow {
     OrderMark order;          // a delivery of this good waiting for the clock
 };
 
+// Where one good the program still needs comes from (spec 011, BR-006):
+// display assembly from the content and the player's own view, each line
+// "" when it has nothing to say.
+struct WhereFromRow {
+    std::string good;
+    std::string regions;   // "Nickel may be found in Northern Shield (40%), ..."
+    std::string research;  // the unlocking project while the good is locked, or ""
+    std::string mines;     // our mines that yield it with their daily output, or that none does
+    std::string surveys;   // the plots our latest surveys show it on, or ""
+};
+
 // The Program tab (spec 010): the stage the player is working on, or the
 // line that says every stage is done. Whether a stage can be completed is
 // the sim's answer (sim::ProgramStageView::ready); the lines that say what
@@ -311,6 +322,7 @@ struct ProgramPanel {
     // the Research tab would start it too (its row is the one source).
     bool research_open = false;
     bool can_research = false;
+    bool pace_warning = false;     // sim::ProgramView::paceWarning: pace_line is a warning
     std::string research_label;    // "Start research ($2.00M)"
     std::string research_blocked;  // why it is off, as the Research tab says it, or ""
     OrderMark research_order;
@@ -322,6 +334,14 @@ struct ProgramPanel {
     std::string blocked_research;    // the research is not finished, or ""
     std::string blocked_deliveries;  // deliveries are outstanding, or ""
     std::string blocked_cash;        // spendable cash does not cover the cost, or ""
+    // Keeping pace (spec 011, BR-004), read off sim::ProgramView: the last
+    // day to start the stage's research, or that it has passed; and the day
+    // a lab busy with another project is free. Each "" when the view is silent.
+    std::string pace_line;
+    std::string lab_line;
+    // Where each good an incomplete stage needs comes from (spec 011, BR-006).
+    std::string where_heading;
+    std::vector<WhereFromRow> where_from;
 };
 
 // One stage's line under a company on the end screen (spec 010).

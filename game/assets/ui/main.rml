@@ -219,6 +219,21 @@
                     <span class="sub warn blocked" data-if="program.blocked_deliveries != ''">{{program.blocked_deliveries}}</span>
                     <span class="sub warn blocked" data-if="program.blocked_cash != ''">{{program.blocked_cash}}</span>
                     <span class="sub good ready" data-if="program.ready_line != ''">{{program.ready_line}}</span>
+                    <!-- Keeping pace (spec 011): the last day to start the
+                         research, or that it has passed; a lab busy elsewhere. -->
+                    <span class="pline pace" data-class-warn="program.pace_warning" data-if="program.pace_line != ''">{{program.pace_line}}</span>
+                    <span class="pline labbusy" data-if="program.lab_line != ''">{{program.lab_line}}</span>
+                </div>
+                <!-- Where each good the program still needs comes from (spec 011). -->
+                <div class="sheet wherefrom" data-if="program.has_stage">
+                    <h2><span class="idx">03</span><span class="wheading">{{program.where_heading}}</span></h2>
+                    <div data-for="w : program.where_from" class="wfrom">
+                        <span class="wgood">{{w.good}}</span>
+                        <span class="pline regions" data-if="w.regions != ''">{{w.regions}}</span>
+                        <span class="pline wresearch warn" data-if="w.research != ''">{{w.research}}</span>
+                        <span class="pline wmines">{{w.mines}}</span>
+                        <span class="pline wsurveys" data-if="w.surveys != ''">{{w.surveys}}</span>
+                    </div>
                 </div>
             </div>
 
