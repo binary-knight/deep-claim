@@ -97,6 +97,13 @@ bool noticeIsDanger(sim::NoticeKind kind) {
     }
 }
 
+// The status line for the first of the day's stops (until task 013's stop
+// panel replaces it).
+std::string stopStatus(const sim::Content& content, const Session& session) {
+    const std::string line = describeNotice(content, session.view(), session.stopsToday().front());
+    return text(content, "status.paused_by", {{"text", line}});
+}
+
 }  // namespace
 
 App::App(Rml::Context& context, platform::Services& services, const sim::Content& content,
@@ -879,10 +886,13 @@ void App::update(double seconds) {
         traceEnd();
     }
     statusAge_ += seconds;
-    if (const std::optional<sim::Notice> why = session_->takePausedBy()) {
+    // Each tick starts the day's stops afresh, so after a tick a non-empty
+    // list is a new stop. Task 013 replaces this status line with the stop
+    // panel, which keeps the reason on screen until the clock restarts.
+    if (ticked > 0 && !session_->stopsToday().empty()) {
         // The clock stopped for this: say so and keep it on screen longer.
-        const std::string line = describeNotice(*content_, session_->view(), *why);
-        setStatus(text(*content_, "status.paused_by", {{"text", line}}), noticeIsDanger(why->kind));
+        setStatus(stopStatus(*content_, *session_),
+                  noticeIsDanger(session_->stopsToday().front().kind));
         statusAge_ = -kStatusSeconds;
     }
     if (statusAge_ > kStatusSeconds && !model_.status_line.empty()) {
@@ -966,6 +976,13 @@ void App::onStep() {
         traceEnd();
     }
     refresh();
+    if (!session_->stopsToday().empty()) {
+        // The step stopped the clock: say why, as update() does, over any
+        // refusal refresh() just put on the status line.
+        setStatus(stopStatus(*content_, *session_),
+                  noticeIsDanger(session_->stopsToday().front().kind));
+        statusAge_ = -kStatusSeconds;
+    }
 }
 
 void App::onSelectPlot(int index) {

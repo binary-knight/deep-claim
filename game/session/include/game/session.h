@@ -24,7 +24,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -47,6 +46,9 @@ struct LogEntry {
     sim::Day day = 0;
     sim::Notice notice;
     std::string text;
+    // The line stopped the clock: its notice matched an enabled Stops rule,
+    // or it ended the game (spec 011, BR-009).
+    bool stoppedClock = false;
 };
 
 class Session {
@@ -64,11 +66,11 @@ public:
     void togglePause();
     // Advances real time; ticks whole in-game days as they accrue. Returns
     // how many days were ticked. Pauses the moment a notice in the
-    // auto-pause rule set reaches the player (that notice is then available
-    // from takePausedBy). Once the game is over (gameOver) no further day is
+    // auto-pause rule set reaches the player (the day's such notices are then
+    // in stopsToday). Once the game is over (gameOver) no further day is
     // ticked and nothing more is added to the log, the histories or the
     // trace; the day it ends on stops the clock whatever the rules say, and
-    // takePausedBy then hands over the notice that ended it.
+    // stopsToday then leads with the notice that ended it.
     int advance(double seconds);
     // One day forward regardless of speed (used by a "step" button).
     void stepOneDay();
@@ -76,8 +78,13 @@ public:
     // ---- auto-pause ----
     [[nodiscard]] const AutoPause& autoPause() const { return autoPause_; }
     void setAutoPause(const AutoPause& rules) { autoPause_ = rules; }
-    // The notice that last stopped the clock, handed over once.
-    [[nodiscard]] std::optional<sim::Notice> takePausedBy();
+    // Why the clock stopped (spec 011, BR-009): the notices of the day it
+    // stopped on that matched an enabled rule, in log order, with the
+    // game-ending notice first on the day the game ends. Empty while the
+    // clock runs. The list stays until the clock is started again; a load
+    // clears it, and each new day replaces it with its own. Session memory,
+    // not saved.
+    [[nodiscard]] const std::vector<sim::Notice>& stopsToday() const { return stops_; }
 
     // ---- player ----
     // Queues an order, always bound to the player. It reaches the sim at the
@@ -148,6 +155,9 @@ private:
     // Pauses the clock when the last tick raised a pausing notice or ended
     // the game.
     bool stopIfPaused();
+    // On the day the game ends: puts the notice that ended it first among
+    // the day's stops and marks its line in the log.
+    void markEnding(sim::Day day, std::span<const sim::Notice> notices);
     void refreshView();
     void appendLog(sim::Day day, const sim::Notice& notice);
     void appendLogText(sim::Day day, const sim::Notice& notice, std::string text);
@@ -167,7 +177,7 @@ private:
     double accumulator_ = 0.0;  // real seconds not yet turned into days
     TraceWriter* trace_ = nullptr;
     AutoPause autoPause_ = AutoPause::defaults();
-    std::optional<sim::Notice> pausedBy_;
+    std::vector<sim::Notice> stops_;  // see stopsToday
     std::vector<sim::Money> cashHistory_;
     // Plots the player ordered a bid on since the last tick (the bid and the
     // auction's close can be processed in the same day).

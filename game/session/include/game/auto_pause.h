@@ -30,6 +30,7 @@ enum class PauseOn : std::uint8_t {
     ResearchComplete,  // ResearchComplete (the player's own lab)
     MineLosing,        // MineLosingMoney (the player's own mine)
     RivalProgram,      // ProgramResearchStarted, ProgramStageComplete (another company's)
+    FellBehind,        // ProgramFellBehind, ProgramPastDeadline (the player's own)
     kCount,
 };
 
@@ -37,6 +38,10 @@ constexpr std::size_t kPauseOnCount = static_cast<std::size_t>(PauseOn::kCount);
 
 // Stable key for the settings file and the string catalogue ("ui.pause_on.<key>").
 [[nodiscard]] std::string_view pauseOnKey(PauseOn reason);
+
+// A stop that is news about the race (spec 011, BR-010): a rival's program
+// progress or the player falling behind. The interface sets it apart.
+[[nodiscard]] bool isRaceStop(PauseOn reason);
 
 struct AutoPause {
     std::array<bool, kPauseOnCount> enabled{};
@@ -46,7 +51,7 @@ struct AutoPause {
     // lands unseen or a lab left idle costs the player more than a stop.
     // A mine losing money (spec 008) is on too: every day unseen is paid for.
     // So is a rival's progress in the race (spec 010): the player has to be
-    // able to react in time.
+    // able to react in time. And so is falling behind in it (spec 011).
     [[nodiscard]] static AutoPause defaults();
 
     [[nodiscard]] bool isEnabled(PauseOn reason) const {

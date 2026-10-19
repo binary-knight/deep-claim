@@ -52,6 +52,9 @@ void Session::setSpeed(Speed speed) {
     if (speed != speed_ && trace_ != nullptr) {
         trace_->ui(day(), "speed", std::to_string(daysPerSecond(speed)) + " days/s");
     }
+    if (speed != Speed::Paused) {
+        stops_.clear();  // the player has seen why and started the clock again
+    }
     speed_ = speed;
 }
 
@@ -91,19 +94,13 @@ void Session::stepOneDay() {
 
 bool Session::stopIfPaused() {
     // The end of the game stops the clock under any rule set.
-    if (!pausedBy_.has_value() && !gameOver()) {
+    if (stops_.empty() && !gameOver()) {
         return false;
     }
     // Something the player wants to see: stop here, on this day.
     setSpeed(Speed::Paused);
     accumulator_ = 0.0;
     return true;
-}
-
-std::optional<sim::Notice> Session::takePausedBy() {
-    std::optional<sim::Notice> notice;
-    notice.swap(pausedBy_);
-    return notice;
 }
 
 bool Session::submit(sim::Command command) {
@@ -294,7 +291,7 @@ bool Session::load(std::span<const std::uint8_t> bytes) {
     }
     refreshView();
     cashHistory_.assign(1, view_.cash);
-    pausedBy_.reset();
+    stops_.clear();
     submittedBids_.clear();
     pending_.clear();
     log_.clear();
@@ -330,6 +327,8 @@ void Session::tickOnce() {
     // The player's orders go to the sim first, then the rivals decide from
     // their own views. The sim applies everything in company order.
     giveOrders();
+    // The stops shown are the day's own: a step while stopped replaces them.
+    stops_.clear();
     const std::size_t companies = view_.companies.size();
     for (std::uint32_t c = 1; c < companies; ++c) {
         simulation_.collectCommands(sim::CompanyId(c), ai_);
@@ -362,16 +361,29 @@ void Session::tickOnce() {
     const std::vector<sim::Notice> notices = simulation_.reportFor(kPlayer);
     logNotices(processed, notices, bidPlots);
     if (gameOver()) {
-        // Whatever else the day raised, the end is what stopped the clock.
-        const auto ending =
-            std::find_if(notices.begin(), notices.end(),
-                         [](const sim::Notice& notice) { return endsTheGame(notice, kPlayer); });
-        if (ending != notices.end()) {
-            pausedBy_ = *ending;
-        }
+        markEnding(processed, notices);
     }
     if (trace_ != nullptr && dayClosed && view_.day % sim::kDaysPerMonth == 0) {
         trace_->state(*content_, view_);
+    }
+}
+
+void Session::markEnding(sim::Day day, std::span<const sim::Notice> notices) {
+    // Whatever else the day raised, the end is what stopped the clock: it
+    // leads the day's stops (once, though the player's bankruptcy may have
+    // matched its rule too) and its line in the log is marked.
+    const auto ending = std::find_if(notices.begin(), notices.end(), [](const sim::Notice& notice) {
+        return endsTheGame(notice, kPlayer);
+    });
+    if (ending == notices.end()) {
+        return;
+    }
+    std::erase_if(stops_, [](const sim::Notice& notice) { return endsTheGame(notice, kPlayer); });
+    stops_.insert(stops_.begin(), *ending);
+    for (auto entry = log_.rbegin(); entry != log_.rend() && entry->day == day; ++entry) {
+        if (endsTheGame(entry->notice, kPlayer)) {
+            entry->stoppedClock = true;
+        }
     }
 }
 
@@ -452,8 +464,10 @@ void Session::logNotices(sim::Day day, std::span<const sim::Notice> notices,
             continue;
         }
         appendLog(day, notice);
-        if (!pausedBy_.has_value() && autoPause_.shouldPause(notice, kPlayer)) {
-            pausedBy_ = notice;
+        if (autoPause_.shouldPause(notice, kPlayer)) {
+            // Every stop of the day is kept, and its line marked (BR-009).
+            stops_.push_back(notice);
+            log_.back().stoppedClock = true;
         }
     }
 }
