@@ -242,12 +242,29 @@ struct LogRow {
     std::string day;
     std::string text;
     bool warning = false;
+    std::string mark;  // "Stopped the clock" on a line that stopped it (spec 011, BR-009), else ""
 };
 
 struct PauseRow {
     int index = 0;
     std::string label;
     bool on = false;
+};
+
+// Why the clock stopped (spec 011, BR-009, BR-010), from
+// Session::stopsToday(): up while the day's stops stand, so until the clock
+// is started again, and not over the end screen.
+struct StopPanel {
+    bool shown = false;
+    bool race = false;    // a race stop (isRaceStop): its own heading and both founding days
+    std::string heading;  // "Clock stopped: Survey complete", the rule as the Stops menu names it
+    std::string line;     // the first stop's line, as the log has it
+    std::string more;     // "+2 more" when several stopped the clock that day, else ""
+    std::string days;     // a race stop's earliest founding days, else ""
+    std::string go_to;    // "Go to Plots"
+    int tab = 0;          // where the player acts on it, numbered as UiModel::tab
+    int rule = 0;         // the PauseOn it stopped for
+    std::string rule_label;  // "Stop for this", or "Not stopping for this" once the rule is off
 };
 
 // One company's place in the race for the program (spec 010), on the
@@ -416,6 +433,7 @@ struct UiModel {
     bool status_danger = false;
     bool show_pause_menu = false;
     std::vector<PauseRow> pause_rows;
+    StopPanel stop;
 
     // Orders waiting for the clock (spec 007), in the order given
     std::vector<PendingRow> pending_orders;

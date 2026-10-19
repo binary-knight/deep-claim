@@ -82,26 +82,19 @@ bool writeFile(const std::filesystem::path& path, const std::vector<std::uint8_t
     return static_cast<bool>(file);
 }
 
-// Notices the status line shows in the danger colour.
-bool noticeIsDanger(sim::NoticeKind kind) {
-    switch (kind) {
-        case sim::NoticeKind::CommandRejected:
-        case sim::NoticeKind::InsolvencyWarning:
-        case sim::NoticeKind::Bankrupt:
-        case sim::NoticeKind::MineFoundNothing:
-        case sim::NoticeKind::IdleMineWarning:
-        case sim::NoticeKind::BidForfeited:
-            return true;
-        default:
-            return false;
+// The stop panel's data type (spec 011, BR-009), apart from bindModel to
+// keep that one readable.
+void registerStopPanel(Rml::DataModelConstructor& ctor) {
+    if (auto h = ctor.RegisterStruct<StopPanel>()) {
+        h.RegisterMember("shown", &StopPanel::shown);
+        h.RegisterMember("race", &StopPanel::race);
+        h.RegisterMember("heading", &StopPanel::heading);
+        h.RegisterMember("line", &StopPanel::line);
+        h.RegisterMember("more", &StopPanel::more);
+        h.RegisterMember("days", &StopPanel::days);
+        h.RegisterMember("go_to", &StopPanel::go_to);
+        h.RegisterMember("rule_label", &StopPanel::rule_label);
     }
-}
-
-// The status line for the first of the day's stops (until task 013's stop
-// panel replaces it).
-std::string stopStatus(const sim::Content& content, const Session& session) {
-    const std::string line = describeNotice(content, session.view(), session.stopsToday().front());
-    return text(content, "status.paused_by", {{"text", line}});
 }
 
 }  // namespace
@@ -452,6 +445,7 @@ void App::bindModel() {
         h.RegisterMember("day", &LogRow::day);
         h.RegisterMember("text", &LogRow::text);
         h.RegisterMember("warning", &LogRow::warning);
+        h.RegisterMember("mark", &LogRow::mark);
     }
     if (auto h = ctor.RegisterStruct<RaceRow>()) {
         h.RegisterMember("name", &RaceRow::name);
@@ -525,6 +519,7 @@ void App::bindModel() {
         h.RegisterMember("where_heading", &ProgramPanel::where_heading);
         h.RegisterMember("where_from", &ProgramPanel::where_from);
     }
+    registerStopPanel(ctor);
     if (auto h = ctor.RegisterStruct<EndStageLine>()) {
         h.RegisterMember("text", &EndStageLine::text);
         h.RegisterMember("reached", &EndStageLine::reached);
@@ -684,6 +679,7 @@ void App::bindModel() {
     ctor.Bind("selected_plot", &model_.selected_plot);
     ctor.Bind("selected_resource", &model_.selected_resource);
     ctor.Bind("ui_shortcuts", &model_.ui_shortcuts);
+    ctor.Bind("stop", &model_.stop);
     ctor.Bind("end", &model_.end);
     ctor.Bind("ui_pause_menu_title", &model_.ui_pause_menu_title);
     ctor.Bind("ui_cancel", &model_.ui_cancel);
@@ -719,6 +715,14 @@ void App::bindModel() {
                            });
     ctor.BindEventCallback("toggle_pause_menu", [this](Rml::DataModelHandle, Rml::Event&, Args) {
         showPopover(!model_.show_pause_menu, false);
+    });
+    // The stop panel's buttons (spec 011, BR-009): the tab where the stop is
+    // acted on, and its Stops rule, switched as the Stops menu switches it.
+    ctor.BindEventCallback("stop_go_to", [this](Rml::DataModelHandle, Rml::Event&, Args) {
+        onSetTab(model_.stop.tab);
+    });
+    ctor.BindEventCallback("stop_rule", [this](Rml::DataModelHandle, Rml::Event&, Args) {
+        onTogglePause(model_.stop.rule);
     });
     ctor.BindEventCallback("toggle_pending_list", [this](Rml::DataModelHandle, Rml::Event&, Args) {
         showPopover(false, !showPendingList_);
@@ -908,16 +912,9 @@ void App::update(double seconds) {
         // window closes.
         traceEnd();
     }
+    // Why the clock stopped is the stop panel's (spec 011, BR-009): it
+    // stays up until the clock is started again, so nothing is timed here.
     statusAge_ += seconds;
-    // Each tick starts the day's stops afresh, so after a tick a non-empty
-    // list is a new stop. Task 013 replaces this status line with the stop
-    // panel, which keeps the reason on screen until the clock restarts.
-    if (ticked > 0 && !session_->stopsToday().empty()) {
-        // The clock stopped for this: say so and keep it on screen longer.
-        setStatus(stopStatus(*content_, *session_),
-                  noticeIsDanger(session_->stopsToday().front().kind));
-        statusAge_ = -kStatusSeconds;
-    }
     if (statusAge_ > kStatusSeconds && !model_.status_line.empty()) {
         model_.status_line.clear();
         model_.status_danger = false;
@@ -999,13 +996,6 @@ void App::onStep() {
         traceEnd();
     }
     refresh();
-    if (!session_->stopsToday().empty()) {
-        // The step stopped the clock: say why, as update() does, over any
-        // refusal refresh() just put on the status line.
-        setStatus(stopStatus(*content_, *session_),
-                  noticeIsDanger(session_->stopsToday().front().kind));
-        statusAge_ = -kStatusSeconds;
-    }
 }
 
 void App::onSelectPlot(int index) {

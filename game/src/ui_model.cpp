@@ -2167,6 +2167,7 @@ void fillLog(const Session& session, UiModel& model) {
     model.log.clear();
     model.recent.clear();
     const std::vector<LogEntry>& entries = session.log();
+    const std::string stopped = text(session.content(), "ui.log_stopped");
     // Newest first, capped for the list. The dashboard's "Recent" ignores
     // the filter.
     for (std::size_t i = 0; i < entries.size() && model.log.size() < kLogRows; ++i) {
@@ -2175,6 +2176,7 @@ void fillLog(const Session& session, UiModel& model) {
         row.day = formatDay(entry.day);
         row.text = entry.text;
         row.warning = noticeIsWarning(entry.notice.kind);
+        row.mark = entry.stoppedClock ? stopped : "";
         if (i < 3) {
             model.recent.push_back(row);
         }
@@ -2196,6 +2198,94 @@ void fillPauseRows(const Session& session, UiModel& model) {
         row.on = session.autoPause().isEnabled(reason);
         model.pause_rows.push_back(row);
     }
+}
+
+// ---- the stop panel (spec 011, BR-009, BR-010) ----
+
+// The tab where the player acts on a stop, numbered as UiModel::tab, and the
+// catalogue key of its name. Display routing, so the client's: mines are
+// worked from the Plots tab, the lab from Research, the race from Program.
+std::pair<int, const char*> stopTab(PauseOn rule) {
+    switch (rule) {
+        case PauseOn::Insolvency:
+        case PauseOn::Bankrupt:
+            return {4, "ui.tab_finance"};
+        case PauseOn::ResearchComplete:
+            return {3, "ui.tab_research"};
+        case PauseOn::RivalProgram:
+        case PauseOn::FellBehind:
+            return {6, "ui.tab_program"};
+        case PauseOn::AuctionWon:
+        case PauseOn::AuctionLost:
+        case PauseOn::SurveyComplete:
+        case PauseOn::MineOperational:
+        case PauseOn::MineFoundNothing:
+        case PauseOn::IdleMine:
+        case PauseOn::MineLosing:
+        case PauseOn::kCount:
+            break;
+    }
+    return {1, "ui.tab_plots"};
+}
+
+// A race stop's two earliest founding days: the player's and the rival's the
+// notice is about (falling behind names the rival, a rival's progress is its
+// own company's), else the leading rival's. "" when either has no day.
+std::string stopRaceDays(const sim::Content& content, const sim::CompanyView& view,
+                         const sim::Notice& notice) {
+    const sim::CompanyId rival = notice.rival.valid() ? notice.rival : notice.company;
+    const sim::ProgramPublicView* mine = nullptr;
+    const sim::ProgramPublicView* theirs = nullptr;
+    for (const sim::ProgramPublicView& program : view.programs) {
+        mine = program.company == Session::kPlayer ? &program : mine;
+        theirs = program.company == rival && rival != Session::kPlayer ? &program : theirs;
+    }
+    if (theirs == nullptr) {
+        const std::optional<RaceLeader> leader = leadingRival(view);
+        theirs = leader ? leader->program : nullptr;
+    }
+    if (mine == nullptr || theirs == nullptr || !mine->earliestFoundingDay ||
+        !theirs->earliestFoundingDay || theirs->company.index() >= view.companies.size()) {
+        return "";
+    }
+    return text(content, "ui.stop_race_days",
+                {{"day", formatDay(*mine->earliestFoundingDay)},
+                 {"company", view.companies[theirs->company.index()].name},
+                 {"rival_day", formatDay(*theirs->earliestFoundingDay)}});
+}
+
+void fillStop(const Session& session, UiModel& model) {
+    const sim::Content& content = session.content();
+    model.stop = StopPanel();
+    const std::vector<sim::Notice>& stops = session.stopsToday();
+    // A finished game's stop is the end screen's to explain.
+    if (stops.empty() || session.gameOver()) {
+        return;
+    }
+    const sim::Notice& first = stops.front();
+    // Only the notice that ends the game stops the clock without a rule.
+    const std::optional<PauseOn> rule = AutoPause::reasonFor(first, Session::kPlayer);
+    if (!rule) {
+        return;
+    }
+    StopPanel& stop = model.stop;
+    stop.shown = true;
+    stop.race = isRaceStop(*rule);
+    stop.heading = text(content, stop.race ? "ui.stop_race_heading" : "ui.stop_heading",
+                        {{"rule", text(content, "ui.pause_on." + std::string(pauseOnKey(*rule)))}});
+    stop.line = describeNotice(content, session.view(), first);
+    if (stops.size() > 1) {
+        stop.more = text(content, "ui.stop_more", {{"count", std::to_string(stops.size() - 1)}});
+    }
+    if (stop.race) {
+        stop.days = stopRaceDays(content, session.view(), first);
+    }
+    const auto [tab, tabName] = stopTab(*rule);
+    stop.tab = tab;
+    stop.go_to = text(content, "ui.stop_go_to", {{"tab", text(content, tabName)}});
+    stop.rule = static_cast<int>(*rule);
+    stop.rule_label = text(
+        content, session.autoPause().isEnabled(*rule) ? "ui.stop_for_this" : "ui.stop_rule_off");
 }
 
 // ---- the end screen (spec 010) ----
@@ -2347,6 +2437,7 @@ void refreshModel(const Session& session, UiModel& model) {
     fillProgram(session, orders, model);
     fillLog(session, model);
     fillPauseRows(session, model);
+    fillStop(session, model);
     fillEnd(session, model);
 }
 

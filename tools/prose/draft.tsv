@@ -423,6 +423,12 @@ ui.stop_race_days	Earliest founding: us {day}, {company} {rival_day}
 ui.stop_more	+{count} more
 ui.stop_go_to	Go to {tab}
 ui.stop_for_this	Stop for this
+ui.stop_rule_off	Not stopping for this
+ui.log_stopped	Stopped the clock
+ui.tab_plots	Plots
+ui.tab_research	Research
+ui.tab_finance	Finance
+ui.tab_program	Program
 ui.race_behind_by.one	Behind by {days} day
 ui.race_behind_by.many	Behind by {days} days
 ui.race_ahead_by.one	Ahead by {days} day

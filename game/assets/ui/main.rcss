@@ -195,6 +195,32 @@ th.w-deliver { width: 296dp; }
 #program .wgood { display: block; font-weight: 600; color: #ffffff; }
 
 /* ---- Body: rail + content ---- */
+/* Why the clock stopped (spec 011, BR-009, BR-010): a band in the page's
+   flow under the strip, so it never covers the clock's buttons. The words
+   carry the meaning; a race stop's rule and founding days are extra. */
+#stop {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 8dp 16dp;
+    background-color: #111826;
+    border-bottom: 1dp #2f4160;
+    border-left: 4dp #2f8cff;
+    font-size: 14dp;
+    line-height: 20dp;
+    color: #c9d4e6;
+}
+#stop.race { border-left-color: #f0b340; padding-top: 12dp; padding-bottom: 12dp; }
+#stop .what { display: block; flex: 1 1 0; width: 100dp; margin-right: 16dp; }
+#stop .heading { display: block; font-weight: 600; color: #ffffff; }
+#stop.race .heading { font-family: "Barlow Condensed"; font-size: 18dp; line-height: 24dp; letter-spacing: 0.25dp; }
+#stop .days { display: block; font-weight: 600; color: #ffffff; }
+#stop .said { display: block; }
+#stop .more { margin-left: 8dp; font-weight: 600; white-space: nowrap; color: #ffffff; }
+#stop .acts { display: flex; flex-direction: row; flex: 0 0 auto; align-items: center; }
+#stop .acts button { margin-left: 8dp; white-space: nowrap; }
+.log .mark { display: block; flex: 0 0 auto; margin-left: 12dp; font-size: 14dp; line-height: 18dp; font-weight: 600; color: #8fa0ba; white-space: nowrap; }
+
 #body { display: flex; flex-direction: row; flex: 1 1 0; min-height: 0; }
 #rail {
     width: 56dp;

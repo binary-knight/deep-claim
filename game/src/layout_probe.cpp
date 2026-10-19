@@ -66,6 +66,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1215,7 +1216,8 @@ struct LosingMine {
     std::string noticeText;   // its line in the log
     std::size_t notices = 0;  // losing-mine lines in the log
     game::Speed speed = game::Speed::Paused;
-    std::string status;  // the status line after that second
+    std::string status;    // the status line after that second
+    game::StopPanel stop;  // the stop panel then (spec 011, BR-009)
 };
 
 // The shipped content with mining made ruinous. The app and its session read
@@ -1293,6 +1295,7 @@ bool playLosingMine(game::App& app, const game::AutoPause& rules, LosingMine& lo
     losing.stopped = session.day();
     losing.speed = session.speed();
     losing.status = app.model().status_line;
+    losing.stop = app.model().stop;
     losing.notices = countLosingNotices(session);
     for (const game::LogEntry& entry : session.log()) {
         if (entry.notice.kind == sim::NoticeKind::MineLosingMoney) {
@@ -1533,10 +1536,10 @@ void checkLosingLogLine(Rml::Context& context, std::string_view where, const Los
 
 // The notice and the clock. With the rule on the clock stopped on the day
 // the notice arrived (it is logged on the day it was raised, and the stop
-// leaves the session on the next day, as in tests/session_test.cpp) and the
-// status line says why; with the rule off every day that was due went by
-// and the clock is running. (The status line is not checked then: the app
-// keeps the last one across the probe's restart of the game.)
+// leaves the session on the next day, as in tests/session_test.cpp), the
+// stop panel says why and the log marks the line; with the rule off every
+// day that was due went by, the clock is running and nothing is marked.
+// The status line no longer says why (spec 011, BR-009): the panel does.
 void checkNotice(const game::App& app, const sim::Content& content, const LosingMine& losing,
                  bool ruleOn, Checks& checks) {
     const game::UiModel& model = app.model();
@@ -1562,11 +1565,22 @@ void checkNotice(const game::App& app, const sim::Content& content, const Losing
         checks.same("the day the clock stopped on", losing.stopped, losing.noticeDay + 1);
         checks.expect(losing.stopped - losing.opened < kDaysDue,
                       "every day that was due went by with the rule on");
-        checks.same("the status line", losing.status, paused);
+        checks.expect(losing.status != paused, "the status line still says why the clock stopped");
+        checks.expect(losing.stop.shown, "no stop panel with the clock stopped for the notice");
+        checks.same("the stop panel's heading", losing.stop.heading,
+                    game::text(content, "ui.stop_heading",
+                               {{"rule", game::text(content, "ui.pause_on.mine_losing")}}));
+        checks.same("the stop panel's line", losing.stop.line, losing.noticeText);
+        checks.same("the stop panel's tab", losing.stop.tab, 1);
+        checks.expect(row != model.log.end() && row->mark == game::text(content, "ui.log_stopped"),
+                      "the notice's row in the log is not marked as stopping the clock");
     } else {
         checks.expect(losing.speed == game::Speed::Fastest && model.speed == 3,
                       "the clock stopped with the rule off");
         checks.same("days gone by with the rule off", losing.stopped - losing.opened, kDaysDue);
+        checks.expect(!losing.stop.shown, "a stop panel with the clock running");
+        checks.expect(row != model.log.end() && row->mark.empty(),
+                      "the notice's row is marked though the rule is off");
         checks.expect(losing.stopped > losing.noticeDay + 1,
                       "the clock did not run on past the notice");
     }
@@ -3199,6 +3213,232 @@ int probeStopsMenu(Rml::Context& context, game::App& app, LoggingSystem& system)
     return laidOut ? 0 : kLayoutFailure;
 }
 
+// ---- the stop panel (spec 011, BR-009, BR-010) ----
+
+constexpr int kStopPanelFailure = 14;
+constexpr int kStopSeconds = 200;  // seconds at the fastest speed to wait for a stop
+
+// What the stop panel should read, from the session: the first stop's rule
+// as the Stops menu names it, its marked line in the log, how many more
+// stopped the clock that day, and for a race stop both earliest founding
+// days. The tab is the caller's: where the player acts on that rule.
+struct StopExpected {
+    game::PauseOn rule = game::PauseOn::kCount;
+    bool race = false;
+    std::string heading;
+    std::string line;
+    std::string more;
+    std::string days;
+    int tab = 0;
+    std::string goTo;
+};
+
+StopExpected simStop(const game::Session& session, int tab, const char* tabKey, Checks& checks) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const std::vector<sim::Notice>& stops = session.stopsToday();
+    StopExpected expected;
+    expected.tab = tab;
+    expected.goTo = game::text(content, "ui.stop_go_to", {{"tab", game::text(content, tabKey)}});
+    const std::optional<game::PauseOn> rule =
+        stops.empty() ? std::nullopt
+                      : game::AutoPause::reasonFor(stops.front(), game::Session::kPlayer);
+    if (!rule) {
+        checks.expect(false, "the clock did not stop for a notice under a Stops rule");
+        return expected;
+    }
+    expected.rule = *rule;
+    expected.race = game::isRaceStop(*rule);
+    const std::string name =
+        game::text(content, "ui.pause_on." + std::string(game::pauseOnKey(*rule)));
+    expected.heading = game::text(
+        content, expected.race ? "ui.stop_race_heading" : "ui.stop_heading", {{"rule", name}});
+    // The day's stops are the marked lines of the last day the log marked.
+    const std::vector<game::LogEntry>& log = session.log();
+    const auto newestFirst = std::views::reverse(log);
+    const auto last =
+        std::ranges::find_if(newestFirst, [](const game::LogEntry& e) { return e.stoppedClock; });
+    std::size_t marked = 0;
+    for (const game::LogEntry& entry : log) {
+        if (last != newestFirst.end() && entry.stoppedClock && entry.day == last->day) {
+            expected.line = marked == 0 ? entry.text : expected.line;
+            ++marked;
+        }
+    }
+    checks.same("lines marked on the day the clock stopped", marked, stops.size());
+    if (stops.size() > 1) {
+        expected.more =
+            game::text(content, "ui.stop_more", {{"count", std::to_string(stops.size() - 1)}});
+    }
+    if (expected.race) {
+        const sim::Notice& first = stops.front();
+        const sim::CompanyId rival = first.rival.valid() ? first.rival : first.company;
+        const sim::ProgramPublicView* theirs = nullptr;
+        for (const sim::ProgramPublicView& program : view.programs) {
+            theirs = program.company == rival ? &program : theirs;
+        }
+        const sim::ProgramPublicView& mine = view.programs[game::Session::kPlayer.index()];
+        checks.expect(rival != game::Session::kPlayer && theirs != nullptr &&
+                          mine.earliestFoundingDay && theirs->earliestFoundingDay,
+                      "a race stop without both companies' earliest founding days");
+        if (rival != game::Session::kPlayer && theirs != nullptr && mine.earliestFoundingDay &&
+            theirs->earliestFoundingDay) {
+            expected.days =
+                game::text(content, "ui.stop_race_days",
+                           {{"day", game::formatDay(*mine.earliestFoundingDay)},
+                            {"company", view.companies[rival.index()].name},
+                            {"rival_day", game::formatDay(*theirs->earliestFoundingDay)}});
+        }
+    }
+    return expected;
+}
+
+Rml::Element* stopPanel(Rml::Context& context) {
+    settle(context);
+    Rml::Element* panel = context.GetDocument(0)->GetElementById("stop");
+    return panel != nullptr && panel->IsVisible(true) ? panel : nullptr;
+}
+
+// The panel as the player sees it on whatever tab is showing: its words, its
+// two buttons, inside the window and under the header, so the clock's
+// buttons stay clear of it.
+void checkStopPanel(Rml::Context& context, const StopExpected& expected, const Frame& frame,
+                    const std::string& where, Checks& checks) {
+    Rml::Element* panel = stopPanel(context);
+    if (panel == nullptr) {
+        checks.expect(false, where + ": no stop panel with the clock stopped");
+        return;
+    }
+    const auto shown = [&](const char* cls, const std::string& text) {
+        checks.same(std::format("{}: the panel's {}", where, cls), onlyText(panel, "span", cls),
+                    text.empty() ? std::string("<0 found>") : text);
+    };
+    shown("heading", expected.heading);
+    shown("line", expected.line);
+    shown("more", expected.more);
+    shown("days", expected.days);
+    checks.expect(panel->IsClassSet("race") == expected.race,
+                  where + ": the panel is not set apart as a race stop, or is when it is not one");
+    checks.same(where + ": \"" + expected.goTo + "\" buttons",
+                visibleElements(panel, "button", "", expected.goTo).size(), std::size_t{1});
+    Rml::Element* header = context.GetDocument(0)->GetElementById("header");
+    const float top = panel->GetAbsoluteOffset(Rml::BoxArea::Border).y;
+    const float bottom = top + panel->GetBox().GetSize(Rml::BoxArea::Border).y;
+    const float headerBottom = header->GetAbsoluteOffset(Rml::BoxArea::Border).y +
+                               header->GetBox().GetSize(Rml::BoxArea::Border).y;
+    checks.expect(top >= headerBottom && rightEdge(panel) <= static_cast<float>(frame.width) &&
+                      bottom <= static_cast<float>(frame.height),
+                  std::format("{}: the panel runs {:.0f}-{:.0f}dp down, {:.0f}dp across, under a "
+                              "header ending {:.0f}dp down",
+                              where, top, bottom, rightEdge(panel), headerBottom));
+    checkInside(panel, where, checks);
+}
+
+// Every tab in both frames with the panel up.
+bool probeStopFrames(Rml::Context& context, game::App& app, LoggingSystem& system,
+                     const StopExpected& expected, const char* label, Checks& checks) {
+    bool ok = true;
+    for (const Frame& frame : kFrames) {
+        const bool deck = static_cast<float>(frame.width) < kDeckWidth;
+        context.SetDimensions(Rml::Vector2i(frame.width, frame.height));
+        app.forceDeck(deck);
+        std::cout << std::format("\n== {}, frame {}x{}{} ==\n", label, frame.width, frame.height,
+                                 deck ? " (deck)" : "");
+        for (std::size_t tab = 0; tab < kTabs.size(); ++tab) {
+            ok = probeTab(context, app, system, frame, tab, Popover::None) && ok;
+            checkStopPanel(
+                context, expected, frame,
+                std::format("{} {} {}x{}", label, kTabs.at(tab), frame.width, frame.height),
+                checks);
+        }
+    }
+    std::cout << std::format("    {}: \"{}\" / \"{}\" / \"{}\" / \"{}\"\n", label, expected.heading,
+                             expected.line, expected.more, expected.days);
+    return ok;
+}
+
+// The panel's buttons, as the player clicks them: Go to opens the tab where
+// the stop is acted on; the rule's button switches it off, says so, and
+// switches it on again; starting the clock clears the panel.
+void useStopPanel(Rml::Context& context, game::App& app, const StopExpected& expected,
+                  Checks& checks) {
+    if (expected.rule == game::PauseOn::kCount) {
+        return;  // no stop to act on: simStop has said so
+    }
+    const sim::Content& content = app.session().content();
+    app.setTab(0);
+    clickFirst(context, "button", "", expected.goTo, checks);
+    checks.same("the tab after \"" + expected.goTo + "\"", app.model().tab, expected.tab);
+    const auto ruleOn = [&] { return app.session().autoPause().isEnabled(expected.rule); };
+    const bool before = ruleOn();
+    clickFirst(context, "button", "", game::text(content, "ui.stop_for_this"), checks);
+    checks.expect(!ruleOn(), "the panel's rule button did not switch the rule off");
+    clickFirst(context, "button", "", game::text(content, "ui.stop_rule_off"), checks);
+    checks.expect(ruleOn() == before, "the panel's rule button did not switch the rule back on");
+    checks.expect(stopPanel(context) != nullptr, "the panel went before the clock was started");
+    clickFirst(context, "button", "", "1x", checks);
+    checks.expect(
+        app.session().speed() != game::Speed::Paused && app.session().stopsToday().empty(),
+        "1x did not start the clock and clear the day's stops");
+    checks.expect(stopPanel(context) == nullptr,
+                  "the stop panel is still up with the clock running");
+    clickFirst(context, "button", "", "Pause", checks);
+}
+
+int stopResult(const Checks& checks, bool laidOut) {
+    if (!checks.ok()) {
+        return kStopPanelFailure;
+    }
+    return laidOut ? 0 : kLayoutFailure;
+}
+
+// A race stop: the day the rival starts its program research (spec 010) the
+// clock stops under its own heading, with both earliest founding days.
+int probeRaceStop(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    app.refreshNow();
+    Checks checks("STOP");
+    const StopExpected expected = simStop(app.session(), 6, "ui.tab_program", checks);
+    checks.expect(expected.race, "the rival's research did not stop the clock as a race stop");
+    const bool laidOut = probeStopFrames(context, app, system, expected, "race stop", checks);
+    useStopPanel(context, app, expected, checks);
+    return stopResult(checks, laidOut);
+}
+
+// A stop with a count: two surveys ordered on one day report on one day,
+// and the panel names the first and counts the other.
+int probeStopCount(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    app.startGame(kScenarioSeed);
+    game::Session& session = app.session();
+    std::vector<sim::PlotId> lots;
+    for (const sim::PlotView& plot : session.view().plots) {
+        if (plot.listing == sim::PlotListing::Listed && plot.auction && lots.size() < 2) {
+            lots.push_back(plot.id);
+        }
+    }
+    if (lots.size() < 2) {
+        std::cout << "SCENARIO (stop): fewer than two plots at auction on day 0\n";
+        return kScenarioFailure;
+    }
+    for (const sim::PlotId lot : lots) {
+        session.submit(sim::CommissionSurvey{{}, lot});
+    }
+    session.setSpeed(game::Speed::Fastest);
+    for (int second = 0; second < kStopSeconds && session.speed() != game::Speed::Paused;
+         ++second) {
+        app.update(1.0);
+    }
+    app.refreshNow();
+    Checks checks("STOP");
+    const StopExpected expected = simStop(session, 1, "ui.tab_plots", checks);
+    checks.expect(expected.rule == game::PauseOn::SurveyComplete && !expected.more.empty(),
+                  std::format("the clock stopped on day {} with {} stops, not for two surveys",
+                              session.day(), session.stopsToday().size()));
+    const bool laidOut =
+        probeStopFrames(context, app, system, expected, "stop with a count", checks);
+    useStopPanel(context, app, expected, checks);
+    return stopResult(checks, laidOut);
+}
+
 // ---- the end screen (spec 010) ----
 
 constexpr int kEndFailure = 11;
@@ -4305,9 +4545,22 @@ int probeRivalResearching(Rml::Context& context, game::App& app, LoggingSystem& 
         return rival() != nullptr &&
                rival()->researchState == sim::ProgramResearchState::InProgress;
     };
+    // The race's rules on (playToStock switched every rule off), so the day
+    // the rival starts its research stops the clock as a race stop.
+    game::AutoPause race;
+    race.enabled.fill(false);
+    race.set(game::PauseOn::RivalProgram, true);
+    race.set(game::PauseOn::FellBehind, true);
+    session.setAutoPause(race);
     for (int day = 0; day < kRivalResearchMaxDays && !researching() && !session.gameOver(); ++day) {
         deliverAll(session);
         session.stepOneDay();
+    }
+    // The day the rival started its research stopped the clock (spec 011).
+    if (researching()) {
+        if (const int code = probeRaceStop(context, app, system); code != 0) {
+            return code;
+        }
     }
     // Each day the player's research waits moves its earliest founding a day
     // later, and the rival's stays: a gap of more than one day.
@@ -4457,6 +4710,13 @@ int run(std::span<char*> args) {
                                          return probeRivalResearching(own, app, system,
                                                                       rivalResearches);
                                      });
+        code != 0) {
+        exitCode = code;
+    }
+    // A stop with a count (spec 011, BR-009).
+    if (const int code = onItsOwnApp(
+            host, "stopcount", *loaded.content,
+            [&](Rml::Context& own, game::App& app) { return probeStopCount(own, app, system); });
         code != 0) {
         exitCode = code;
     }

@@ -69,6 +69,23 @@
         <span class="item" data-if="has_world"><span class="k">World</span><span class="chip warn">{{world_event}}</span> <span class="num">{{world_sub}}</span></span>
     </div>
 
+    <!-- Why the clock stopped (spec 011, BR-009), until it is started again.
+         In the page's flow under the strip, on every tab, so it covers none
+         of the controls that restart the clock. A race stop (BR-010) is set
+         apart by its heading and by both founding days placed under it,
+         ahead of the notice's line, not by colour alone. -->
+    <div id="stop" data-if="stop.shown" data-class-race="stop.race">
+        <div class="what">
+            <span class="heading">{{stop.heading}}</span>
+            <span class="days" data-if="stop.days != ''">{{stop.days}}</span>
+            <div class="said"><span class="line">{{stop.line}}</span><span class="more" data-if="stop.more != ''">{{stop.more}}</span></div>
+        </div>
+        <div class="acts">
+            <button class="sm" data-event-click="stop_go_to">{{stop.go_to}}</button>
+            <button class="sm" data-event-click="stop_rule">{{stop.rule_label}}</button>
+        </div>
+    </div>
+
     <div id="body">
         <div id="rail">
             <div class="tab" data-class-active="tab == 0" data-event-click="set_tab(0)"><span class="ic dashboard"></span><span class="tl">Dashboard</span></div>
@@ -163,7 +180,7 @@
                 <div class="sheet">
                     <h2><span class="idx">05</span>Recent</h2>
                     <div class="log">
-                        <div data-for="e : recent" class="line" data-class-warn="e.warning"><span class="d">{{e.day}}</span><span class="t">{{e.text}}</span></div>
+                        <div data-for="e : recent" class="line" data-class-warn="e.warning"><span class="d">{{e.day}}</span><span class="t">{{e.text}}</span><span class="mark" data-if="e.mark != ''">{{e.mark}}</span></div>
                     </div>
                 </div>
             </div>
@@ -538,7 +555,7 @@
                     <div class="log">
                         <!-- Class binding one level below the repeated element, as for the
                              survey estimates: the filters shrink this list. -->
-                        <div data-for="e : log"><div class="line" data-class-warn="e.warning"><span class="d">{{e.day}}</span><span class="t">{{e.text}}</span></div></div>
+                        <div data-for="e : log"><div class="line" data-class-warn="e.warning"><span class="d">{{e.day}}</span><span class="t">{{e.text}}</span><span class="mark" data-if="e.mark != ''">{{e.mark}}</span></div></div>
                     </div>
                 </div>
             </div>
