@@ -667,3 +667,46 @@ TEST_CASE("Cover costs keeps the old order when the program needs nothing", "[fi
     CHECK(world.sales() == std::vector<Sale>{{kIron, 334}});
     CHECK(world.player().inventoryTonnes[kCopper.index()] == 40);
 }
+
+// The storage warning (spec 011, BR-014): the sim's view decides it, at the
+// content's share of cash.
+namespace {
+
+bool storageWarning(const sim::Content& content, sim::WorldState state, sim::Money cash,
+                    std::int64_t ironTonnes) {
+    state.companies[0].cash = cash;
+    state.companies[0].inventoryTonnes[0] = ironTonnes;  // iron: 1.50 per tonne-month
+    return sim::makeCompanyView(content, state, kPlayer).storageWarning;
+}
+
+}  // namespace
+
+TEST_CASE("Storage costing more than a tenth of cash is a warning", "[finance][spec011]") {
+    const sim::Content content = test::makeContent();
+    const sim::Simulation simulation(content, 1, test::setup());
+    const sim::WorldState state = simulation.state();
+    const auto cents = [](std::int64_t c) { return sim::Money::fromCents(c); };
+
+    // $1,500 a month of storage against $15,000 is a tenth, not above it.
+    CHECK_FALSE(storageWarning(content, state, cents(1'500'000), 1'000));
+    CHECK(storageWarning(content, state, cents(1'499'999), 1'000));
+    // With no cash, or less, any storage cost is a warning.
+    CHECK(storageWarning(content, state, cents(0), 1'000));
+    CHECK(storageWarning(content, state, cents(-100), 1'000));
+    // Nothing held, nothing to warn of.
+    CHECK_FALSE(storageWarning(content, state, cents(0), 0));
+    CHECK_FALSE(storageWarning(content, state, cents(-100), 0));
+
+    // The share is the content's: at a fifth, $7,500 is the line.
+    sim::Content fifth = content;
+    fifth.balance.storageWarningCashShare = sim::Fixed::fromRatio(1, 5);
+    CHECK_FALSE(storageWarning(fifth, state, cents(1'499'999), 1'000));
+    CHECK_FALSE(storageWarning(fifth, state, cents(750'000), 1'000));
+    CHECK(storageWarning(fifth, state, cents(749'999), 1'000));
+
+    // At a tenth the scaled cash is exactly the integer tenth the client
+    // used before (cents / 10, truncated), so the warning is unchanged.
+    for (const std::int64_t c : {1LL, 9LL, 10LL, 11LL, 1'234'567LL, 999'999'999'999LL}) {
+        CHECK(cents(c).scaled(content.balance.storageWarningCashShare).cents() == c / 10);
+    }
+}

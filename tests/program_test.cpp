@@ -2436,3 +2436,179 @@ TEST_CASE("A save whose pace flags differ from their rule is refused", "[program
         s.companies[1].programPastDeadline ^= 1;
     }));
 }
+
+// A missing ore (spec 011, BR-007): the stages not yet complete still need
+// more of it than the viewer holds, and none of the viewer's mines yields
+// it. Built straight from an edited state, as the view is.
+
+namespace {
+
+using MO = sim::MissingOre;
+
+std::vector<MO> missingOres(const sim::Content& content, const sim::WorldState& state,
+                            sim::CompanyId viewer = kPlayer) {
+    std::vector<MO> missing = sim::makeCompanyView(content, state, viewer).program.missingOres;
+    REQUIRE(missing.size() == content.resources.size());
+    return missing;
+}
+
+// A mine of `owner`'s on plot 0 in `mineState` that has extracted
+// `extracted` tonnes (iron, copper, lithium) so far.
+void addMine(const sim::Content& content, sim::WorldState& state, sim::CompanyId owner,
+             sim::MineState mineState, const std::vector<std::int64_t>& extracted) {
+    sim::Mine mine;
+    mine.plot = sim::PlotId(0);
+    mine.owner = owner;
+    mine.state = mineState;
+    mine.extractedTonnes = extracted;
+    mine.lastDayTonnes.assign(content.resources.size(), 0);
+    mine.lastOutputTonnes.assign(content.resources.size(), 0);
+    state.mines.push_back(mine);
+}
+
+void checkNoneMissing(const std::vector<MO>& missing) {
+    for (const MO ore : missing) {
+        CHECK(ore == MO::None);
+    }
+}
+
+}  // namespace
+
+TEST_CASE("Every ore the program needs is missing on day one, the locked one too",
+          "[program][view][missing]") {
+    const sim::Content content = test::makeContent();
+    const sim::WorldState state = freshState(content);
+    const std::vector<MO> missing = missingOres(content, state);
+    REQUIRE(missing.size() == content.resources.size());
+    // Stage 1 needs iron; the next stage, copper: both are Needs you rows.
+    CHECK(missing[kIron.index()] == MO::Soon);
+    CHECK(missing[kCopper.index()] == MO::Soon);
+    // Lithium is locked and only stage 3 needs it: missing all the same, so
+    // its land is marked, but not yet a row (edge case 8).
+    CHECK(missing[kLithium.index()] == MO::Later);
+}
+
+TEST_CASE("Stock that covers every remaining stage's need is not missing",
+          "[program][view][missing]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = freshState(content);
+    // Iron: 1,000 + 2,000 + 3,000 t over the three stages.
+    state.companies[0].inventoryTonnes[kIron.index()] = 5'999;
+    CHECK(missingOres(content, state)[kIron.index()] == MO::Soon);
+    state.companies[0].inventoryTonnes[kIron.index()] = 6'000;
+    CHECK(missingOres(content, state)[kIron.index()] == MO::None);
+
+    // What is delivered to the current stage is need met: 400 t delivered
+    // and 5,600 t held cover the rest.
+    state.companies[0].programDelivered[kIron.index()] = 400;
+    state.companies[0].inventoryTonnes[kIron.index()] = 5'600;
+    CHECK(missingOres(content, state)[kIron.index()] == MO::None);
+    state.companies[0].inventoryTonnes[kIron.index()] = 5'599;
+    CHECK(missingOres(content, state)[kIron.index()] == MO::Soon);
+
+    // Only stages not yet complete count: at stage 3, 3,000 t will do.
+    sim::WorldState late = freshState(content);
+    atStage(content, late.companies[0], 2);
+    late.companies[0].inventoryTonnes[kIron.index()] = 3'000;
+    CHECK(missingOres(content, late)[kIron.index()] == MO::None);
+}
+
+TEST_CASE("A mine that yields the ore is a source, mothballed or not", "[program][view][missing]") {
+    const sim::Content content = test::makeContent();
+    const sim::WorldState base = freshState(content);
+    const std::vector<std::int64_t> iron = {500, 0, 0};
+
+    for (const sim::MineState yielding :
+         {sim::MineState::Building, sim::MineState::Operating, sim::MineState::Mothballed}) {
+        sim::WorldState state = base;
+        addMine(content, state, kPlayer, yielding, iron);
+        const std::vector<MO> missing = missingOres(content, state);
+        CHECK(missing[kIron.index()] == MO::None);
+        // It yields iron, not copper.
+        CHECK(missing[kCopper.index()] == MO::Soon);
+    }
+
+    // A worked-out or closed mine is no source.
+    for (const sim::MineState spent : {sim::MineState::Depleted, sim::MineState::Closed}) {
+        sim::WorldState state = base;
+        addMine(content, state, kPlayer, spent, iron);
+        CHECK(missingOres(content, state)[kIron.index()] == MO::Soon);
+    }
+
+    // Nor is a rival's mine.
+    sim::WorldState rivals = base;
+    addMine(content, rivals, kRival, sim::MineState::Operating, iron);
+    CHECK(missingOres(content, rivals)[kIron.index()] == MO::Soon);
+    CHECK(missingOres(content, rivals, kRival)[kIron.index()] == MO::None);
+
+    // A mine that has yielded nothing yet is a source once the owner's own
+    // survey of its plot shows the ore.
+    sim::WorldState surveyed = base;
+    addMine(content, surveyed, kPlayer, sim::MineState::Building, {0, 0, 0});
+    CHECK(missingOres(content, surveyed)[kCopper.index()] == MO::Soon);
+    sim::Survey survey;
+    survey.company = kPlayer;
+    survey.plot = sim::PlotId(0);
+    survey.complete = 1;
+    survey.estimates.push_back({kCopper, 40'000, sim::Fixed::fromRatio(1, 10)});
+    surveyed.surveys.push_back(survey);
+    const std::vector<MO> missing = missingOres(content, surveyed);
+    CHECK(missing[kCopper.index()] == MO::None);
+    CHECK(missing[kIron.index()] == MO::Soon);
+    // A rival's survey of the same plot shows the player nothing.
+    sim::WorldState theirs = base;
+    addMine(content, theirs, kPlayer, sim::MineState::Building, {0, 0, 0});
+    survey.company = kRival;
+    theirs.surveys.push_back(survey);
+    CHECK(missingOres(content, theirs)[kCopper.index()] == MO::Soon);
+}
+
+TEST_CASE("An ore is Soon when the current or the next stage needs it, Later beyond",
+          "[program][view][missing]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = freshState(content);
+    CHECK(missingOres(content, state)[kLithium.index()] == MO::Later);
+
+    // At stage 2, stage 3 is next: lithium is a row now.
+    atStage(content, state.companies[0], 1);
+    std::vector<MO> missing = missingOres(content, state);
+    CHECK(missing[kIron.index()] == MO::Soon);
+    CHECK(missing[kCopper.index()] == MO::Soon);
+    CHECK(missing[kLithium.index()] == MO::Soon);
+
+    // At stage 3 copper is needed no more.
+    atStage(content, state.companies[0], 2);
+    missing = missingOres(content, state);
+    CHECK(missing[kCopper.index()] == MO::None);
+    CHECK(missing[kLithium.index()] == MO::Soon);
+
+    // Stage 1's iron delivered in full: iron is still missing, for the later
+    // stages, and Soon because stage 2 needs it.
+    sim::WorldState delivered = freshState(content);
+    delivered.companies[0].programDelivered[kIron.index()] = 1'000;
+    CHECK(missingOres(content, delivered)[kIron.index()] == MO::Soon);
+}
+
+TEST_CASE("No ore is missing once the program is founded, the game is over or the viewer is broke",
+          "[program][view][missing]") {
+    const sim::Content content = test::makeContent();
+
+    sim::WorldState founded = freshState(content);
+    atStage(content, founded.companies[0], 3);
+    std::vector<MO> missing = missingOres(content, founded);
+    CHECK(missing.size() == content.resources.size());
+    checkNoneMissing(missing);
+
+    sim::WorldState ended = freshState(content);
+    ended.outcome.ended = 1;
+    ended.outcome.day = ended.day;
+    missing = missingOres(content, ended);
+    CHECK(missing.size() == content.resources.size());
+    checkNoneMissing(missing);
+
+    sim::WorldState broke = freshState(content);
+    makeBankrupt(content, broke, kPlayer);
+    missing = missingOres(content, broke);
+    CHECK(missing.size() == content.resources.size());
+    checkNoneMissing(missing);
+}

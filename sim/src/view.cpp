@@ -394,6 +394,64 @@ void addOwnPace(const Content& content, const WorldState& state, CompanyId viewe
         program.lastStartPassed || today + content.program.paceWarningDays >= lastStart;
 }
 
+// The stage lists the ore among its requirements.
+bool stageNeeds(const ProgramStage& stage, ResourceId resource) {
+    return std::ranges::any_of(stage.requirements, [resource](const ProgramRequirement& r) {
+        return r.resource == resource;
+    });
+}
+
+// Tonnes of each ore the stages not yet complete still ask for: what is left
+// of the current stage's need and the whole need of every stage after it.
+std::vector<std::int64_t> remainingNeedTonnes(const Content& content, const Company& self) {
+    std::vector<std::int64_t> need(content.resources.size(), 0);
+    for (std::size_t s = self.programStage; s < content.program.stages.size(); ++s) {
+        for (const ProgramRequirement& requirement : content.program.stages[s].requirements) {
+            const std::size_t r = requirement.resource.index();
+            const std::int64_t delivered = s == self.programStage ? self.programDelivered[r] : 0;
+            need[r] =
+                checkedAdd(need[r], std::max<std::int64_t>(requirement.tonnes - delivered, 0));
+        }
+    }
+    return need;
+}
+
+// One of the viewer's mines is a source of the ore: it can still produce,
+// and it has produced the ore or the viewer's own survey shows it there.
+bool yieldsOre(const MineView& mine, std::size_t r) {
+    if (mine.state != MineState::Building && mine.state != MineState::Operating &&
+        mine.state != MineState::Mothballed) {
+        return false;
+    }
+    return mine.extractedTonnes[r] > 0 || mine.bestEstimateTonnes[r] > 0;
+}
+
+// The ores the viewer's program lacks (spec 011, BR-007), from the viewer's
+// stock and its own mines as the view shows them. A locked ore counts like
+// any other: no mine yields it (edge case 8).
+void addMissingOres(const Content& content, const WorldState& state, const Company& self,
+                    CompanyView& view) {
+    std::vector<MissingOre>& missing = view.program.missingOres;
+    missing.assign(content.resources.size(), MissingOre::None);
+    const std::size_t stage = self.programStage;
+    if (stage >= content.program.stages.size() || gameEnded(state) || self.bankrupt != 0) {
+        return;
+    }
+    const std::vector<std::int64_t> need = remainingNeedTonnes(content, self);
+    for (std::size_t r = 0; r < need.size(); ++r) {
+        if (need[r] <= self.inventoryTonnes[r] ||
+            std::ranges::any_of(view.mines,
+                                [r](const MineView& mine) { return yieldsOre(mine, r); })) {
+            continue;
+        }
+        const ResourceId resource(static_cast<std::uint32_t>(r));
+        const bool soon = stageNeeds(content.program.stages[stage], resource) ||
+                          (stage + 1 < content.program.stages.size() &&
+                           stageNeeds(content.program.stages[stage + 1], resource));
+        missing[r] = soon ? MissingOre::Soon : MissingOre::Later;
+    }
+}
+
 // The viewer's own program: what its current stage asks for and how far
 // each part has got. The figures are the sim's own (R-001).
 void addOwnProgram(const Content& content, const WorldState& state, CompanyId viewer,
@@ -403,6 +461,7 @@ void addOwnProgram(const Content& content, const WorldState& state, CompanyId vi
     view.program.stagesCompleted = self.programStage;
     view.program.complete = stage == nullptr;
     view.program.stageDays = self.programStageDays;
+    addMissingOres(content, state, self, view);
     if (stage == nullptr) {
         return;
     }
@@ -475,6 +534,10 @@ CompanyView makeCompanyView(const Content& content, const WorldState& state, Com
     view.outstandingPrincipal = outstandingPrincipal(state, company);
     view.loanCapacity = content.balance.loanMaxPrincipal - view.outstandingPrincipal;
     view.monthlyStorageCost = monthlyStorageCost(content, state, company);
+    view.storageWarning =
+        view.monthlyStorageCost > Money::zero() &&
+        (view.cash <= Money::zero() ||
+         view.monthlyStorageCost > view.cash.scaled(content.balance.storageWarningCashShare));
     addMineOpexQuotes(content, state, self, view);
     view.surveyNoiseQuote = surveyNoise(content, self);
     view.monthsInsolvent = self.monthsInsolvent;

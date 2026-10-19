@@ -105,6 +105,16 @@ enum class ProgramResearchState : std::uint8_t {
     Done,
 };
 
+// Whether an ore is missing from the viewer's program (spec 011, BR-007):
+// the stages not yet complete need more of it than the viewer holds, and
+// none of the viewer's mines yields it. Soon when the current or the next
+// stage needs it; Later when only a stage after that does.
+enum class MissingOre : std::uint8_t {
+    None,
+    Later,
+    Soon,
+};
+
 // One good the viewer's current stage asks for (spec 010).
 struct ProgramRequirementView {
     ResourceId resource;
@@ -153,6 +163,11 @@ struct ProgramView {
     // The last day to start has passed or is no more than
     // ProgramDef::paceWarningDays from today.
     bool paceWarning = false;
+    // Per ore, indexed by ResourceId. A mine yields an ore while it is
+    // building, operating or mothballed and shows it in extractedTonnes or
+    // bestEstimateTonnes. All None once the program is complete, the game
+    // has ended or the viewer is bankrupt.
+    std::vector<MissingOre> missingOres;
 };
 
 // Any company's place in the race. Public (spec 010, BR-007): a rival's
@@ -256,6 +271,10 @@ struct CompanyView {
     Money outstandingPrincipal;
     Money loanCapacity;        // how much more may be borrowed
     Money monthlyStorageCost;  // at current inventory
+    // Storage is a standing problem (spec 011, BR-014): it costs something,
+    // and cash is zero or less or monthlyStorageCost is above cash scaled by
+    // BalanceParams::storageWarningCashShare.
+    bool storageWarning = false;
     // Per ore (spec 008): what an operating mine producing that ore costs
     // the viewer a day, today. Indexed by ResourceId; quoted for every ore,
     // unlocked or not.
