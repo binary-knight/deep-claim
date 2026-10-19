@@ -65,3 +65,7 @@ target_link_libraries(deep_claim_layout_probe PRIVATE dc::game_session dc::conte
 target_compile_definitions(deep_claim_layout_probe PRIVATE DC_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
                                                            DC_ASSETS_DIR="${CMAKE_SOURCE_DIR}/game/assets")
 add_test(NAME layout_probe COMMAND deep_claim_layout_probe)
+# The probe takes about 25 s (Linux and the Windows debug build alike); 600 s
+# leaves a slow runner room many times over and still ends a hang with its
+# output in the log, well before CI gives up on the job.
+set_tests_properties(layout_probe PROPERTIES TIMEOUT 600)

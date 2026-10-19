@@ -89,7 +89,7 @@ jobs:
       - name: Build
         run: cmake --build --preset debug-game --parallel
       - name: Test
-        run: ctest --preset debug-game
+        run: ctest --preset debug-game --output-on-failure
 
   # The Windows client as a folder that runs anywhere: the executable, its
   # DLLs, data and assets. build.sh fetches it for playtests.

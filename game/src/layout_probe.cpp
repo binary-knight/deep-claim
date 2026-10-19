@@ -74,6 +74,20 @@
 #include <variant>
 #include <vector>
 
+#ifdef _MSC_VER
+// For reportFailuresOnStderr: the debug CRT's report hooks and the system's
+// error mode.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <crtdbg.h>
+#include <cstdlib>
+#include <windows.h>
+#endif
+
 namespace {
 
 class StubRender final : public Rml::RenderInterface {
@@ -2148,9 +2162,11 @@ WhereLine simWhere(const game::Session& session, sim::ResourceId resource) {
     std::vector<std::string> mines;
     for (const sim::MineView& mine : view.mines) {
         if (sim::mineYieldsOre(mine, resource)) {
+            const std::int64_t daily =
+                r < mine.lastOutputTonnes.size() ? mine.lastOutputTonnes[r] : 0;
             mines.push_back(game::text(content, "ui.program_from_mine_item",
                                        {{"plot", std::format("#{}", mine.plot.value() + 1)},
-                                        {"tonnes", game::formatTonnes(mine.lastOutputTonnes[r])}}));
+                                        {"tonnes", game::formatTonnes(daily)}}));
         }
     }
     line.mines = mines.empty()
@@ -2194,8 +2210,6 @@ std::string simPaceNeed(const game::Session& session) {
                : game::text(content, "ui.need_pace_passed_title", {{"number", number}});
 }
 
-// The pace row stands under Needs you exactly while the view warns, and its
-// button goes to the Program tab.
 // Clicks the button of the first Needs you row with `action`, on the
 // Dashboard, and checks the tab it opens. False when no row has it.
 bool clickNeedRow(Rml::Context& context, game::App& app, int action, int tab,
@@ -2205,6 +2219,9 @@ bool clickNeedRow(Rml::Context& context, game::App& app, int action, int tab,
     if (row == app.model().needs.end()) {
         return false;
     }
+    // A copy: a refresh rebuilds the rows, and an iterator into them is then
+    // invalid (MSVC's debug library stops the probe on it).
+    const std::string title = row->title;
     const int before = app.model().tab;
     app.setTab(kDashboardTab);
     app.refreshNow();
@@ -2212,20 +2229,20 @@ bool clickNeedRow(Rml::Context& context, game::App& app, int action, int tab,
     Rml::Element* button = nullptr;
     for (Rml::Element* line : visibleElements(context.GetDocument(0), "div", "nrow")) {
         const std::vector<Rml::Element*> buttons = visibleElements(line, "button", "");
-        if (button == nullptr && onlyText(line, "span", "title") == row->title &&
-            !buttons.empty()) {
+        if (button == nullptr && onlyText(line, "span", "title") == title && !buttons.empty()) {
             button = buttons.front();
         }
     }
     checkOpensTab(context, app, button, kDashboardTab, tab,
-                  std::format("{}: the button of the Needs you row \"{}\"", where, row->title),
-                  checks);
+                  std::format("{}: the button of the Needs you row \"{}\"", where, title), checks);
     app.setTab(before);
     app.refreshNow();
     settle(context);
     return true;
 }
 
+// The pace row stands under Needs you exactly while the view warns, and its
+// button goes to the Program tab.
 void checkPaceNeed(game::App& app, const std::string& where, Checks& checks) {
     const std::string title = simPaceNeed(app.session());
     const game::NeedRow* row = nullptr;
@@ -4981,9 +4998,32 @@ int run(std::span<char*> args) {
     return exitCode;
 }
 
+// A headless run must fail where it can be read, not wait on a dialog no one
+// will click. On Windows the debug CRT reports an assertion (an invalid
+// iterator, an index out of range) and an abort in a message box, and the
+// system reports a crash in one: send the reports to stderr and raise no box.
+// Nothing to do elsewhere.
+void reportFailuresOnStderr() {
+#ifdef _MSC_VER
+#ifdef _DEBUG  // the report hooks are the debug CRT's; a release build has none
+    for (const int report : {_CRT_WARN, _CRT_ERROR, _CRT_ASSERT}) {
+        _CrtSetReportMode(report, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(report, _CRTDBG_FILE_STDERR);
+    }
+#endif
+    _set_error_mode(_OUT_TO_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    SetErrorMode(SetErrorMode(0) | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
+                 SEM_NOOPENFILEERRORBOX);
+#endif
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    reportFailuresOnStderr();
+    // Each line as it is written, so the last one before a hang is in the log.
+    std::cout << std::unitbuf;
     try {
         return run(std::span<char*>(argv, static_cast<std::size_t>(argc)));
     } catch (const std::exception& error) {
