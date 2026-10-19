@@ -85,7 +85,8 @@ void serialize(Archive& ar, Company& company) {
     ar(company.name, company.kind, company.cash, company.inventoryTonnes, company.completedTechs,
        company.monthsInsolvent, company.bankrupt, company.sellPolicies, company.coverCosts,
        company.autoSoldTonnes, company.autoSoldProceeds, company.programStage,
-       company.programDelivered, company.programStageDays);
+       company.programDelivered, company.programStageDays, company.programBehind,
+       company.programPastDeadline);
 }
 
 template <class Archive>

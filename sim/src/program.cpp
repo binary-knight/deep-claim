@@ -93,6 +93,52 @@ void endGame(WorldState& state, CompanyId founder) {
     }
 }
 
+struct RivalDay {
+    CompanyId rival;
+    Day day = 0;
+};
+
+// The solvent rival that could found the program soonest, with its earliest
+// founding day; on a tie, the lowest company index. The one statement of who
+// leads: leadingRivalFoundingDay and the pace check both answer from it.
+std::optional<RivalDay> leadingRival(const Content& content, const WorldState& state,
+                                     CompanyId company) {
+    std::optional<RivalDay> leading;
+    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
+        if (CompanyId(c) == company) {
+            continue;
+        }
+        const std::optional<Day> day = earliestFoundingDay(content, state, CompanyId(c));
+        if (day && (!leading || *day < leading->day)) {
+            leading = RivalDay{CompanyId(c), *day};
+        }
+    }
+    return leading;
+}
+
+// Step 9b for one solvent company.
+void checkPace(const Content& content, WorldState& state, CompanyId id, TickReport& report) {
+    const std::optional<Day> own = earliestFoundingDay(content, state, id);
+    const std::optional<RivalDay> leading = leadingRival(content, state, id);
+    const bool behind = own && leading && *own > leading->day;
+    const bool past = foundsPastDeadline(content, state, id);
+    Company& company = state.companies[id.index()];
+    if (behind && company.programBehind == 0) {
+        Notice notice = makeNotice(NoticeKind::ProgramFellBehind, id, PlotId());
+        notice.rival = leading->rival;
+        notice.foundingDay = own;
+        notice.rivalFoundingDay = leading->day;
+        report.notices.push_back(notice);
+    }
+    if (past && company.programPastDeadline == 0) {
+        Notice notice = makeNotice(NoticeKind::ProgramPastDeadline, id, PlotId());
+        notice.foundingDay = own;
+        report.notices.push_back(notice);
+    }
+    company.programBehind = behind ? 1 : 0;
+    company.programPastDeadline = past ? 1 : 0;
+}
+
 }  // namespace
 
 std::optional<RejectReason> validateDeliverToProgram(const Content& content,
@@ -245,17 +291,8 @@ Day foundingDayIfStartedOn(const Content& content, std::uint32_t stage, Day star
 
 std::optional<Day> leadingRivalFoundingDay(const Content& content, const WorldState& state,
                                            CompanyId company) {
-    std::optional<Day> leading;
-    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
-        if (CompanyId(c) == company) {
-            continue;
-        }
-        const std::optional<Day> day = earliestFoundingDay(content, state, CompanyId(c));
-        if (day && (!leading || *day < *leading)) {
-            leading = day;
-        }
-    }
-    return leading;
+    const std::optional<RivalDay> leading = leadingRival(content, state, company);
+    return leading ? std::optional<Day>(leading->day) : std::nullopt;
 }
 
 bool foundsPastDeadline(const Content& content, const WorldState& state, CompanyId company) {
@@ -279,6 +316,17 @@ void runProgram(const Content& content, WorldState& state, TickReport& report) {
     }
     endGame(state, CompanyId());
     report.notices.push_back(makeNotice(NoticeKind::DeadlinePassed, CompanyId(), PlotId()));
+}
+
+void runProgramPace(const Content& content, WorldState& state, TickReport& report) {
+    if (gameEnded(state)) {
+        return;
+    }
+    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
+        if (state.companies[c].bankrupt == 0) {
+            checkPace(content, state, CompanyId(c), report);
+        }
+    }
 }
 
 }  // namespace sim

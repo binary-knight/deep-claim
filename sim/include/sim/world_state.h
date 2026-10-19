@@ -80,6 +80,13 @@ struct Company {
     // The day each stage was completed, oldest first: one entry per stage
     // complete, so programStage of them.
     std::vector<Day> programStageDays;
+    // The pace check (spec 011, tick step 9b), left as it answered at the end
+    // of the last tick the company was solvent in an open game: 1 while its
+    // earliest founding day is later than its leading solvent rival's, and 1
+    // once that day is after the deadline. Kept so that each notice comes
+    // once per change.
+    std::uint8_t programBehind = 0;
+    std::uint8_t programPastDeadline = 0;
 };
 
 // One commodity market per resource. Everything here is public.

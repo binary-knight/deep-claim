@@ -240,20 +240,25 @@ const TickReport& Simulation::tick() {
     // Outcome::day is the day the state stays on, nothing that happens later
     // in a day can contradict the results, and the state is one a save holds
     // (every other step leaves its records dated before the day it ends on).
+    //
+    // Step 9b (spec 011), the pace check, is the last step and the one after
+    // the day advances, so that it compares the earliest founding days the
+    // next view shows. It changes only its own flags and raises notices.
     applyCommands();                         // 1
     runProgram(*content_, state_, report_);  // 1b (spec 010): the deadline
     if (gameEnded(state_)) {
         return report_;
     }
-    runPlotMarket(*content_, state_, report_);  // 2
-    runSurveys(*content_, state_, report_);     // 3
-    runMines(*content_, state_, report_);       // 4
-    runSellPolicies(*content_, state_);         // 4b (spec 001)
-    runMarkets(*content_, state_);              // 5
-    runFinance(*content_, state_, report_);     // 6
-    runResearch(*content_, state_, report_);    // 7
-    runEvents(*content_, state_, report_);      // 8
-    ++state_.day;                               // 9
+    runPlotMarket(*content_, state_, report_);   // 2
+    runSurveys(*content_, state_, report_);      // 3
+    runMines(*content_, state_, report_);        // 4
+    runSellPolicies(*content_, state_);          // 4b (spec 001)
+    runMarkets(*content_, state_);               // 5
+    runFinance(*content_, state_, report_);      // 6
+    runResearch(*content_, state_, report_);     // 7
+    runEvents(*content_, state_, report_);       // 8
+    ++state_.day;                                // 9
+    runProgramPace(*content_, state_, report_);  // 9b (spec 011): falling behind
     return report_;
 }
 

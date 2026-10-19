@@ -35,10 +35,12 @@ not build SDL3 and RmlUi until the client exists.
   submission order) -> program: the deadline check (1b, spec 010) ->
   resolve auctions -> advance surveys -> mines extract -> sell policies (4b,
   spec 001) -> update markets -> month-boundary finance and bankruptcy ->
-  research -> events -> advance day and emit tick report. The game can end
-  in the commands step or the deadline check; the world then freezes: no
-  later step runs and the day does not advance. See "The race for the
-  program (spec 010, step 1)".
+  research -> events -> advance day -> the pace check (9b, spec 011) ->
+  emit tick report. The game can end in the commands step or the deadline
+  check; the world then freezes: no later step runs and the day does not
+  advance. See "The race for the program (spec 010, step 1)". The pace
+  check is the one step after the day advances; see "Reading the race
+  (spec 011)".
 
 ## Hidden truth vs observable view
 
@@ -1787,3 +1789,42 @@ values are unconfirmed on Windows; the client has not been seen on a
 display; and the security review and the spec-compliance check have not
 been run for step 1. The code review and the Codex review are done
 (2026-10-11) and their outcomes are in the spec under "Reviews".
+
+## Reading the race (spec 011)
+
+- **Tick step 9b, the pace check.** `runProgramPace` runs after the day
+  advances, the one step that does, so it compares the earliest founding
+  days the next view shows. While the game is open, for each solvent
+  company in index order, it sets `Company::programBehind` to whether the
+  company's earliest founding day is later than its leading solvent
+  rival's, and `Company::programPastDeadline` to whether that day is after
+  the deadline. A change from 0 to 1 raises the private
+  `ProgramFellBehind` (naming the lowest-indexed rival on the leading day,
+  with both days) or `ProgramPastDeadline`; drawing level or ahead clears
+  `programBehind` with no notice. A bankrupt company's flags are left as
+  they stood. Both flags are saved and hashed. See
+  `docs/adrs/F-2026-10-18-reading-the-race-002-pace-check-tick-step-and-flags.md`.
+
+### Golden hashes (spec 011)
+
+All three values are in `tests/determinism_test.cpp`, use the in-code
+content fixture and were recorded on Linux/GCC on 2026-10-19. They are
+confirmed for Windows/MSVC only when CI runs.
+
+- **The pace flags and step 9b** moved all three once. Every company
+  gained `programBehind` and `programPastDeadline`, set by the new step.
+  No other rule changed, and the AI reads only the view, which the step
+  does not touch, so each run plays the same game; the checks on what each
+  run leaves behind still pass.
+  - **`kGolden`** (seed 42, one year, no orders): `0x059a7c79213dd307`
+    to `0xc7cc092323bf84f7`. Nobody gives an order, so both companies
+    stay level and far from the deadline, and the flags are hashed as
+    zero.
+  - **`kGoldenPlayed`** (seed 42, three years, the AI gives both
+    companies' orders): `0x41192679894c4afc` to `0x43349088476870b5`.
+    The rival ends the run behind, so its `programBehind` is hashed as
+    one.
+  - **`kGoldenRace`** (the race by rote on the fixture's program):
+    `0xae14b05ab3e56760` to `0xf576ea4384386ae7`. The rival starts 45
+    days after the player, falls behind on the first day and never draws
+    level. The test now checks both companies' `programBehind`.

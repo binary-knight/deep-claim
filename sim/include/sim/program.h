@@ -75,7 +75,8 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
 // the project's duration and a day for the completion order.
 [[nodiscard]] Day foundingDayIfStartedOn(const Content& content, std::uint32_t stage, Day startDay);
 // The earliest founding day among the company's solvent rivals; empty when
-// it has none.
+// it has none. On a tie the lowest company index leads, which the pace
+// check names.
 [[nodiscard]] std::optional<Day> leadingRivalFoundingDay(const Content& content,
                                                          const WorldState& state,
                                                          CompanyId company);
@@ -102,5 +103,17 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
 // first, so a last stage completed on the deadline day founds the program.
 // Nothing else of the deadline day is played.
 void runProgram(const Content& content, WorldState& state, TickReport& report);
+
+// The pace check (spec 011, BR-005), tick step 9b, after the day advances,
+// so it compares the days the next view shows. While the game is open, for
+// each solvent company in index order: Company::programBehind becomes
+// whether its earliest founding day is later than its leading solvent
+// rival's (never, with no such rival), and a change from 0 to 1 raises a
+// private ProgramFellBehind naming the lowest-indexed rival on the leading
+// day, with both days; drawing level or ahead clears it with no notice.
+// Company::programPastDeadline becomes foundsPastDeadline, and a change from
+// 0 to 1 raises a private ProgramPastDeadline. A bankrupt company's flags
+// are left as they stood.
+void runProgramPace(const Content& content, WorldState& state, TickReport& report);
 
 }  // namespace sim

@@ -163,7 +163,12 @@ TEST_CASE("Golden state hash is stable across platforms", "[determinism]") {
     // gains the list of days it completed its stages on (programStageDays).
     // Nobody completes a stage here, so the list is hashed empty, by its
     // length alone.
-    constexpr std::uint64_t kGolden = 0x059a7c79213dd307ULL;
+    // Moved once for spec 011, from 0x059a7c79213dd307: every company gains
+    // the pace check's two flags (programBehind and programPastDeadline),
+    // set by the new tick step 9b. Nobody gives an order here, so both
+    // companies stay level, far from the deadline, and the flags are hashed
+    // as zero.
+    constexpr std::uint64_t kGolden = 0xc7cc092323bf84f7ULL;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
     simulation.tick(sim::kDaysPerYear);
@@ -204,7 +209,12 @@ TEST_CASE("Golden state hash of a played game is stable across platforms", "[det
     // change gave the view a flag per research project (researchOpen) that
     // the competitor reads in place of its own copy of the rule; that did
     // not move the value.
-    constexpr std::uint64_t kGoldenPlayed = 0x41192679894c4afcULL;
+    // Moved once for spec 011, from 0x41192679894c4afc: every company gains
+    // the pace check's two flags, set by the new tick step 9b. The rival
+    // ends the run behind, so a flag is hashed as one. The competitor reads
+    // only the view, which the step does not change, so the game it plays
+    // is the same.
+    constexpr std::uint64_t kGoldenPlayed = 0x43349088476870b5ULL;
     constexpr sim::Day kDays = sim::kDaysPerYear * 3;
     const sim::Content content = test::makeContent();
     sim::Simulation simulation(content, 42, test::setup());
@@ -255,7 +265,11 @@ TEST_CASE("Golden state hash of a played race is stable across platforms", "[det
     // order that founds the program is the last thing that happens, so the
     // rest of that day's pipeline no longer runs and the day does not
     // advance; the outcome's day equals the state's day.
-    constexpr std::uint64_t kGoldenRace = 0xae14b05ab3e56760ULL;
+    // Moved once for spec 011, from 0xae14b05ab3e56760: every company gains
+    // the pace check's two flags, set by the new tick step 9b. The rival,
+    // starting later, falls behind on the first day and stays behind; the
+    // orders and the race are the same.
+    constexpr std::uint64_t kGoldenRace = 0xf576ea4384386ae7ULL;
     constexpr sim::Day kRivalStartsDay = 45;
     constexpr sim::Day kLongestRace = sim::kDaysPerYear * 2;
     const sim::Content content = test::makeContent();
@@ -294,6 +308,10 @@ TEST_CASE("Golden state hash of a played race is stable across platforms", "[det
     CHECK(rival.programDelivered[0] == 1'500);
     CHECK(std::any_of(world.research.begin(), world.research.end(),
                       [](const sim::Research& project) { return project.complete == 0; }));
+    // The rival, starting later, fell behind and never drew level (spec
+    // 011, step 9b).
+    CHECK(player.programBehind == 0);
+    CHECK(rival.programBehind == 1);
     CHECK(world.outcome.ended != 0);
     CHECK(world.outcome.day == player.programStageDays[2]);
     CHECK(world.outcome.day == world.day);  // the world froze on the day it ended

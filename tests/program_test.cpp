@@ -2137,3 +2137,238 @@ TEST_CASE("The pace figures are empty once the stage's research has started or t
     makeBankrupt(content, bankrupt, kPlayer);
     checkNoPace(ownPace(content, bankrupt));
 }
+
+// Falling behind is news (spec 011, BR-005): tick step 9b, after the day
+// advances, compares each solvent company's earliest founding day with its
+// leading solvent rival's and with the deadline, keeps the answers in two
+// saved flags and raises a private notice when either turns true.
+
+namespace {
+
+// Day 40 of a fixture race in which both companies have cash for any stage
+// project, put into a simulation as a save would. Cash plays no part in the
+// earliest founding day, so the pace flags still hold their rule.
+void cashedRace(sim::Simulation& simulation, const sim::Content& content) {
+    sim::WorldState state = racingState(content);
+    for (sim::Company& company : state.companies) {
+        company.cash = sim::Money::fromUnits(1'000'000'000);
+    }
+    play(simulation, content, state);
+}
+
+sim::TechId stageTech(const sim::Content& content, std::uint32_t stage) {
+    return content.program.stages[stage].research;
+}
+
+// The step on its own, on an edited state.
+sim::TickReport paceOf(const sim::Content& content, sim::WorldState& state) {
+    sim::TickReport report;
+    sim::runProgramPace(content, state, report);
+    return report;
+}
+
+}  // namespace
+
+TEST_CASE("A company is told the day it falls behind, with its rival and both days",
+          "[program][pace]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    cashedRace(simulation, content);
+    REQUIRE(simulation.state().companies[0].programBehind == 0);
+
+    simulation.submit(sim::StartResearch{kRival, stageTech(content, 0)});
+    const sim::TickReport& report = simulation.tick();
+    const sim::WorldState& state = simulation.state();
+    const std::vector<sim::Notice> fell = noticesOf(report, Kind::ProgramFellBehind);
+    REQUIRE(fell.size() == 1);
+    CHECK(fell[0].company == kPlayer);
+    CHECK(fell[0].rival == kRival);
+    // The days the next view shows: the step runs after the day advances.
+    CHECK(fell[0].foundingDay == earliest(content, state, kPlayer));
+    CHECK(fell[0].rivalFoundingDay == earliest(content, state, kRival));
+    CHECK(fell[0].foundingDay == *fell[0].rivalFoundingDay + 1);
+    CHECK(state.companies[0].programBehind == 1);
+    CHECK(state.companies[1].programBehind == 0);
+    // Private: only the company that fell behind reads it.
+    CHECK(noticesOf({report.day, simulation.reportFor(kPlayer)}, Kind::ProgramFellBehind).size() ==
+          1);
+    CHECK(noticesOf({report.day, simulation.reportFor(kRival)}, Kind::ProgramFellBehind).empty());
+
+    // Further behind each day, and told no more.
+    for (int day = 0; day < 30; ++day) {
+        CHECK(noticesOf(simulation.tick(), Kind::ProgramFellBehind).empty());
+    }
+    CHECK(simulation.state().companies[0].programBehind == 1);
+}
+
+TEST_CASE("Drawing level clears the flag silently and a later fall is news again",
+          "[program][pace]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = racingState(content);
+    startStageResearch(content, state, kRival);
+    REQUIRE(paceOf(content, state).notices.size() == 1);
+    REQUIRE(state.companies[0].programBehind == 1);
+
+    // Level: the player's project started the same day as the rival's.
+    startStageResearch(content, state, kPlayer);
+    REQUIRE(earliest(content, state, kPlayer) == earliest(content, state, kRival));
+    CHECK(paceOf(content, state).notices.empty());
+    CHECK(state.companies[0].programBehind == 0);
+
+    // Both projects finish. The day after, the rival completes its stage and
+    // starts the next project while the player waits: behind again.
+    state.research[state.research.size() - 2].complete = 1;
+    state.research.back().complete = 1;
+    completeStageResearch(content, state.companies[0]);
+    completeStageResearch(content, state.companies[1]);
+    state.day = state.research.back().completesDay + 2;
+    atStage(content, state.companies[1], 1);
+    state.companies[1].programStageDays = {state.day - 1};
+    startStageResearch(content, state, kRival);
+    REQUIRE(earliest(content, state, kPlayer) == *earliest(content, state, kRival) + 1);
+    const sim::TickReport again = paceOf(content, state);
+    const std::vector<sim::Notice> fell = noticesOf(again, Kind::ProgramFellBehind);
+    REQUIRE(fell.size() == 1);
+    CHECK(fell[0].company == kPlayer);
+    CHECK(state.companies[0].programBehind == 1);
+}
+
+TEST_CASE("Falling behind and drawing level on the same day is no news", "[program][pace]") {
+    // Edge case 7: only the days at the end of the tick are compared.
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    cashedRace(simulation, content);
+    simulation.submit(sim::StartResearch{kRival, stageTech(content, 0)});
+    simulation.submit(sim::StartResearch{kPlayer, stageTech(content, 0)});
+    const sim::TickReport& report = simulation.tick();
+    CHECK(noticesOf(report, Kind::ProgramFellBehind).empty());
+    CHECK(simulation.state().companies[0].programBehind == 0);
+    CHECK(simulation.state().companies[1].programBehind == 0);
+}
+
+TEST_CASE("The notice names the lowest-indexed of the rivals that lead", "[program][pace]") {
+    const sim::Content content = test::makeContent();
+    sim::GameSetup three = test::setup();
+    three.aiNames = {"Rival", "Third"};
+    sim::Simulation simulation(content, 1, three);
+    simulation.tick(kRaceDay);
+    const sim::CompanyId third(2);
+
+    sim::WorldState onlyThird = simulation.state();
+    startStageResearch(content, onlyThird, third);
+    std::vector<sim::Notice> fell = noticesOf(paceOf(content, onlyThird), Kind::ProgramFellBehind);
+    REQUIRE(fell.size() == 2);
+    CHECK(fell[0].company == kPlayer);
+    CHECK(fell[0].rival == third);
+    CHECK(fell[1].company == kRival);
+    CHECK(fell[1].rival == third);
+
+    sim::WorldState tied = simulation.state();
+    startStageResearch(content, tied, kRival);
+    startStageResearch(content, tied, third);
+    fell = noticesOf(paceOf(content, tied), Kind::ProgramFellBehind);
+    REQUIRE(fell.size() == 1);
+    CHECK(fell[0].company == kPlayer);
+    CHECK(fell[0].rival == kRival);
+}
+
+TEST_CASE("A bankrupt rival puts nobody behind and a bankrupt company is not checked",
+          "[program][pace]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = racingState(content);
+    startStageResearch(content, state, kRival);
+    makeBankrupt(content, state, kRival);
+    CHECK(paceOf(content, state).notices.empty());
+    CHECK(state.companies[0].programBehind == 0);
+
+    // A company behind a rival that then goes bankrupt is no longer behind,
+    // and hears nothing of it.
+    sim::WorldState fallen = racingState(content);
+    startStageResearch(content, fallen, kRival);
+    REQUIRE(paceOf(content, fallen).notices.size() == 1);
+    makeBankrupt(content, fallen, kRival);
+    CHECK(paceOf(content, fallen).notices.empty());
+    CHECK(fallen.companies[0].programBehind == 0);
+
+    // The bankrupt company's own flags are left as they stood.
+    sim::WorldState broke = racingState(content);
+    startStageResearch(content, broke, kRival);
+    makeBankrupt(content, broke, kPlayer);
+    broke.companies[0].programBehind = 1;
+    broke.companies[0].programPastDeadline = 1;
+    CHECK(paceOf(content, broke).notices.empty());
+    CHECK(broke.companies[0].programBehind == 1);
+    CHECK(broke.companies[0].programPastDeadline == 1);
+}
+
+TEST_CASE("A company is told once the day its founding falls past the deadline",
+          "[program][pace]") {
+    sim::Content content = test::makeContent();
+    // From day 0 the fixture's program could found on day 483; one week of
+    // waiting puts it on the deadline, and the eighth day past it.
+    content.program.deadlineDay = 7 + kFixtureFromStage1;
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(6);
+    REQUIRE(simulation.state().day == 6);
+
+    // Founding on the deadline day is in time.
+    CHECK(noticesOf(simulation.tick(), Kind::ProgramPastDeadline).empty());
+    CHECK(earliest(content, simulation.state(), kPlayer) == content.program.deadlineDay);
+
+    const sim::TickReport& report = simulation.tick();
+    const std::vector<sim::Notice> past = noticesOf(report, Kind::ProgramPastDeadline);
+    REQUIRE(past.size() == 2);
+    for (std::uint32_t c = 0; c < 2; ++c) {
+        CHECK(past[c].company == sim::CompanyId(c));
+        CHECK(past[c].foundingDay == content.program.deadlineDay + 1);
+        CHECK(simulation.state().companies[c].programPastDeadline == 1);
+    }
+    // Private: each reads its own.
+    for (const sim::CompanyId id : {kPlayer, kRival}) {
+        const std::vector<sim::Notice> own =
+            noticesOf({report.day, simulation.reportFor(id)}, Kind::ProgramPastDeadline);
+        REQUIRE(own.size() == 1);
+        CHECK(own[0].company == id);
+    }
+    // Level with each other the whole way, so neither fell behind.
+    CHECK(noticesOf(report, Kind::ProgramFellBehind).empty());
+
+    std::size_t later = 0;
+    while (!sim::gameEnded(simulation.state())) {
+        later += noticesOf(simulation.tick(), Kind::ProgramPastDeadline).size();
+    }
+    CHECK(later == 0);
+    CHECK(simulation.state().companies[0].programPastDeadline == 1);
+}
+
+TEST_CASE("The pace check does nothing once the game has ended", "[program][pace]") {
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = foundedWorld(content);
+    // The rival, two stages in with its last project not started, would read
+    // as behind the founder.
+    REQUIRE(earliest(content, state, kRival) > earliest(content, state, kPlayer));
+    const sim::WorldState before = state;
+    CHECK(paceOf(content, state).notices.empty());
+    CHECK(sim::hashWorld(state) == sim::hashWorld(before));
+}
+
+TEST_CASE("The pace flags are saved and hashed", "[program][pace][save]") {
+    const sim::Content content = test::makeContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    cashedRace(simulation, content);
+    simulation.submit(sim::StartResearch{kRival, stageTech(content, 0)});
+    simulation.tick();
+    REQUIRE(simulation.state().companies[0].programBehind == 1);
+
+    sim::Simulation restored(content, 7, test::setup());
+    REQUIRE(restored.load(simulation.save()));
+    CHECK(restored.state().companies[0].programBehind == 1);
+    CHECK(restored.stateHash() == simulation.stateHash());
+
+    sim::WorldState flipped = simulation.state();
+    flipped.companies[0].programBehind = 0;
+    CHECK(sim::hashWorld(flipped) != simulation.stateHash());
+    flipped = simulation.state();
+    flipped.companies[1].programPastDeadline = 1;
+    CHECK(sim::hashWorld(flipped) != simulation.stateHash());
+}
