@@ -339,8 +339,10 @@ const ProgramStage* currentProgramStage(const Content& content, const Company& c
 }
 
 // A company's project for `tech` while it is in progress. Only ever asked
-// about a program stage's project, which is public; a company's other
-// research stays its own.
+// about a program stage's project, which is public. A company's other
+// research stays its own but for one thing: its earliest founding day counts
+// a lab busy with another project, so every view shows when that project
+// ends, though never what it is (spec 011, GA-008).
 std::optional<ResearchView> researchInProgress(const WorldState& state, CompanyId company,
                                                TechId tech) {
     for (const Research& research : state.research) {
@@ -359,6 +361,37 @@ ProgramResearchState programResearchState(const WorldState& state, CompanyId id,
     return researchInProgress(state, id, stage->research).has_value()
                ? ProgramResearchState::InProgress
                : ProgramResearchState::NotStarted;
+}
+
+// Keeping pace with the race (spec 011, BR-004) while the viewer's stage
+// project has not started. The last day to start is worked out in signed
+// days: against a rival close to founding it can fall before day 0, and it
+// is then only ever reported as passed.
+void addOwnPace(const Content& content, const WorldState& state, CompanyId viewer,
+                const ProgramStageView& stage, ProgramView& program) {
+    if (stage.researchState != ProgramResearchState::NotStarted) {
+        return;
+    }
+    if (gameEnded(state) || !earliestFoundingDay(content, state, viewer)) {
+        return;
+    }
+    // Not the stage's project, which has not started: another.
+    if (const std::optional<ResearchId> active = activeResearch(state, viewer)) {
+        program.labFreeDay = state.research[active->index()].completesDay + 1;
+    }
+    const Day deadline = content.program.deadlineDay;
+    const Day target =
+        std::min(leadingRivalFoundingDay(content, state, viewer).value_or(deadline), deadline);
+    const std::int64_t lastStart =
+        std::int64_t{target} - std::int64_t{foundingDayIfStartedOn(content, stage.index, 0)};
+    const std::int64_t today = state.day;
+    if (lastStart < today) {
+        program.lastStartPassed = true;
+    } else {
+        program.lastStartDay = static_cast<Day>(lastStart);
+    }
+    program.paceWarning =
+        program.lastStartPassed || today + content.program.paceWarningDays >= lastStart;
 }
 
 // The viewer's own program: what its current stage asks for and how far
@@ -388,6 +421,7 @@ void addOwnProgram(const Content& content, const WorldState& state, CompanyId vi
     }
     stageView.progressPermille = programProgressPermille(content, state, viewer);
     stageView.ready = programStageReady(content, state, viewer);
+    addOwnPace(content, state, viewer, stageView, view.program);
     view.program.stage = stageView;
 }
 
@@ -410,6 +444,14 @@ void addRace(const Content& content, const WorldState& state, CompanyView& view)
         entry.stageDays = state.companies[i].programStageDays;
         entry.progressPermille = programProgressPermille(content, state, id);
         entry.researchState = programResearchState(state, id, stage);
+        entry.earliestFoundingDay = earliestFoundingDay(content, state, id);
+        if (stage != nullptr) {
+            if (const std::optional<ResearchView> due =
+                    researchInProgress(state, id, stage->research)) {
+                entry.researchDueDay = due->completesDay;
+            }
+        }
+        entry.pastDeadline = foundsPastDeadline(content, state, id);
         view.programs.push_back(entry);
     }
 }

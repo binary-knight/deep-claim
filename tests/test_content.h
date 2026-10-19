@@ -166,11 +166,15 @@ inline sim::Content makeContent() {
     // to. Tests of the share and the re-arm run set their own values.
     c.balance.mineLossNoticeMinShare = sim::Fixed::zero();
     c.balance.mineLossRearmDays = 1;
+    // Spec 011 (BR-014): the storage warning at a tenth of cash, as shipped.
+    c.balance.storageWarningCashShare = sim::Fixed::fromRatio(1, 10);
 
     // Spec 010: a small program that obeys the loader's rules (three stages,
     // each project tied to its position, lithium in the third). The deadline
     // is the shipped one, thirty game years.
     c.program.deadlineDay = 10'800;
+    // Spec 011 (BR-004): the pace warning a year ahead, as shipped.
+    c.program.paceWarningDays = 360;
     c.program.stages.push_back({"stage_1",
                                 sim::Money::fromUnits(1'000'000),
                                 sim::TechId(2),

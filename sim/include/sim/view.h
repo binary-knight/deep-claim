@@ -138,6 +138,21 @@ struct ProgramView {
     // (Company::programStageDays): stagesCompleted of them.
     std::vector<Day> stageDays;
     std::optional<ProgramStageView> stage;  // the current stage; empty when complete
+    // Keeping pace (spec 011, BR-004), while the current stage's project has
+    // not started and the game is being played: the last day it can start
+    // and still found the program no later than the leading solvent rival
+    // could (sim::leadingRivalFoundingDay), or the deadline day if that is
+    // earlier. Empty once that day is before today, which lastStartPassed
+    // then says. Empty and false for a bankrupt viewer.
+    std::optional<Day> lastStartDay;
+    bool lastStartPassed = false;
+    // Under the same conditions, when the lab is busy with another project:
+    // the day after that project ends, the first day the stage's project can
+    // start.
+    std::optional<Day> labFreeDay;
+    // The last day to start has passed or is no more than
+    // ProgramDef::paceWarningDays from today.
+    bool paceWarning = false;
 };
 
 // Any company's place in the race. Public (spec 010, BR-007): a rival's
@@ -153,6 +168,14 @@ struct ProgramPublicView {
     std::int64_t progressPermille = 0;
     // Of its current stage's project; Done when the program is complete.
     ProgramResearchState researchState = ProgramResearchState::NotStarted;
+    // The earliest day it could found the program (sim::earliestFoundingDay,
+    // spec 011); empty when it is bankrupt.
+    std::optional<Day> earliestFoundingDay;
+    // The finish day of its current stage's project while that is under way.
+    std::optional<Day> researchDueDay;
+    // Its earliest founding day is after the deadline day
+    // (sim::foundsPastDeadline): it can no longer found the program in time.
+    bool pastDeadline = false;
 };
 
 // How the game ended, or that it has not: the world's Outcome, public.

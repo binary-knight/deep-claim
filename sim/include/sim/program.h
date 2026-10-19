@@ -57,6 +57,34 @@ void applyCompleteProgramStage(const Content& content, WorldState& state,
 [[nodiscard]] std::int64_t programProgressPermille(const Content& content, const WorldState& state,
                                                    CompanyId company);
 
+// The earliest day the company could found the program (spec 011, BR-001),
+// were every remaining stage project started as soon as the rules allow and
+// goods and cash never held it up. Counted from WorldState::day, the day an
+// order given now applies: a project started on day D finishes on D plus its
+// duration, its stage's completion order applies the day after, and the next
+// stage's project can start on that same day; a lab busy with another
+// project takes the stage's the day after that project ends. A founded
+// program's day is the day of its last stage. No research can be sped up, so
+// the day never moves earlier. Pure: it reads research records, the stages
+// completed and their days, and bankruptcy, never cash or deliveries. Empty
+// for a bankrupt or unknown company, or content with no program.
+[[nodiscard]] std::optional<Day> earliestFoundingDay(const Content& content,
+                                                     const WorldState& state, CompanyId company);
+// The founding day for a company whose project for `stage` (from zero)
+// starts on startDay: startDay plus, over that stage and every later one,
+// the project's duration and a day for the completion order.
+[[nodiscard]] Day foundingDayIfStartedOn(const Content& content, std::uint32_t stage, Day startDay);
+// The earliest founding day among the company's solvent rivals; empty when
+// it has none.
+[[nodiscard]] std::optional<Day> leadingRivalFoundingDay(const Content& content,
+                                                         const WorldState& state,
+                                                         CompanyId company);
+// True when the company's earliest founding day is after the deadline day; a
+// founding on the deadline day is in time. False when it has no day. The one
+// statement of that test: the view and the pace check both answer from it.
+[[nodiscard]] bool foundsPastDeadline(const Content& content, const WorldState& state,
+                                      CompanyId company);
+
 // How the race ends for a company that did not found the program: a lesser
 // partner when another company founded it and this one has completed at
 // least two stages and is not bankrupt; lost otherwise, and always when

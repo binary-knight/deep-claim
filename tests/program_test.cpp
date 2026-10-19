@@ -9,8 +9,10 @@
 #include "sim/save.h"
 #include "sim/simulation.h"
 #include "sim/types.h"
+#include "sim/view.h"
 #include "sim/world_state.h"
 
+#include "content/loader.h"
 #include "test_content.h"
 #include <catch2/catch_test_macros.hpp>
 
@@ -1004,6 +1006,23 @@ StageResearch researchStateByRule(const sim::Content& content, const sim::WorldS
     return StageResearch::NotStarted;
 }
 
+// The finish day of the company's current stage project while it is under
+// way, from the state.
+std::optional<sim::Day> stageResearchDueDay(const sim::Content& content,
+                                            const sim::WorldState& state, sim::CompanyId id) {
+    const sim::Company& company = state.companies[id.index()];
+    if (company.programStage >= content.program.stages.size()) {
+        return std::nullopt;
+    }
+    const sim::TechId tech = content.program.stages[company.programStage].research;
+    for (const sim::Research& research : state.research) {
+        if (research.company == id && research.tech == tech && research.complete == 0) {
+            return research.completesDay;
+        }
+    }
+    return std::nullopt;
+}
+
 // The viewer's own program, figure by figure, against the rules and the state.
 void checkOwnProgram(const sim::Content& content, const sim::WorldState& state,
                      const sim::CompanyView& view) {
@@ -1057,6 +1076,9 @@ void checkRaceView(const sim::Content& content, const sim::Simulation& simulatio
         CHECK(entry.complete == (state.companies[c].programStage >= content.program.stages.size()));
         CHECK(entry.progressPermille == sim::programProgressPermille(content, state, id));
         CHECK(entry.researchState == researchStateByRule(content, state, id));
+        CHECK(entry.earliestFoundingDay == sim::earliestFoundingDay(content, state, id));
+        CHECK(entry.researchDueDay == stageResearchDueDay(content, state, id));
+        CHECK(entry.pastDeadline == sim::foundsPastDeadline(content, state, id));
     }
 }
 
@@ -1583,4 +1605,506 @@ TEST_CASE("A save of a game still being played shows no ending", "[program][endi
     CHECK_FALSE(loadsBack(content, finished));
     atStage(content, finished.companies[1], 2);
     CHECK(loadsBack(content, finished));
+}
+
+// The earliest founding day (spec 011, BR-001): the race paced by research
+// time alone. Orders apply in step 1 of the day the view shows, a project
+// completes in step 7 of its finish day, and a stage's completion and the
+// next stage's start can both apply on one day. So from a stage's start the
+// program takes each remaining project's duration and a day for each
+// completion order. The shipped projects take 480, 1,680 and 2,520 days
+// (data/techs.json): 4,683 days from the first start to the founding, 4,202
+// from the second and 2,521 from the third. The fixture's take 120, 150 and
+// 210: 483 days in all.
+
+namespace {
+
+constexpr sim::Day kShippedFromStage1 = 4'683;
+constexpr sim::Day kShippedFromStage2 = 4'202;
+constexpr sim::Day kShippedFromStage3 = 2'521;
+constexpr sim::Day kFixtureFromStage1 = 483;
+
+// The tech every shipped and fixture lab may start on day 0: a survey
+// project of 90 days with no prerequisites.
+const sim::TechId kSurveyTech(0);
+
+sim::Content shippedContent() {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    return *result.content;
+}
+
+std::optional<sim::Day> earliest(const sim::Content& content, const sim::WorldState& state,
+                                 sim::CompanyId id) {
+    return sim::earliestFoundingDay(content, state, id);
+}
+
+// A research record for an ordinary project, as StartResearch would have
+// left it the day before.
+void startOtherResearch(const sim::Content& content, sim::WorldState& state, sim::CompanyId id,
+                        sim::TechId tech) {
+    sim::Research research;
+    research.company = id;
+    research.tech = tech;
+    research.startedDay = state.day - 1;
+    research.completesDay = research.startedDay + content.techs[tech.index()].durationDays;
+    state.research.push_back(research);
+}
+
+void completeStageResearch(const sim::Content& content, sim::Company& company) {
+    company.completedTechs.push_back(content.program.stages[company.programStage].research);
+}
+
+}  // namespace
+
+TEST_CASE("With no stage research started the founding day counts every project from today",
+          "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    for (const sim::CompanyId id : {kPlayer, kRival}) {
+        CHECK(earliest(content, simulation.state(), id) == kShippedFromStage1);
+    }
+    // A day that could have started a project and did not costs a day
+    // (edge case 1).
+    simulation.tick();
+    for (const sim::CompanyId id : {kPlayer, kRival}) {
+        CHECK(earliest(content, simulation.state(), id) == kShippedFromStage1 + 1);
+    }
+}
+
+TEST_CASE("The founding day if started on a day adds each project and its completion day",
+          "[program][founding]") {
+    const sim::Content content = shippedContent();
+    CHECK(sim::foundingDayIfStartedOn(content, 0, 0) == kShippedFromStage1);
+    CHECK(sim::foundingDayIfStartedOn(content, 0, 100) == 100 + kShippedFromStage1);
+    CHECK(sim::foundingDayIfStartedOn(content, 1, 100) == 100 + kShippedFromStage2);
+    CHECK(sim::foundingDayIfStartedOn(content, 2, 100) == 100 + kShippedFromStage3);
+    // No stage left: the founding order itself is the day.
+    CHECK(sim::foundingDayIfStartedOn(content, 3, 100) == 100);
+}
+
+TEST_CASE("Stage research under way founds from the day after its finish", "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(kRaceDay);
+    sim::WorldState state = simulation.state();
+
+    // Started yesterday, finishing on day 39 + 480; its completion order
+    // applies the day after.
+    startStageResearch(content, state, kPlayer);
+    REQUIRE(state.research.back().completesDay == 519);
+    CHECK(earliest(content, state, kPlayer) == 520 + kShippedFromStage2);
+    CHECK(earliest(content, state, kRival) == kRaceDay + kShippedFromStage1);
+
+    // The same on a later stage.
+    atStage(content, state.companies[1], 1);
+    startStageResearch(content, state, kRival);
+    REQUIRE(state.research.back().completesDay == 39 + 1'680);
+    CHECK(earliest(content, state, kRival) == 1'720 + kShippedFromStage3);
+}
+
+TEST_CASE("Stage research done founds from today with the stages after it", "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(kRaceDay);
+    sim::WorldState state = simulation.state();
+
+    completeStageResearch(content, state.companies[0]);
+    CHECK(earliest(content, state, kPlayer) == kRaceDay + kShippedFromStage2);
+
+    // The last stage's research done: the completion order founds today.
+    atStage(content, state.companies[1], 2);
+    completeStageResearch(content, state.companies[1]);
+    CHECK(earliest(content, state, kRival) == kRaceDay);
+}
+
+TEST_CASE("A lab busy with another project takes the stage's the day after it ends",
+          "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(kRaceDay);
+    sim::WorldState state = simulation.state();
+
+    startOtherResearch(content, state, kPlayer, kSurveyTech);
+    REQUIRE(state.research.back().completesDay == 39 + 90);
+    CHECK(earliest(content, state, kPlayer) == 130 + kShippedFromStage1);
+    // The rival's lab is free.
+    CHECK(earliest(content, state, kRival) == kRaceDay + kShippedFromStage1);
+
+    // On a later stage, too.
+    atStage(content, state.companies[1], 2);
+    startOtherResearch(content, state, kRival, kSurveyTech);
+    CHECK(earliest(content, state, kRival) == 130 + kShippedFromStage3);
+}
+
+TEST_CASE("A founded program's founding day is the day of its last stage", "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(kRaceDay);
+    sim::WorldState state = simulation.state();
+    atStage(content, state.companies[0], 3);
+    state.companies[0].programStageDays = {600, 2'400, 5'000};
+    CHECK(earliest(content, state, kPlayer) == 5'000);
+    CHECK_FALSE(sim::foundsPastDeadline(content, state, kPlayer));
+}
+
+TEST_CASE("A bankrupt company has no founding day and is no rival", "[program][founding]") {
+    const sim::Content content = shippedContent();
+    const sim::WorldState fresh = freshState(content);
+    REQUIRE(sim::leadingRivalFoundingDay(content, fresh, kPlayer) == kShippedFromStage1);
+
+    sim::WorldState state = fresh;
+    makeBankrupt(content, state, kRival);
+    CHECK_FALSE(earliest(content, state, kRival).has_value());
+    CHECK_FALSE(sim::foundsPastDeadline(content, state, kRival));
+    // The player races only the deadline (edge case 4).
+    CHECK_FALSE(sim::leadingRivalFoundingDay(content, state, kPlayer).has_value());
+    CHECK(sim::leadingRivalFoundingDay(content, state, kRival) == kShippedFromStage1);
+}
+
+TEST_CASE("Content with no program gives no founding day", "[program][founding]") {
+    sim::Content content = test::makeContent();
+    content.program.stages.clear();
+    const sim::WorldState state = freshState(content);
+    CHECK_FALSE(earliest(content, state, kPlayer).has_value());
+    CHECK_FALSE(sim::leadingRivalFoundingDay(content, state, kPlayer).has_value());
+    CHECK_FALSE(sim::foundsPastDeadline(content, state, kPlayer));
+}
+
+TEST_CASE("The leading rival is the solvent rival that could found soonest",
+          "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::GameSetup three = test::setup();
+    three.aiNames = {"Rival", "Third"};
+    sim::Simulation simulation(content, 1, three);
+    simulation.tick(kRaceDay);
+    sim::WorldState state = simulation.state();
+    const sim::CompanyId third(2);
+    startStageResearch(content, state, third);
+
+    CHECK(sim::leadingRivalFoundingDay(content, state, kPlayer) == 520 + kShippedFromStage2);
+    CHECK(sim::leadingRivalFoundingDay(content, state, kRival) == 520 + kShippedFromStage2);
+    // Not itself.
+    CHECK(sim::leadingRivalFoundingDay(content, state, third) == kRaceDay + kShippedFromStage1);
+
+    makeBankrupt(content, state, third);
+    CHECK(sim::leadingRivalFoundingDay(content, state, kPlayer) == kRaceDay + kShippedFromStage1);
+}
+
+TEST_CASE("The founding day does not change when only cash or deliveries change",
+          "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(kRaceDay);
+    sim::WorldState state = simulation.state();
+    startStageResearch(content, state, kRival);
+    const std::optional<sim::Day> player = earliest(content, state, kPlayer);
+    const std::optional<sim::Day> rival = earliest(content, state, kRival);
+
+    for (const sim::CompanyId id : {kPlayer, kRival}) {
+        sim::Company& company = state.companies[id.index()];
+        company.cash = sim::Money::fromUnits(-5'000'000);
+        for (const sim::ProgramRequirement& need : content.program.stages[0].requirements) {
+            company.programDelivered[need.resource.index()] = need.tonnes;
+            company.inventoryTonnes[need.resource.index()] = 3 * need.tonnes;
+        }
+    }
+    CHECK(earliest(content, state, kPlayer) == player);
+    CHECK(earliest(content, state, kRival) == rival);
+    state.companies[0].cash = sim::Money::fromUnits(900'000'000);
+    CHECK(earliest(content, state, kPlayer) == player);
+}
+
+TEST_CASE("Founding past the deadline means founding after the deadline day",
+          "[program][founding]") {
+    const sim::Content content = shippedContent();
+    sim::WorldState state = freshState(content);
+    // Founding on the deadline day is in time: that day's orders are applied
+    // before the deadline is looked at.
+    state.day = content.program.deadlineDay - kShippedFromStage1;
+    REQUIRE(earliest(content, state, kPlayer) == content.program.deadlineDay);
+    CHECK_FALSE(sim::foundsPastDeadline(content, state, kPlayer));
+    state.day += 1;
+    CHECK(sim::foundsPastDeadline(content, state, kPlayer));
+    CHECK(sim::foundsPastDeadline(content, state, kRival));
+}
+
+TEST_CASE("Starting each stage on its earliest day founds on the day foretold",
+          "[program][founding]") {
+    // The timing the rule counts, played: the lab busy at first, then each
+    // project started the day the lab is free, and each stage completed and
+    // the next started together the day after its research ends.
+    const sim::Content content = test::makeContent();
+    sim::WorldState state = racingState(content);
+    sim::Company& player = state.companies[0];
+    player.cash = sim::Money::fromUnits(1'000'000'000);
+    for (const sim::ProgramStage& stage : content.program.stages) {
+        for (const sim::ProgramRequirement& need : stage.requirements) {
+            player.inventoryTonnes[need.resource.index()] += need.tonnes;
+        }
+    }
+    sim::Simulation simulation(content, 1, test::setup());
+    play(simulation, content, state);
+    simulation.submit(sim::StartResearch{kPlayer, kSurveyTech});
+    simulation.tick();
+    // The survey project ends on day 40 + 90; stage 1's starts the day after.
+    const std::optional<sim::Day> foretold = earliest(content, simulation.state(), kPlayer);
+    REQUIRE(foretold == 131 + kFixtureFromStage1);
+
+    const auto deliverAndStart = [&](std::uint32_t stage) {
+        for (const sim::ProgramRequirement& need : content.program.stages[stage].requirements) {
+            simulation.submit(sim::DeliverToProgram{kPlayer, need.resource, need.tonnes});
+        }
+        simulation.submit(sim::StartResearch{kPlayer, content.program.stages[stage].research});
+    };
+    std::uint32_t changed = 0;
+    std::uint32_t rivalSteps = 0;
+    while (!sim::gameEnded(simulation.state())) {
+        const sim::WorldState& now = simulation.state();
+        const sim::Company& self = now.companies[0];
+        const std::uint32_t stage = self.programStage;
+        if (sim::techCompleted(self, content.program.stages[stage].research)) {
+            simulation.submit(sim::CompleteProgramStage{kPlayer});
+            if (stage + 1 < content.program.stages.size()) {
+                deliverAndStart(stage + 1);
+            }
+        } else if (!sim::activeResearch(now, kPlayer).has_value()) {
+            deliverAndStart(stage);
+        }
+        const std::optional<sim::Day> rivalBefore = earliest(content, now, kRival);
+        simulation.tick();
+        if (earliest(content, simulation.state(), kPlayer) != foretold) {
+            ++changed;
+        }
+        // The rival never starts: its day moves one later each day.
+        if (!sim::gameEnded(simulation.state()) &&
+            earliest(content, simulation.state(), kRival) == *rivalBefore + 1) {
+            ++rivalSteps;
+        }
+    }
+    CHECK(changed == 0);
+    CHECK(rivalSteps == *foretold - 41);
+    const sim::WorldState& ended = simulation.state();
+    CHECK(ended.outcome.founder == kPlayer);
+    CHECK(ended.outcome.day == *foretold);
+    CHECK(ended.companies[0].programStageDays == std::vector<sim::Day>{252, 403, *foretold});
+}
+
+TEST_CASE("No company's founding day moves earlier from one day to the next",
+          "[program][founding]") {
+    // Both companies played by the AI on the shipped content, which starts
+    // and waits on research as it gathers cash and goods.
+    const sim::Content content = shippedContent();
+    sim::Simulation simulation(content, 3, test::setup());
+    sim::HeuristicController ai(content);
+    std::vector<std::optional<sim::Day>> before(2);
+    std::uint32_t earlier = 0;
+    std::uint32_t heldStill = 0;
+    for (sim::Day day = 0; day < 3 * sim::kDaysPerYear && !sim::gameEnded(simulation.state());
+         ++day) {
+        for (std::uint32_t c = 0; c < 2; ++c) {
+            before[c] = earliest(content, simulation.state(), sim::CompanyId(c));
+            simulation.collectCommands(sim::CompanyId(c), ai);
+        }
+        simulation.tick();
+        for (std::uint32_t c = 0; c < 2; ++c) {
+            const std::optional<sim::Day> after =
+                earliest(content, simulation.state(), sim::CompanyId(c));
+            if (before[c] && after && *after < *before[c]) {
+                ++earlier;
+            }
+            if (before[c] && after && *after == *before[c]) {
+                ++heldStill;
+            }
+        }
+    }
+    CHECK(earlier == 0);
+    // Research was under way on some days, or the test proves little.
+    CHECK(heldStill > 0);
+}
+
+// The race's pace in the view (spec 011, BR-001 and BR-004), on the shipped
+// research durations. The view is built straight from an edited state.
+
+namespace {
+
+// Day 40 of a shipped two-company game, nothing researched.
+sim::WorldState shippedRace(const sim::Content& content) {
+    sim::Simulation simulation(content, 1, test::setup());
+    simulation.tick(kRaceDay);
+    return simulation.state();
+}
+
+sim::ProgramView ownPace(const sim::Content& content, const sim::WorldState& state) {
+    return sim::makeCompanyView(content, state, kPlayer).program;
+}
+
+void checkNoPace(const sim::ProgramView& program) {
+    CHECK_FALSE(program.lastStartDay.has_value());
+    CHECK_FALSE(program.lastStartPassed);
+    CHECK_FALSE(program.paceWarning);
+    CHECK_FALSE(program.labFreeDay.has_value());
+}
+
+}  // namespace
+
+TEST_CASE("Every view gives each company's founding day and its research's due day",
+          "[program][view][founding]") {
+    const sim::Content content = shippedContent();
+    sim::WorldState state = shippedRace(content);
+    startStageResearch(content, state, kPlayer);
+    // The rival's lab busy with a project of its own: the day it frees
+    // counts (GA-008), but it is no stage research due.
+    startOtherResearch(content, state, kRival, kSurveyTech);
+
+    for (const sim::CompanyId viewer : {kPlayer, kRival}) {
+        const sim::CompanyView view = sim::makeCompanyView(content, state, viewer);
+        REQUIRE(view.programs.size() == 2);
+        CHECK(view.programs[0].earliestFoundingDay == 520 + kShippedFromStage2);
+        CHECK(view.programs[0].researchDueDay == 519);
+        CHECK_FALSE(view.programs[0].pastDeadline);
+        CHECK(view.programs[1].earliestFoundingDay == 130 + kShippedFromStage1);
+        CHECK_FALSE(view.programs[1].researchDueDay.has_value());
+        CHECK_FALSE(view.programs[1].pastDeadline);
+    }
+
+    // Too late to found by the deadline: every view says so.
+    sim::WorldState late = freshState(content);
+    late.day = content.program.deadlineDay - kShippedFromStage1 + 1;
+    for (const sim::CompanyId viewer : {kPlayer, kRival}) {
+        const sim::CompanyView view = sim::makeCompanyView(content, late, viewer);
+        CHECK(view.programs[0].pastDeadline);
+        CHECK(view.programs[1].pastDeadline);
+    }
+
+    // A bankrupt company has no day.
+    makeBankrupt(content, state, kRival);
+    CHECK_FALSE(
+        sim::makeCompanyView(content, state, kPlayer).programs[1].earliestFoundingDay.has_value());
+}
+
+TEST_CASE("The last day to start keeps pace with the leading rival", "[program][view][founding]") {
+    const sim::Content content = shippedContent();
+    const sim::WorldState base = shippedRace(content);
+
+    // The rival's lab is busy until day 129: it could found on day
+    // 130 + 4,683, so the player must start by day 130 to keep pace. That
+    // is within the year's warning.
+    sim::WorldState busyRival = base;
+    startOtherResearch(content, busyRival, kRival, kSurveyTech);
+    sim::ProgramView pace = ownPace(content, busyRival);
+    CHECK(pace.lastStartDay == 130);
+    CHECK_FALSE(pace.lastStartPassed);
+    CHECK(pace.paceWarning);
+    CHECK_FALSE(pace.labFreeDay.has_value());
+    // The warning's reach is the content's.
+    sim::Content noWarning = content;
+    noWarning.program.paceWarningDays = 0;
+    CHECK_FALSE(ownPace(noWarning, busyRival).paceWarning);
+    noWarning.program.paceWarningDays = 90;
+    CHECK(ownPace(noWarning, busyRival).paceWarning);
+    noWarning.program.paceWarningDays = 89;
+    CHECK_FALSE(ownPace(noWarning, busyRival).paceWarning);
+
+    // The rival started yesterday: the last day was yesterday.
+    sim::WorldState startedRival = base;
+    startStageResearch(content, startedRival, kRival);
+    pace = ownPace(content, startedRival);
+    CHECK_FALSE(pace.lastStartDay.has_value());
+    CHECK(pace.lastStartPassed);
+    CHECK(pace.paceWarning);
+
+    // A rival that could found today, against a player who has not begun:
+    // the last day lies thousands of days before day 0, and is still only
+    // "passed", never a day wrapped round.
+    sim::WorldState foundingRival = base;
+    atStage(content, foundingRival.companies[1], 2);
+    completeStageResearch(content, foundingRival.companies[1]);
+    REQUIRE(sim::earliestFoundingDay(content, foundingRival, kRival) == kRaceDay);
+    pace = ownPace(content, foundingRival);
+    CHECK_FALSE(pace.lastStartDay.has_value());
+    CHECK(pace.lastStartPassed);
+    CHECK(pace.paceWarning);
+}
+
+TEST_CASE("With the rival bankrupt the last day to start is measured against the deadline",
+          "[program][view][founding]") {
+    const sim::Content content = shippedContent();
+    sim::WorldState state = shippedRace(content);
+    makeBankrupt(content, state, kRival);
+    const sim::Day lastDay = content.program.deadlineDay - kShippedFromStage1;
+    REQUIRE(lastDay == 6'117);
+
+    sim::ProgramView pace = ownPace(content, state);
+    CHECK(pace.lastStartDay == lastDay);
+    CHECK_FALSE(pace.lastStartPassed);
+    CHECK_FALSE(pace.paceWarning);
+
+    // The warning from paceWarningDays before the last day.
+    state.day = lastDay - content.program.paceWarningDays - 1;
+    CHECK_FALSE(ownPace(content, state).paceWarning);
+    state.day = lastDay - content.program.paceWarningDays;
+    CHECK(ownPace(content, state).paceWarning);
+
+    // The last day itself is still in time; the day after is not.
+    state.day = lastDay;
+    pace = ownPace(content, state);
+    CHECK(pace.lastStartDay == lastDay);
+    CHECK_FALSE(pace.lastStartPassed);
+    state.day = lastDay + 1;
+    pace = ownPace(content, state);
+    CHECK_FALSE(pace.lastStartDay.has_value());
+    CHECK(pace.lastStartPassed);
+    CHECK(pace.paceWarning);
+}
+
+TEST_CASE("A busy lab is named with the day it is free", "[program][view][founding]") {
+    const sim::Content content = shippedContent();
+    sim::WorldState state = shippedRace(content);
+    CHECK_FALSE(ownPace(content, state).labFreeDay.has_value());
+
+    startOtherResearch(content, state, kPlayer, kSurveyTech);
+    const sim::ProgramView pace = ownPace(content, state);
+    CHECK(pace.labFreeDay == 130);
+    // The last day to start is the rival's pace all the same: the busy lab
+    // has already put the player behind it.
+    CHECK(pace.lastStartDay == kRaceDay);
+    CHECK(pace.paceWarning);
+
+    // The lab busy with the stage's own project is not another project.
+    sim::WorldState own = shippedRace(content);
+    startStageResearch(content, own, kPlayer);
+    CHECK_FALSE(ownPace(content, own).labFreeDay.has_value());
+}
+
+TEST_CASE("The pace figures are empty once the stage's research has started or the race is over",
+          "[program][view][founding]") {
+    const sim::Content content = shippedContent();
+    sim::WorldState base = shippedRace(content);
+    startStageResearch(content, base, kRival);
+
+    sim::WorldState underWay = base;
+    startStageResearch(content, underWay, kPlayer);
+    checkNoPace(ownPace(content, underWay));
+
+    sim::WorldState done = base;
+    completeStageResearch(content, done.companies[0]);
+    checkNoPace(ownPace(content, done));
+
+    sim::WorldState founded = base;
+    atStage(content, founded.companies[0], 3);
+    checkNoPace(ownPace(content, founded));
+
+    // A busy lab is no news once the race is over.
+    sim::WorldState ended = base;
+    startOtherResearch(content, ended, kPlayer, kSurveyTech);
+    ended.outcome.ended = 1;
+    ended.outcome.day = ended.day;
+    checkNoPace(ownPace(content, ended));
+
+    sim::WorldState bankrupt = base;
+    startOtherResearch(content, bankrupt, kPlayer, kSurveyTech);
+    makeBankrupt(content, bankrupt, kPlayer);
+    checkNoPace(ownPace(content, bankrupt));
 }

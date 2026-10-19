@@ -2,6 +2,7 @@
 
 #include "sim/commands.h"
 #include "sim/content.h"
+#include "sim/fatal.h"
 #include "sim/fixed.h"
 #include "sim/ids.h"
 #include "sim/plot_market.h"
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 namespace sim {
@@ -193,6 +195,72 @@ std::int64_t programProgressPermille(const Content& content, const WorldState& s
         shares += checkedMulDiv(delivered, kPermille, requirement.tonnes).value_or(kPermille);
     }
     return shares / static_cast<std::int64_t>(stage->requirements.size());
+}
+
+std::optional<Day> earliestFoundingDay(const Content& content, const WorldState& state,
+                                       CompanyId company) {
+    if (!knownCompany(state, company) || content.program.stages.empty()) {
+        return std::nullopt;
+    }
+    const Company& racer = state.companies[company.index()];
+    if (racer.bankrupt != 0) {
+        return std::nullopt;
+    }
+    const ProgramStage* stage = currentStage(content, racer);
+    if (stage == nullptr) {
+        // A save is refused unless it holds a day for every stage completed.
+        if (racer.programStageDays.empty()) {
+            return std::nullopt;
+        }
+        return racer.programStageDays.back();
+    }
+    const std::uint32_t current = racer.programStage;
+    if (techCompleted(racer, stage->research)) {
+        return foundingDayIfStartedOn(content, current + 1, state.day);
+    }
+    const std::optional<ResearchId> active = activeResearch(state, company);
+    if (!active) {
+        return foundingDayIfStartedOn(content, current, state.day);
+    }
+    // The lab frees the day after its project ends: the stage's own, whose
+    // completion order applies then, or another, after which the stage's
+    // project can start.
+    const Research& project = state.research[active->index()];
+    const Day labFree = project.completesDay + 1;
+    return project.tech == stage->research ? foundingDayIfStartedOn(content, current + 1, labFree)
+                                           : foundingDayIfStartedOn(content, current, labFree);
+}
+
+Day foundingDayIfStartedOn(const Content& content, std::uint32_t stage, Day startDay) {
+    std::int64_t day = startDay;
+    for (std::size_t s = stage; s < content.program.stages.size(); ++s) {
+        const TechDef& project = content.techs[content.program.stages[s].research.index()];
+        day = checkedAdd(day, checkedAdd(project.durationDays, 1));
+    }
+    if (day > std::numeric_limits<Day>::max()) {
+        fatal("foundingDayIfStartedOn: day out of range");
+    }
+    return static_cast<Day>(day);
+}
+
+std::optional<Day> leadingRivalFoundingDay(const Content& content, const WorldState& state,
+                                           CompanyId company) {
+    std::optional<Day> leading;
+    for (std::uint32_t c = 0; c < state.companies.size(); ++c) {
+        if (CompanyId(c) == company) {
+            continue;
+        }
+        const std::optional<Day> day = earliestFoundingDay(content, state, CompanyId(c));
+        if (day && (!leading || *day < *leading)) {
+            leading = day;
+        }
+    }
+    return leading;
+}
+
+bool foundsPastDeadline(const Content& content, const WorldState& state, CompanyId company) {
+    const std::optional<Day> day = earliestFoundingDay(content, state, company);
+    return day.has_value() && *day > content.program.deadlineDay;
 }
 
 ProgramResult programResultBesideFounder(const Company& company, bool founded) {
