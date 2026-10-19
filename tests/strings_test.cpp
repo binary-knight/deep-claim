@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -404,6 +405,129 @@ TEST_CASE("The race strip, the Program tab and the end screen have their text", 
         INFO(key);
         CHECK(game::text(content, key).front() != '[');
     }
+}
+
+TEST_CASE("Time from now reads in years and days, or as today", "[strings][data][format]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& content = *result.content;
+
+    // The owner's form for the status strip (spec 011): a 360-day year.
+    CHECK(game::formatTimeFromNow(content, 6 * sim::kDaysPerYear + 120) == "in 6 y 120 d");
+    // Whole years keep the day count, as the deadline item does.
+    CHECK(game::formatTimeFromNow(content, 2 * sim::kDaysPerYear) == "in 2 y 0 d");
+    CHECK(game::formatTimeFromNow(content, sim::kDaysPerYear - 1) == "in 359 d");
+    CHECK(game::formatTimeFromNow(content, 1) == "in 1 d");
+    CHECK(game::formatTimeFromNow(content, 0) == "today");
+}
+
+TEST_CASE("The race notices name the rival and give the days as dates", "[strings][data]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& content = *result.content;
+    sim::CompanyView view;
+    for (const char* name : {"Deep Claim Mining", "Northfield Resources"}) {
+        sim::CompanyPublicView company;
+        company.id = sim::CompanyId(static_cast<sim::CompanyId::Value>(view.companies.size()));
+        company.name = name;
+        view.companies.push_back(company);
+    }
+    view.deadlineDay = 30 * sim::kDaysPerYear;
+
+    sim::Notice behind;
+    behind.kind = sim::NoticeKind::ProgramFellBehind;
+    behind.company = sim::CompanyId(0);
+    behind.rival = sim::CompanyId(1);
+    behind.foundingDay = 16 * sim::kDaysPerYear + 4 * sim::kDaysPerMonth + 2;
+    behind.rivalFoundingDay = 12 * sim::kDaysPerYear;
+    const std::string fell = game::describeNotice(content, view, behind);
+    INFO(fell);
+    CHECK(fell.starts_with("Northfield Resources"));
+    CHECK(fell.find(game::formatDay(*behind.foundingDay)) != std::string::npos);
+    CHECK(fell.find("Y17 M5 D3") != std::string::npos);
+    CHECK(fell.find(game::formatDay(*behind.rivalFoundingDay)) != std::string::npos);
+    CHECK(fell.find('{') == std::string::npos);
+
+    sim::Notice late;
+    late.kind = sim::NoticeKind::ProgramPastDeadline;
+    late.company = sim::CompanyId(0);
+    late.foundingDay = 31 * sim::kDaysPerYear;
+    const std::string past = game::describeNotice(content, view, late);
+    INFO(past);
+    CHECK(past.find(game::formatDay(*late.foundingDay)) != std::string::npos);
+    CHECK(past.find(game::formatDay(view.deadlineDay)) != std::string::npos);
+    CHECK(past.find('{') == std::string::npos);
+
+    // A notice without its days still reads, with a mark where a day would be.
+    sim::Notice bare;
+    bare.kind = sim::NoticeKind::ProgramFellBehind;
+    const std::string unknown = game::describeNotice(content, view, bare);
+    CHECK(unknown.find('?') != std::string::npos);
+    CHECK(unknown.find('{') == std::string::npos);
+}
+
+TEST_CASE("The stop panel and the race displays have their text", "[strings][data]") {
+    const content::LoadResult result = content::loadFromDirectory(DC_DATA_DIR);
+    INFO(content::formatErrors(result.errors));
+    REQUIRE(result.ok());
+    const sim::Content& content = *result.content;
+
+    CHECK(game::text(content, "ui.stop_more", {{"count", "2"}}) == "+2 more");
+    CHECK(game::textPlural(content, "ui.race_behind_by", 1374, {{"days", "1,374"}})
+              .find("1,374 days") != std::string::npos);
+    CHECK(game::textPlural(content, "ui.race_ahead_by", 1, {{"days", "1"}}).find("1 day") !=
+          std::string::npos);
+    // Every key spec 011 adds for the session and the client (tasks 009-014).
+    for (const char* key : {"ui.pause_on.fell_behind",
+                            "ui.stop_heading",
+                            "ui.stop_race_heading",
+                            "ui.stop_race_days",
+                            "ui.stop_more",
+                            "ui.stop_go_to",
+                            "ui.stop_for_this",
+                            "ui.race_behind_by.one",
+                            "ui.race_behind_by.many",
+                            "ui.race_ahead_by.one",
+                            "ui.race_ahead_by.many",
+                            "ui.race_cannot_found",
+                            "ui.race_founding_day",
+                            "ui.race_research_due",
+                            "ui.race_rival_could_found",
+                            "ui.time_from_now",
+                            "ui.time_from_now_days",
+                            "ui.time_from_now_today",
+                            "ui.program_last_start",
+                            "ui.program_last_start_passed",
+                            "ui.program_lab_busy",
+                            "ui.program_where_from",
+                            "ui.program_from_regions",
+                            "ui.program_from_region_item",
+                            "ui.program_from_research",
+                            "ui.program_from_mines",
+                            "ui.program_from_mine_item",
+                            "ui.program_from_no_mines",
+                            "ui.program_from_surveys",
+                            "ui.need_pace_title",
+                            "ui.need_pace_passed_title",
+                            "ui.need_pace_sub",
+                            "ui.need_ore_title",
+                            "ui.need_ore_sub",
+                            "ui.plot_mark_may_hold",
+                            "ui.plot_mark_survey_shows",
+                            "ui.bid_stands",
+                            "ui.bid_replaces"}) {
+        INFO(key);
+        const std::string line = game::text(content, key);
+        CHECK(line.front() != '[');
+        CHECK(line.find("deep-space") == std::string::npos);
+        CHECK(line.find("deep space") == std::string::npos);
+    }
+    // The cover-costs warning says program stock is sold last (BR-011), and
+    // the end screen counts open mines (BR-012).
+    CHECK(game::text(content, "ui.program_cover_costs_warning").find("last") != std::string::npos);
+    CHECK(game::text(content, "ui.end_mines") == "Open mines");
 }
 
 TEST_CASE("A prose edit keeps the content fingerprint; a name edit moves it", "[strings][data]") {

@@ -392,7 +392,7 @@ ui.program_blocked_deliveries	The yard is still short on deliveries for this sta
 ui.program_blocked_cash	We need {amount} in spendable cash on the ledger to close out this stage.
 ui.program_blocked_locked	We can't dig {resource} until we have {tech}.
 ui.program_nothing_to_deliver	Nothing on the pile that this stage still calls for.
-ui.program_cover_costs_warning	Cover costs is switched on. Come month-end, the clerk may sell off stock you are holding back for the program.
+ui.program_cover_costs_warning	Cover costs is switched on. At month-end the clerk sells stock beyond what this stage still needs first, and the stock it needs last.
 ui.program_complete	Every stage of the program is complete.
 ui.end_founded_title	We founded the program
 ui.end_founded_body	We finished the last stage ahead of the rival and beat the deadline. The program is ours to run.
@@ -409,10 +409,48 @@ ui.end_stage_days	Stage {number}: day {day}
 ui.end_stage_never	Stage {number}: not reached
 ui.end_your_figures	Your figures
 ui.end_cash	Cash
-ui.end_mines	Mines
+ui.end_mines	Open mines
 ui.end_stages	Stages completed
 ui.end_new_game	New game
 notice.command_rejected.delivery	Couldn't deliver {resource} to the program: {reason}.
 notice.command_rejected.stage	Couldn't complete the program stage: {reason}.
-notice.program_fell_behind	A rival can now found the program before us.
-notice.program_past_deadline	At this pace we cannot found the program before the deadline.
+notice.program_fell_behind	{rival} can now found the program before us. Their earliest founding day is {rival_day}; ours is {day}.
+notice.program_past_deadline	At this pace we cannot found the program before the deadline. Our earliest founding day is {day}; the deadline is {deadline}.
+ui.pause_on.fell_behind	Falling behind in the race
+ui.stop_heading	Clock stopped: {rule}
+ui.stop_race_heading	Race news. Clock stopped: {rule}
+ui.stop_race_days	Earliest founding: us {day}, {company} {rival_day}
+ui.stop_more	+{count} more
+ui.stop_go_to	Go to {tab}
+ui.stop_for_this	Stop for this
+ui.race_behind_by.one	Behind by {days} day
+ui.race_behind_by.many	Behind by {days} days
+ui.race_ahead_by.one	Ahead by {days} day
+ui.race_ahead_by.many	Ahead by {days} days
+ui.race_cannot_found	We cannot found the program in time
+ui.race_founding_day	earliest founding {day}
+ui.race_research_due	research due {day}
+ui.race_rival_could_found	{company} could found the program {time}
+ui.time_from_now	in {years} y {days} d
+ui.time_from_now_days	in {days} d
+ui.time_from_now_today	today
+ui.program_last_start	Start this stage's research by {day} to keep pace.
+ui.program_last_start_passed	The last day to start this stage's research and keep pace has passed.
+ui.program_lab_busy	The lab is busy with another project. It is free on {day}.
+ui.program_where_from	Where the ore comes from
+ui.program_from_regions	{resource} may be found in {regions}.
+ui.program_from_region_item	{region} ({odds})
+ui.program_from_research	{resource} is locked until we have {tech}.
+ui.program_from_mines	Our mines yielding {resource}: {mines}.
+ui.program_from_mine_item	{plot}, {tonnes} a day
+ui.program_from_no_mines	None of our mines yields {resource}.
+ui.program_from_surveys	Our surveys show {resource} on {plots}.
+ui.need_pace_title	Start stage {number} research by {day} to keep pace.
+ui.need_pace_passed_title	The last day to start stage {number} research and keep pace has passed.
+ui.need_pace_sub	The research costs {amount}. Borrow if cash is short.
+ui.need_ore_title	The program needs {resource}, and none of our mines yields it.
+ui.need_ore_sub	It may be found in {regions}. Look for plots on the Plots tab.
+ui.plot_mark_may_hold	may hold {resource}
+ui.plot_mark_survey_shows	survey shows {resource}
+ui.bid_stands	Your bid stands: {amount}
+ui.bid_replaces	Replaces your bid of {amount}

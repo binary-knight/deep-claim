@@ -60,6 +60,12 @@ using TextArgs = std::initializer_list<TextArg>;
 [[nodiscard]] std::string textPlural(const sim::Content& content, std::string_view key,
                                      std::int64_t count, TextArgs args);
 
+// A span of days ahead, as the status strip gives it (spec 011): "in 6 y
+// 120 d" from a year up (whole years keep "0 d", as the deadline item
+// does), "in 120 d" under a year, "today" for zero. The words are the
+// catalogue's (ui.time_from_now*); a 360-day year. Dates use formatDay.
+[[nodiscard]] std::string formatTimeFromNow(const sim::Content& content, sim::Day days);
+
 // Plain-language reason for a rejected order (reject.<reason>).
 [[nodiscard]] std::string rejectReasonText(const sim::Content& content, sim::RejectReason reason);
 

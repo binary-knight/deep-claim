@@ -61,6 +61,18 @@ std::string formatDay(sim::Day day) {
                        day % sim::kDaysPerMonth + 1);
 }
 
+std::string formatTimeFromNow(const sim::Content& content, sim::Day days) {
+    if (days == 0) {
+        return text(content, "ui.time_from_now_today");
+    }
+    if (days < sim::kDaysPerYear) {
+        return text(content, "ui.time_from_now_days", {{"days", std::to_string(days)}});
+    }
+    return text(content, "ui.time_from_now",
+                {{"years", std::to_string(days / sim::kDaysPerYear)},
+                 {"days", std::to_string(days % sim::kDaysPerYear)}});
+}
+
 std::string formatTonnes(std::int64_t tonnes) {
     return withThousands(tonnes) + " t";
 }

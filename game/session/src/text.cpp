@@ -5,11 +5,13 @@
 #include "sim/content.h"
 #include "sim/ids.h"
 #include "sim/money.h"
+#include "sim/types.h"
 #include "sim/view.h"
 
 #include "game/format.h"
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -44,6 +46,11 @@ std::string eventName(const sim::Content& content, sim::EventId id) {
         return "?";
     }
     return content.events[id.index()].name;
+}
+
+// A day a notice may not carry shows as a mark, as an unknown name does.
+std::string dayName(const std::optional<sim::Day>& day) {
+    return day ? formatDay(*day) : "?";
 }
 
 // Plots are numbered from 1 in every piece of text the player sees.
@@ -183,6 +190,10 @@ std::string describeNotice(const sim::Content& content, const sim::CompanyView& 
     return capitalised(text(content, key,
                             {{"plot", plotName(n.plot)},
                              {"company", companyName(view, n.company)},
+                             {"rival", companyName(view, n.rival)},
+                             {"day", dayName(n.foundingDay)},
+                             {"rival_day", dayName(n.rivalFoundingDay)},
+                             {"deadline", formatDay(view.deadlineDay)},
                              {"resource", resourceName(content, n.resource)},
                              {"tech", techName(content, n.tech)},
                              {"event", eventName(content, n.event)},
