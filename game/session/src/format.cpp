@@ -77,6 +77,10 @@ std::string formatTonnes(std::int64_t tonnes) {
     return withThousands(tonnes) + " t";
 }
 
+std::string formatCount(std::int64_t count) {
+    return withThousands(count);
+}
+
 std::string formatRatio(sim::Fixed ratio) {
     const std::int64_t hundredths = ratio.raw() / (sim::Fixed::kScale / 100);
     return std::format("x{}.{:02}", hundredths / 100, std::llabs(hundredths % 100));

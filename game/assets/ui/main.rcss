@@ -139,7 +139,11 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
    a well like the strip: the deadline at header-figure size with the verdict
    under it, then a line a company. Column widths are the widest text each
    holds in the mono face at 14dp (8.4dp a character): 22 characters of
-   "3 of 3 stages complete", 14 of "100% delivered". The bar takes the rest. */
+   "3 of 3 stages complete", 14 of "100% delivered". The name column holds
+   the company's name, wrapping when it is a long one, over its earliest
+   founding day (spec 011), "earliest founding Y30 M12 D30" at its widest;
+   the research column "research due Y30 M12 D30". The bar takes the rest.
+   On the status strip, the leading rival's line is an item of its own. */
 #strip .race .deadline, #strip .race .founded { margin-right: 8dp; }
 #race {
     display: flex;
@@ -157,12 +161,14 @@ h2 .idx { font-family: "JetBrains Mono"; font-weight: 400; font-size: 12dp; colo
 #race .when .verdictline { display: block; height: 24dp; line-height: 24dp; margin-top: 4dp; }
 #race .rows { display: block; flex: 1 1 0; width: 100dp; }
 #race .rrow { display: flex; flex-direction: row; align-items: center; min-height: 28dp; }
-#race .who { display: block; flex: 0 0 auto; width: 168dp; margin-right: 16dp; font-weight: 600; white-space: nowrap; overflow: hidden; }
+#race .who { display: block; flex: 0 0 auto; width: 208dp; margin-right: 16dp; }
+#race .who .nm { display: block; font-weight: 600; }
+#race .who .founding { display: block; color: #c9d4e6; white-space: nowrap; }
 #race .stage { display: block; flex: 0 0 auto; width: 192dp; margin-right: 16dp; color: #c9d4e6; white-space: nowrap; }
 #race .bar { display: block; flex: 1 1 0; width: 60dp; height: 8dp; box-sizing: border-box; margin-right: 16dp; background-color: #0a0f17; border: 1dp #2f4160; border-radius: 2dp; }
 #race .bar .fill { display: block; height: 6dp; background-color: #2f8cff; }
 #race .pct { display: block; flex: 0 0 auto; width: 124dp; margin-right: 16dp; white-space: nowrap; }
-#race .research { display: block; flex: 0 0 auto; width: 152dp; color: #c9d4e6; white-space: nowrap; }
+#race .research { display: block; flex: 0 0 auto; width: 176dp; color: #c9d4e6; white-space: nowrap; }
 
 /* ---- Program tab (spec 010) ----
    The three stages side by side, each a name over its state chip. The

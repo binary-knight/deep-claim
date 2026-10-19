@@ -63,6 +63,9 @@ public:
     [[nodiscard]] const UiModel& model() const { return model_; }
     // For the layout probe, which plays a fixed game to fill every table.
     void startGame(std::uint64_t seed);
+    // For the layout probe: the rival's name in games started from now on,
+    // so the race displays can be laid out with a long one.
+    void setRivalName(std::string name);
     void selectPlot(int index);
     void showPauseMenu(bool on);
     void showPendingList(bool on);
@@ -157,6 +160,7 @@ private:
 
     std::filesystem::path playtestDir_;
     std::string buildId_;
+    std::string rivalName_ = "Northfield Minerals";
     std::string traceStem_;  // "trace-YYYYMMDD-HHMMSS", shared by the trace's files
     std::filesystem::path tracePath_;
     std::ofstream traceFile_;

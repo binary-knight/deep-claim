@@ -37,6 +37,9 @@ TEST_CASE("Money, day and tonnage formatting", "[session][format]") {
     CHECK(game::formatDay(0) == "Y1 M1 D1");
     CHECK(game::formatDay(sim::kDaysPerYear + 45) == "Y2 M2 D16");
     CHECK(game::formatTonnes(1'234'567) == "1,234,567 t");
+    // A count in words, as the race verdict gives its gap (spec 011).
+    CHECK(game::formatCount(1'374) == "1,374");
+    CHECK(game::formatCount(999) == "999");
     CHECK(game::formatRatio(sim::Fixed::fromRatio(85, 100)) == "x0.85");
 }
 

@@ -24,6 +24,9 @@ std::string formatMoney(sim::Money amount);
 std::string formatDay(sim::Day day);
 // "12,345 t"
 std::string formatTonnes(std::int64_t tonnes);
+// "1,374": a count with thousands separators, as the race verdict gives
+// its gap in days.
+std::string formatCount(std::int64_t count);
 // "x0.85"
 std::string formatRatio(sim::Fixed ratio);
 

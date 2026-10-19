@@ -171,7 +171,7 @@ void App::newGame(std::uint64_t seed) {
     traceEnd();
     sim::GameSetup setup;
     setup.playerName = std::string(services_->playerName());
-    setup.aiNames = {"Northfield Minerals"};
+    setup.aiNames = {rivalName_};
     session_ = std::make_unique<Session>(*content_, seed, setup);
     session_->setTrace(trace_.get());
     session_->setAutoPause(pauseRules_);
@@ -451,6 +451,7 @@ void App::bindModel() {
     }
     if (auto h = ctor.RegisterStruct<RaceRow>()) {
         h.RegisterMember("name", &RaceRow::name);
+        h.RegisterMember("founding", &RaceRow::founding);
         h.RegisterMember("stage", &RaceRow::stage);
         h.RegisterMember("progress", &RaceRow::progress);
         h.RegisterMember("bar_width", &RaceRow::bar_width);
@@ -596,6 +597,7 @@ void App::bindModel() {
     ctor.Bind("has_world", &model_.has_world);
     // The race for the program (spec 010)
     ctor.Bind("has_race", &model_.has_race);
+    ctor.Bind("race_rival", &model_.race_rival);
     ctor.Bind("race_deadline", &model_.race_deadline);
     ctor.Bind("race_founded", &model_.race_founded);
     ctor.Bind("race_verdict", &model_.race_verdict);
@@ -846,6 +848,10 @@ void App::setTab(int tab) {
 void App::startGame(std::uint64_t seed) {
     newGame(seed);
     refresh();
+}
+
+void App::setRivalName(std::string name) {
+    rivalName_ = std::move(name);
 }
 
 void App::selectPlot(int index) {

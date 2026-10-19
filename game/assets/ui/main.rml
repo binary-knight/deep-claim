@@ -60,7 +60,10 @@
         <span class="brk"></span>
         <!-- The race (spec 010), on every tab: the time left and whether the
              player leads, in words. The header has no width for it once the
-             company name and the figures are long ones. -->
+             company name and the figures are long ones. Ahead of it, an item
+             of its own so it wraps on its own (spec 011): when the leading
+             rival could found the program before the deadline, how soon. -->
+        <span class="item race" data-if="race_rival != ''"><span class="couldfound">{{race_rival}}</span></span>
         <span class="item race" data-if="has_race"><span class="num deadline" data-if="race_deadline != ''">{{race_deadline}}</span><span class="founded" data-if="race_founded != ''">{{race_founded}}</span><span class="chip verdict" data-if="race_verdict != ''" data-class-good="race_verdict_class == 'good'" data-class-warn="race_verdict_class == 'warn'">{{race_verdict}}</span></span>
         <span class="item"><span class="k">Research</span><span class="num">{{research_strip}}</span></span>
         <span class="item" data-if="has_world"><span class="k">World</span><span class="chip warn">{{world_event}}</span> <span class="num">{{world_sub}}</span></span>
@@ -84,7 +87,9 @@
                 <h1>Dashboard</h1>
                 <!-- The race for the program (spec 010): the deadline, then a
                      line a company. Progress is a bar with its figure beside
-                     it, and who leads is a word, so neither rests on colour. -->
+                     it, and who leads is a word, so neither rests on colour.
+                     Each company's earliest founding day sits under its name
+                     (spec 011), and research under way gives its due day. -->
                 <div id="race" data-if="has_race">
                     <div class="when">
                         <span class="deadline" data-if="race_deadline != ''">{{race_deadline}}</span>
@@ -93,7 +98,7 @@
                     </div>
                     <div class="rows">
                         <div data-for="r : race_rows" class="rrow">
-                            <span class="who">{{r.name}}</span>
+                            <span class="who"><span class="nm">{{r.name}}</span><span class="founding" data-if="r.founding != ''">{{r.founding}}</span></span>
                             <span class="stage num">{{r.stage}}</span>
                             <div class="bar"><div class="fill" data-style-width="r.bar_width"></div></div>
                             <span class="pct num">{{r.progress}}</span>
@@ -150,7 +155,7 @@
                         <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
                         <div class="stat"><span class="label">Available</span><span class="value">{{available}}</span></div>
                         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span><span class="sub">{{capacity_sub}}</span></div>
-                        <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub">{{storage_sub}}</span></div>
+                        <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub wrapok">{{storage_sub}}</span></div>
                         <div class="stat"><span class="label">This month</span><span class="value" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span><span class="sub">{{instalment_sub}}</span></div>
                         <div class="stat"><span class="label">Solvency</span><span class="chipline"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="sub wrapok">{{solvency_sub}}</span></div>
                     </div>
@@ -437,7 +442,7 @@
                         <div class="stat"><span class="label">Cash</span><span class="value">{{cash}}</span></div>
                         <div class="stat"><span class="label">Available</span><span class="value">{{available}}</span></div>
                         <div class="stat"><span class="label">Debt</span><span class="value">{{debt}}</span><span class="sub">{{capacity_sub}}</span></div>
-                        <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub">{{storage_sub}}</span></div>
+                        <div class="stat"><span class="label">Warehouse</span><span class="value">{{warehouse_value}}</span><span class="sub wrapok">{{storage_sub}}</span></div>
                         <div class="stat"><span class="label">This month</span><span class="value" data-class-good="month_good" data-class-danger="!month_good">{{month_net}}</span><span class="sub">{{instalment_sub}}</span></div>
                         <div class="stat"><span class="label">Solvency</span><span class="chipline"><span class="chip" data-class-good="solvent" data-class-danger="!solvent">{{solvency}}</span></span><span class="sub wrapok">{{solvency_sub}}</span></div>
                     </div>

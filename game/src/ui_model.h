@@ -247,11 +247,13 @@ struct PauseRow {
 // Dashboard's race strip. Every figure is the sim's (sim::ProgramPublicView),
 // worded by the catalogue; nothing here is worked out by the client.
 struct RaceRow {
-    std::string name;       // "You" for the player, else the company's name
-    std::string stage;      // "1 of 3 stages complete"
+    std::string name;  // "You" for the player, else the company's name
+    std::string
+        founding;       // "earliest founding Y17 M5 D3"; "" with no day or once the game has ended
+    std::string stage;  // "1 of 3 stages complete"
     std::string progress;   // "42% delivered": the bar's figure, toward the current stage
     std::string bar_width;  // the bar's fill as an RCSS width, "42.5%"
-    std::string research;   // "research not started", "research under way", "research done"
+    std::string research;   // "research not started", "research due Y12 M1 D1", "research done"
     bool you = false;
 };
 
@@ -414,12 +416,19 @@ struct UiModel {
 
     // The race for the program (spec 010): the status strip's item on every
     // tab, and the Dashboard's race strip.
-    bool has_race = false;      // the content has a program to race for
+    bool has_race = false;  // the content has a program to race for
+    // "Northfield Minerals could found the program in 6 y 120 d" while the
+    // leading solvent rival's earliest founding day is before the deadline
+    // (spec 011), else "".
+    std::string race_rival;
     std::string race_deadline;  // "29 y 132 d to the deadline"; "" once a company has founded it
     std::string race_founded;   // "Northfield Minerals founded the program", else ""
-    // The player against the rival furthest on, in words: "Ahead", "Behind"
-    // or "Level"; "" once the game has ended. Stages complete are compared
-    // first, then progress toward the current stage. Display only.
+    // The player against the leading solvent rival, in words (spec 011):
+    // "Behind by 1,374 days", "Ahead by 12 days", "Level" on the same earliest
+    // founding day, or "We cannot found the program in time" when the view
+    // says the player's day is past the deadline; "" once the game has ended.
+    // Stages complete, then progress, decide only where a day is missing.
+    // Display only.
     std::string race_verdict;
     std::string race_verdict_class;  // chip class: "good" ahead, "warn" behind, "" level
     std::vector<RaceRow> race_rows;  // the player first, then every rival

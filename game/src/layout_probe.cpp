@@ -26,7 +26,11 @@
 // to a mine with stock the first stage needs, delivered by orders, and it
 // exits non-zero when the deadline, the verdict, either company's stage
 // count, percentage, research state or bar differ from the sim's view, on
-// the status strip of every tab and on the Dashboard's race strip. The same
+// the status strip of every tab and on the Dashboard's race strip; with the
+// rival under a long name, the earliest founding days, the research due day,
+// the rival's time to founding and the verdict's gap in days are checked
+// too (spec 011), as are a player more delivered but Behind on research time
+// and the cannot-found-in-time verdict, each on a copy of its own. The same
 // game goes on to the Program tab (spec 010): a new game, a delivery given by
 // its button and waiting, then made, the stage's research ordered and under
 // way; then two apps on copies of the content, one whose first stage asks for
@@ -1702,62 +1706,90 @@ constexpr float kBarTolerance = 1.0F;  // a bar's fill against its track, in dp
 // The race scenario delivers once a fifth of what the stage needs of some
 // good is in stock, so the player's percentage is a figure well above zero.
 constexpr std::int64_t kRaceStockShare = 5;
+// The race is played against a rival with a long name (spec 011, AC-010),
+// so the status strip and the race strip are laid out with one.
+constexpr std::string_view kLongRivalName = "Northern Shield Consolidated Mining Group";
+// How long the rival-researching game may run, after the player's first
+// delivery, for the rival to start its stage research.
+constexpr int kRivalResearchMaxDays = 2400;
+// Then the days the player waits on with its research unstarted.
+constexpr int kRivalLeadDays = 120;
 
 // One company's line on the race strip, as the catalogue words the sim's
 // figures for it.
 struct RaceLine {
-    std::string who;       // "You", or the rival's name
-    std::string stage;     // "0 of 3 stages complete"
+    std::string who;  // "You", or the rival's name
+    std::string
+        founding;       // "earliest founding Y17 M5 D3"; "" with no day or once the game has ended
+    std::string stage;  // "0 of 3 stages complete"
     std::string percent;   // "12% delivered"
-    std::string research;  // "research not started"
+    std::string research;  // "research not started", "research due Y2 M3 D4"
     std::int64_t permille = 0;
 };
 
 // What the strip must read, worked out here from the sim's view and the
 // catalogue, independently of the client's model.
 struct RaceExpected {
+    std::string rival;            // "Northfield could found the program in 6 y 120 d", or ""
     std::string deadline;         // "29 y 201 d to the deadline"
-    std::string verdict;          // "Ahead", "Behind" or "Level"
+    std::string verdict;          // "Behind by 1,374 days", "Level", "We cannot found ..."
     std::vector<RaceLine> lines;  // the player first, then every rival
 };
 
-std::string researchWords(const sim::Content& content, sim::ProgramResearchState state) {
-    switch (state) {
+// The current stage's research in words: its due day while it is under way
+// and the game is open (spec 011).
+std::string researchWords(const sim::Content& content, const sim::ProgramPublicView& program,
+                          bool open) {
+    switch (program.researchState) {
         case sim::ProgramResearchState::NotStarted:
             return game::text(content, "ui.race_research_not_started");
         case sim::ProgramResearchState::InProgress:
-            return game::text(content, "ui.race_research_in_progress");
+            return open && program.researchDueDay
+                       ? game::text(content, "ui.race_research_due",
+                                    {{"day", game::formatDay(*program.researchDueDay)}})
+                       : game::text(content, "ui.race_research_in_progress");
         case sim::ProgramResearchState::Done:
             return game::text(content, "ui.race_research_done");
     }
     return {};
 }
 
-RaceExpected simRace(const game::Session& session) {
-    const sim::Content& content = session.content();
-    const sim::CompanyView& view = session.view();
-    RaceExpected expected;
-    const sim::Day left = view.deadlineDay > view.day ? view.deadlineDay - view.day : 0;
-    expected.deadline = game::text(content, "ui.race_deadline",
-                                   {{"years", std::to_string(left / sim::kDaysPerYear)},
-                                    {"days", std::to_string(left % sim::kDaysPerYear)}});
-    const std::string total = std::to_string(content.program.stages.size());
+// The rival the player races (spec 011): the solvent one with the earliest
+// founding day, or none when every rival is bankrupt (edge case 4).
+const sim::ProgramPublicView* leadingRival(const sim::CompanyView& view) {
+    const sim::ProgramPublicView* leader = nullptr;
     for (const sim::ProgramPublicView& program : view.programs) {
-        RaceLine line;
-        line.who = program.company == game::Session::kPlayer
-                       ? game::text(content, "ui.race_you")
-                       : view.companies[program.company.index()].name;
-        line.stage =
-            game::text(content, "ui.race_stage",
-                       {{"done", std::to_string(program.stagesCompleted)}, {"total", total}});
-        line.percent = game::text(content, "ui.race_progress",
-                                  {{"percent", std::to_string(program.progressPermille / 10)}});
-        line.research = researchWords(content, program.researchState);
-        line.permille = program.progressPermille;
-        expected.lines.push_back(line);
+        if (program.company == game::Session::kPlayer || !program.earliestFoundingDay ||
+            view.companies[program.company.index()].bankrupt) {
+            continue;
+        }
+        if (leader == nullptr || *program.earliestFoundingDay < *leader->earliestFoundingDay) {
+            leader = &program;
+        }
     }
-    // Stages complete first, then progress toward the current one.
+    return leader;
+}
+
+// The verdict: the player's earliest founding day against the leading
+// rival's, with the gap in days, Level on the same day (edge case 5); "cannot
+// found in time" when the player's day is past the deadline. Stages and
+// share delivered decide only where a day is missing.
+std::string simVerdict(const sim::Content& content, const sim::CompanyView& view) {
     const sim::ProgramPublicView& mine = view.programs[game::Session::kPlayer.index()];
+    if (mine.pastDeadline) {
+        return game::text(content, "ui.race_cannot_found");
+    }
+    const sim::ProgramPublicView* rival = leadingRival(view);
+    if (rival != nullptr && mine.earliestFoundingDay) {
+        const std::int64_t gap = static_cast<std::int64_t>(*mine.earliestFoundingDay) -
+                                 static_cast<std::int64_t>(*rival->earliestFoundingDay);
+        if (gap == 0) {
+            return game::text(content, "ui.race_level");
+        }
+        const std::int64_t days = std::abs(gap);
+        return game::textPlural(content, gap > 0 ? "ui.race_behind_by" : "ui.race_ahead_by", days,
+                                {{"days", game::formatCount(days)}});
+    }
     bool ahead = true;
     bool behind = false;
     for (const sim::ProgramPublicView& program : view.programs) {
@@ -1775,7 +1807,46 @@ RaceExpected simRace(const game::Session& session) {
     } else if (ahead) {
         verdict = "ui.race_ahead";
     }
-    expected.verdict = game::text(content, verdict);
+    return game::text(content, verdict);
+}
+
+RaceExpected simRace(const game::Session& session) {
+    const sim::Content& content = session.content();
+    const sim::CompanyView& view = session.view();
+    const bool open = !view.outcome.ended;
+    RaceExpected expected;
+    const sim::Day left = view.deadlineDay > view.day ? view.deadlineDay - view.day : 0;
+    expected.deadline = game::text(content, "ui.race_deadline",
+                                   {{"years", std::to_string(left / sim::kDaysPerYear)},
+                                    {"days", std::to_string(left % sim::kDaysPerYear)}});
+    const std::string total = std::to_string(content.program.stages.size());
+    for (const sim::ProgramPublicView& program : view.programs) {
+        RaceLine line;
+        line.who = program.company == game::Session::kPlayer
+                       ? game::text(content, "ui.race_you")
+                       : view.companies[program.company.index()].name;
+        if (open && program.earliestFoundingDay) {
+            line.founding = game::text(content, "ui.race_founding_day",
+                                       {{"day", game::formatDay(*program.earliestFoundingDay)}});
+        }
+        line.stage =
+            game::text(content, "ui.race_stage",
+                       {{"done", std::to_string(program.stagesCompleted)}, {"total", total}});
+        line.percent = game::text(content, "ui.race_progress",
+                                  {{"percent", std::to_string(program.progressPermille / 10)}});
+        line.research = researchWords(content, program, open);
+        line.permille = program.progressPermille;
+        expected.lines.push_back(line);
+    }
+    const sim::ProgramPublicView* rival = leadingRival(view);
+    if (open && rival != nullptr && *rival->earliestFoundingDay < view.deadlineDay) {
+        const sim::Day due = *rival->earliestFoundingDay;
+        expected.rival = game::text(
+            content, "ui.race_rival_could_found",
+            {{"company", view.companies[rival->company.index()].name},
+             {"time", game::formatTimeFromNow(content, due > view.day ? due - view.day : 0)}});
+    }
+    expected.verdict = open ? simVerdict(content, view) : std::string();
     return expected;
 }
 
@@ -1785,11 +1856,17 @@ std::string onlyText(Rml::Element* root, std::string_view tag, std::string_view 
 }
 
 // The status strip under the header, on whatever tab is showing: the time
-// left and the verdict.
+// before the leading rival could found the program when that is before the
+// deadline, the time left and the verdict.
 void checkRaceItem(Rml::Context& context, std::string_view where, const RaceExpected& expected,
                    Checks& checks) {
     settle(context);
     Rml::Element* strip = context.GetDocument(0)->GetElementById("strip");
+    checks.same(std::format("{}: the status strip's rival", where),
+                expected.rival.empty()
+                    ? std::format("<{} found>", visibleElements(strip, "span", "couldfound").size())
+                    : onlyText(strip, "span", "couldfound"),
+                expected.rival.empty() ? std::string("<0 found>") : expected.rival);
     checks.same(std::format("{}: the status strip's deadline", where),
                 onlyText(strip, "span", "deadline"), expected.deadline);
     checks.same(std::format("{}: the status strip's verdict", where),
@@ -1819,7 +1896,13 @@ void checkRaceStrip(Rml::Context& context, std::string_view where, const RaceExp
     for (std::size_t i = 0; i < rows.size() && i < expected.lines.size(); ++i) {
         const RaceLine& line = expected.lines[i];
         const std::string who = std::format("{}: {}", where, line.who);
-        checks.same(who + ": name", onlyText(rows[i], "span", "who"), line.who);
+        checks.same(who + ": name", onlyText(rows[i], "span", "nm"), line.who);
+        checks.same(
+            who + ": earliest founding",
+            line.founding.empty()
+                ? std::format("<{} found>", visibleElements(rows[i], "span", "founding").size())
+                : onlyText(rows[i], "span", "founding"),
+            line.founding.empty() ? std::string("<0 found>") : line.founding);
         checks.same(who + ": stages", onlyText(rows[i], "span", "stage"), line.stage);
         checks.same(who + ": percentage", onlyText(rows[i], "span", "pct"), line.percent);
         checks.same(who + ": research", onlyText(rows[i], "span", "research"), line.research);
@@ -1834,11 +1917,11 @@ void checkRaceStrip(Rml::Context& context, std::string_view where, const RaceExp
         checks.expect(track > 0.0F && std::abs(fill - want) <= kBarTolerance,
                       std::format("{}: the bar is {:.1f}dp of {:.1f}dp, expected {:.1f}dp", who,
                                   fill, track, want));
-        shown += std::format("\n      {}: {}; bar {:.1f}dp of {:.1f}dp; {}; {}", line.who,
-                             line.stage, fill, track, line.percent, line.research);
+        shown += std::format("\n      {}: {}; {}; bar {:.1f}dp of {:.1f}dp; {}; {}", line.who,
+                             line.founding, line.stage, fill, track, line.percent, line.research);
     }
-    std::cout << std::format("    race {}: \"{}\", {}{}\n", where, expected.deadline,
-                             expected.verdict, shown);
+    std::cout << std::format("    race {}: \"{}\" \"{}\", {}{}\n", where, expected.rival,
+                             expected.deadline, expected.verdict, shown);
 }
 
 // How much room the header has left: the width of the gap between its
@@ -2584,6 +2667,7 @@ int probeRace(Rml::Context& context, game::App& app, LoggingSystem& system,
               const sim::Content& content, std::vector<std::int64_t>& dug) {
     Checks checks("RACE");
     Checks tabChecks("PROGRAM");
+    app.setRivalName(std::string(kLongRivalName));
     if (!playToStock(app, content)) {
         return kScenarioFailure;
     }
@@ -2637,6 +2721,12 @@ int probeRace(Rml::Context& context, game::App& app, LoggingSystem& system,
         code != 0) {
         return code;
     }
+    // The player's research applied: its earliest founding day and due day
+    // are the sim's on the day it started (spec 011, AC-004).
+    app.setTab(0);
+    app.refreshNow();
+    checkRaceItem(context, "research under way", simRace(session), checks);
+    checkRaceStrip(context, "research under way", simRace(session), checks);
     if (!checks.ok()) {
         return kRaceFailure;
     }
@@ -3634,6 +3724,27 @@ sim::Content nearDeadlineContent(const sim::Content& shipped) {
 int probeDeadline(Rml::Context& context, game::App& app, LoggingSystem& system) {
     app.startGame(kScenarioSeed);
     game::Session& session = app.session();
+    // Day 0, the deadline closer than any company's research: the verdict
+    // says the program cannot be founded in time (spec 011, AC-002), and no
+    // rival is named in the status strip.
+    app.refreshNow();
+    if (!session.view().programs[game::Session::kPlayer.index()].pastDeadline) {
+        std::cout << "SCENARIO (race): the player can still found the program before a "
+                     "deadline 45 days away\n";
+        return kScenarioFailure;
+    }
+    Checks race("RACE");
+    const RaceExpected expected = simRace(session);
+    race.same("past the deadline: the verdict", expected.verdict,
+              game::text(session.content(), "ui.race_cannot_found"));
+    const bool laidOut =
+        probeRaceFrames(context, app, system, expected, "race, cannot found in time", race);
+    if (!race.ok()) {
+        return kRaceFailure;
+    }
+    if (!laidOut) {
+        return kLayoutFailure;
+    }
     for (sim::Day day = 0; day <= kNearDeadline + 1 && !session.gameOver(); ++day) {
         session.stepOneDay();
     }
@@ -3723,6 +3834,82 @@ int probeProgramCopies(const ProbeHost& host, const sim::Content& shipped,
         exitCode = kScenarioFailure;
     }
     return exitCode;
+}
+
+// The shipped content with a rival that keeps no share of its stock for the
+// program: it delivers nothing, and starts its stage research as the AI
+// always does, once it is producing and can pay for it.
+sim::Content rivalResearchesContent(const sim::Content& shipped) {
+    sim::Content content = shipped;
+    content.ai.programReserveShare = sim::Fixed::zero();
+    return content;
+}
+
+// The player delivers what it digs and leaves its research unstarted while
+// the rival starts its own (spec 011, AC-002): more delivered but later on
+// research time, the player reads Behind with the gap in days, on every tab
+// in both frames, against a rival with a long name. Returns a failure code
+// or 0.
+int probeRivalResearching(Rml::Context& context, game::App& app, LoggingSystem& system,
+                          const sim::Content& content) {
+    app.setRivalName(std::string(kLongRivalName));
+    if (!playToStock(app, content)) {
+        return kScenarioFailure;
+    }
+    game::Session& session = app.session();
+    const auto rival = [&]() -> const sim::ProgramPublicView* {
+        for (const sim::ProgramPublicView& program : session.view().programs) {
+            if (program.company != game::Session::kPlayer) {
+                return &program;
+            }
+        }
+        return nullptr;
+    };
+    const auto researching = [&] {
+        return rival() != nullptr &&
+               rival()->researchState == sim::ProgramResearchState::InProgress;
+    };
+    for (int day = 0; day < kRivalResearchMaxDays && !researching() && !session.gameOver(); ++day) {
+        deliverAll(session);
+        session.stepOneDay();
+    }
+    // Each day the player's research waits moves its earliest founding a day
+    // later, and the rival's stays: a gap of more than one day.
+    for (int day = 0; day < kRivalLeadDays && researching() && !session.gameOver(); ++day) {
+        deliverAll(session);
+        session.stepOneDay();
+    }
+    app.refreshNow();
+    const sim::CompanyView& view = session.view();
+    const sim::ProgramPublicView& mine = view.programs[game::Session::kPlayer.index()];
+    const sim::ProgramPublicView* theirs = rival();
+    std::cout << std::format(
+        "\nrace, rival researching: day {}; you at {} permille, earliest founding {}; rival at "
+        "{} permille, earliest founding {}\n",
+        view.day, mine.progressPermille, mine.earliestFoundingDay.value_or(0),
+        theirs != nullptr ? theirs->progressPermille : 0,
+        theirs != nullptr ? theirs->earliestFoundingDay.value_or(0) : 0);
+    if (!researching() || view.outcome.ended ||
+        mine.researchState != sim::ProgramResearchState::NotStarted ||
+        mine.progressPermille <= theirs->progressPermille || !mine.earliestFoundingDay ||
+        !theirs->earliestFoundingDay || *mine.earliestFoundingDay <= *theirs->earliestFoundingDay) {
+        std::cout << "SCENARIO (race): the rival did not start its research while the player "
+                     "had delivered more and had not started its own\n";
+        return kScenarioFailure;
+    }
+    Checks checks("RACE");
+    const RaceExpected expected = simRace(session);
+    const std::int64_t gap = static_cast<std::int64_t>(*mine.earliestFoundingDay) -
+                             static_cast<std::int64_t>(*theirs->earliestFoundingDay);
+    checks.same(
+        "more delivered, research not started: the verdict", expected.verdict,
+        game::textPlural(content, "ui.race_behind_by", gap, {{"days", game::formatCount(gap)}}));
+    const bool laidOut =
+        probeRaceFrames(context, app, system, expected, "race, rival researching", checks);
+    if (!checks.ok()) {
+        return kRaceFailure;
+    }
+    return laidOut ? 0 : kLayoutFailure;
 }
 
 constexpr int kUncaught = 9;
@@ -3825,6 +4012,16 @@ int run(std::span<char*> args) {
     }
     // The endings the player does not win (spec 010).
     if (const int code = probeEndings(host, *loaded.content); code != 0) {
+        exitCode = code;
+    }
+    // Behind on research time with more delivered (spec 011).
+    const sim::Content rivalResearches = rivalResearchesContent(*loaded.content);
+    if (const int code = onItsOwnApp(host, "rivalresearch", rivalResearches,
+                                     [&](Rml::Context& own, game::App& app) {
+                                         return probeRivalResearching(own, app, system,
+                                                                      rivalResearches);
+                                     });
+        code != 0) {
         exitCode = code;
     }
     // The land run out, on the copy where the race does not end first.
