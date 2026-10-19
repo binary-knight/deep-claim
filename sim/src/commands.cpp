@@ -164,6 +164,10 @@ const char* noticeKindName(NoticeKind kind) {
             return "deadline_passed";
         case NoticeKind::ProgramResearchStarted:
             return "program_research_started";
+        case NoticeKind::ProgramFellBehind:
+            return "program_fell_behind";
+        case NoticeKind::ProgramPastDeadline:
+            return "program_past_deadline";
     }
     return "unknown";
 }
@@ -208,6 +212,8 @@ bool noticeIsPublic(NoticeKind kind) {
         case NoticeKind::MineRunningLow:
         case NoticeKind::MineLosingMoney:
         case NoticeKind::ProgramDelivered:
+        case NoticeKind::ProgramFellBehind:
+        case NoticeKind::ProgramPastDeadline:
             return false;
     }
     return false;

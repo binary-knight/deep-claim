@@ -489,6 +489,35 @@ TEST_CASE("The program's notices and reject reasons have names and the right aud
     CHECK(std::string_view(sim::rejectReasonName(R::GameEnded)) == "game_ended");
 }
 
+TEST_CASE("The race notices have names and are for their own company only", "[program][pace]") {
+    using K = sim::NoticeKind;
+    CHECK(std::string_view(sim::noticeKindName(K::ProgramFellBehind)) == "program_fell_behind");
+    CHECK(std::string_view(sim::noticeKindName(K::ProgramPastDeadline)) == "program_past_deadline");
+    for (const K kind : {K::ProgramFellBehind, K::ProgramPastDeadline}) {
+        INFO(sim::noticeKindName(kind));
+        CHECK_FALSE(sim::noticeIsPublic(kind));
+        sim::Notice notice;
+        notice.kind = kind;
+        notice.company = kPlayer;
+        notice.rival = kRival;
+        CHECK(sim::noticeVisibleTo(notice, kPlayer));
+        CHECK_FALSE(sim::noticeVisibleTo(notice, kRival));
+    }
+}
+
+TEST_CASE("A notice carries no rival or founding days unless it is a race notice",
+          "[program][pace]") {
+    const sim::Notice plain;
+    CHECK_FALSE(plain.rival.valid());
+    CHECK_FALSE(plain.foundingDay.has_value());
+    CHECK_FALSE(plain.rivalFoundingDay.has_value());
+    const sim::Notice made = sim::makeNotice(sim::NoticeKind::ProgramDelivered, kPlayer,
+                                             sim::PlotId(), sim::Money::fromUnits(5));
+    CHECK_FALSE(made.rival.valid());
+    CHECK_FALSE(made.foundingDay.has_value());
+    CHECK_FALSE(made.rivalFoundingDay.has_value());
+}
+
 TEST_CASE("Completing the last stage founds the program and ends the game", "[program][ending]") {
     const sim::Content content = test::makeContent();
     sim::WorldState state = racingState(content);

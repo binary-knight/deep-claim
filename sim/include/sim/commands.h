@@ -11,6 +11,7 @@
 #include "sim/types.h"
 
 #include <cstdint>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -193,6 +194,10 @@ enum class NoticeKind : std::uint8_t {
     DeadlinePassed,          // public: no company; the game has ended with no program founded
     ProgramResearchStarted,  // public: company, tech = a program stage's research just started,
                              // tonnes = that stage (1 for the first)
+    ProgramFellBehind,       // private: company, rival = the solvent rival it fell behind,
+                             // foundingDay and rivalFoundingDay = their earliest founding days
+    ProgramPastDeadline,     // private: company, foundingDay = its earliest founding day,
+                             // now after the deadline
 };
 
 // Which order a CommandRejected notice refused, where the notice's other
@@ -218,6 +223,9 @@ struct Notice {
     Money amount;
     RejectReason reason = RejectReason::None;
     RejectedOrder order = RejectedOrder::Other;  // CommandRejected only
+    CompanyId rival;                             // ProgramFellBehind only
+    std::optional<Day> foundingDay;              // ProgramFellBehind, ProgramPastDeadline
+    std::optional<Day> rivalFoundingDay;         // ProgramFellBehind only
 };
 
 // Stable identifiers for logs, CSV and UI text lookup.

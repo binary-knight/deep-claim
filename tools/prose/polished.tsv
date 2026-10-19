@@ -414,3 +414,5 @@ ui.end_stages	Stages completed
 ui.end_new_game	New game
 notice.command_rejected.delivery	Couldn't deliver {resource} to the program: {reason}.
 notice.command_rejected.stage	Couldn't complete the program stage: {reason}.
+notice.program_fell_behind	A rival can now found the program before us.
+notice.program_past_deadline	At this pace we cannot found the program before the deadline.
