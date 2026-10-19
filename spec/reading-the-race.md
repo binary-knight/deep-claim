@@ -1,6 +1,6 @@
 # PRD: Reading the race (spec 011, the follow-up to spec 010 step 1)
 
-Status: approved by the owner, 2026-10-18; designed, built, reviewed and remediated on branch spec-011-reading-the-race (to `31a05de`), not merged; awaiting playtest 6 and the owner's word on four departures.
+Status: approved by the owner, 2026-10-18; designed, built, reviewed and remediated on branch spec-011-reading-the-race (to `31a05de`), not merged; awaiting playtest 6.
 
 ## Summary
 Playtest 5 (`docs/playtests/2026-10-18.md`) played spec 010's race to its end and lost it without the player knowing they were in one. The sim's race works; the screen does not tell it. Three things went wrong. The player read "Behind" and "29 years left" as plenty of time, when the race had been decided on research time by day 2406 (finding 1). Stage 2 needed nickel, and the player could not find out where it comes from (finding 2). And the clock stopped 58 times without saying why, the rival's six race stops looking like the 52 routine ones (finding 4).
@@ -171,10 +171,10 @@ Departures (build decisions; the requirements and criteria above are not rewritt
 - 2026-10-19, BR-016 and the design: the golden hashes moved once, not twice. The cover-costs change (task 006) moved none of them, because cover costs never runs in the three golden games. Its effect is measured by the gated sweep instead, where nothing moved.
 - 2026-10-19, design: `Session::stopsToday` is also cleared at the start of each tick, not only when the clock starts and on load, so it always holds the day's own stops (task 009, `e0eebfe`).
 - 2026-10-19, BR-009: the game-ending log line is marked `stoppedClock` though it matches no Stops rule. BR-009 marks "every line that stopped the clock", and the end of the game stops it under any rule set (task 009, `e0eebfe`).
-- 2026-10-19, BR-002 and edge case 5: the verdict reads Level on equal earliest founding days even when deliveries differ. BR-002's "then by stages complete and share delivered" conflicts with edge case 5. Level was made binding (task 010, `1f99872`). Task 010 let stages and share decide when a day was missing; remediations 019 and 020 dropped that fallback (below). For the owner to confirm.
-- 2026-10-19, owner's decision on dates: dates use the game's existing formatter, "Y17 M5 D3", where the decision gave "Y17 M5" as the example (task 008, `df1f517`). For the owner to confirm.
-- 2026-10-19, BR-004: the pace warning shows from day 0 of every game. While neither company has started its stage research, the last day to start and keep pace is today. This is BR-004 as written. Playtest 6 will show whether it reads as noise (task 011, `cb953ca`). For the owner to confirm.
-- 2026-10-19, BR-001 and BR-005: a player who starts a project outside the program while the rival's lab is free falls behind that day and gets the race stop. This is BR-001 and BR-005 as written. For the owner to confirm.
+- 2026-10-19, BR-002 and edge case 5: the verdict reads Level on equal earliest founding days even when deliveries differ. BR-002's "then by stages complete and share delivered" conflicts with edge case 5. Level was made binding (task 010, `1f99872`). Task 010 let stages and share decide when a day was missing; remediations 019 and 020 dropped that fallback (below). Accepted by the owner, 2026-10-19.
+- 2026-10-19, owner's decision on dates: dates use the game's existing formatter, "Y17 M5 D3", where the decision gave "Y17 M5" as the example (task 008, `df1f517`). Accepted by the owner, 2026-10-19.
+- 2026-10-19, BR-004: the pace warning shows from day 0 of every game. While neither company has started its stage research, the last day to start and keep pace is today. This is BR-004 as written. Playtest 6 will show whether it reads as noise (task 011, `cb953ca`). The owner, 2026-10-19: decide after playtest 6.
+- 2026-10-19, BR-001 and BR-005: a player who starts a project outside the program while the rival's lab is free falls behind that day and gets the race stop. This is BR-001 and BR-005 as written. The owner, 2026-10-19: decide after playtest 6.
 - 2026-10-19, design: `Notice::foundingDay` and `Notice::rivalFoundingDay` are `std::optional<Day>`, not `Day`, because day 0 is a real day (task 003, `2e8481d`).
 - 2026-10-19, BR-012: the end screen's open mines leave out closed mines as well as worked-out ones (task 014, `9689b39`).
 - 2026-10-19, BR-008: plot marks are lines of words ("may hold nickel", "survey shows nickel"), not pills. A surveyed plot whose survey shows none of a missing ore still carries "may hold", BR-008 read plainly (task 012, `5844377`).
@@ -189,7 +189,7 @@ Departures (build decisions; the requirements and criteria above are not rewritt
 
 Open after build:
 - AC-012: the monitored playtest (playtest 6) has not been played. The spec is not done until it has.
-- The owner's word on the four departures marked above: Level on equal days, dates as "Y17 M5 D3", the pace warning from day 0, and the race stop when the player starts a project outside the program.
+- Two departures wait on playtest 6, by the owner's choice (2026-10-19): the pace warning from day 0, and the race stop when the player starts a project outside the program. Level on equal days and dates as "Y17 M5 D3" are accepted.
 - The golden values are unconfirmed on Windows/MSVC until CI runs.
 - `kLesserPartnerStages` stays in code, on the do-not-copy list, for spec 010 step 4 (GA-010).
 - `status.paused_by`, `ui.race_ahead` and `ui.race_behind` are unused. They are kept in the catalogue.

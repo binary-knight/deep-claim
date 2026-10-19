@@ -1798,7 +1798,8 @@ The spec is `spec/reading-the-race.md`. Its decision records are
 is not merged. Where the build differs from the design
 (`.etc_sdlc/features/active/F-2026-10-18-reading-the-race/design.md`)
 or the spec, the difference is listed in the spec under "Build
-(2026-10-19)", with the commit. Four of them wait for the owner. The
+(2026-10-19)", with the commit. The owner accepted two and left two
+to playtest 6. The
 built spec was reviewed (Codex, a Codex re-review, code, security and
 the spec-enforcer) and the findings applied in remediations 019 to 021,
 to `31a05de`; one finding was declined (below). The spec's build record
@@ -2094,11 +2095,12 @@ assemble a display from content and the player's own survey view; they
 are not a rule the sim enforces or decides, and R-001 allows display
 derivation.
 
-Four departures wait for the owner: Level on equal days even when
-deliveries differ (BR-002 against edge case 5); dates as "Y17 M5 D3";
-the pace warning showing from day 0, while neither company has started
-its stage research; and a player who starts other research while the
-rival's lab is free falling behind that day.
+The owner's answers (2026-10-19): Level on equal days even when
+deliveries differ (BR-002 against edge case 5) and dates as "Y17 M5 D3"
+are accepted. Two wait on playtest 6: the pace warning showing from day
+0, while neither company has started its stage research, and a player
+who starts other research while the rival's lab is free falling behind
+that day.
 
 Still open: the monitored playtest 6 (AC-012); the golden values on
 Windows/MSVC; `kLesserPartnerStages` in code (GA-010); the unused
