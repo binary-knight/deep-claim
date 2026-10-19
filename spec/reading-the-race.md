@@ -1,6 +1,6 @@
 # PRD: Reading the race (spec 011, the follow-up to spec 010 step 1)
 
-Status: approved by the owner, 2026-10-18; designed and built on branch spec-011-reading-the-race, not merged; awaiting review and playtest 6.
+Status: approved by the owner, 2026-10-18; designed, built, reviewed and remediated on branch spec-011-reading-the-race (to `31a05de`), not merged; awaiting playtest 6 and the owner's word on four departures.
 
 ## Summary
 Playtest 5 (`docs/playtests/2026-10-18.md`) played spec 010's race to its end and lost it without the player knowing they were in one. The sim's race works; the screen does not tell it. Three things went wrong. The player read "Behind" and "29 years left" as plenty of time, when the race had been decided on research time by day 2406 (finding 1). Stage 2 needed nickel, and the player could not find out where it comes from (finding 2). And the clock stopped 58 times without saying why, the rival's six race stops looking like the 52 routine ones (finding 4).
@@ -140,18 +140,38 @@ Owner, 2026-10-18, on approving the draft:
 - Earliest founding days are shown as time from now in the status strip ("in 6 y 120 d") and as dates ("Y17 M5") on the Dashboard and the Program tab, as the game gives dates elsewhere.
 
 ## Build (2026-10-19)
-Built on branch `spec-011-reading-the-race`, tasks 001 to 016 and remediations 017 and 018, commits `5b03b46` to `9a1b04d` and this record on base `786e9bd`. Not merged. The requirements and acceptance criteria above are left as approved; where the build differs from them or from the design (`.etc_sdlc/features/active/F-2026-10-18-reading-the-race/design.md`), the difference is listed under "Departures". The architecture, tick step 9b, the golden hash move and the gated sweep's figures are in `docs/DESIGN.md`, "Reading the race (spec 011)". The decision records are `docs/adrs/F-2026-10-18-reading-the-race-001` to `-004`. The departures were accepted by the build conductor, not by the owner; four are marked for the owner to confirm.
+Built on branch `spec-011-reading-the-race`, tasks 001 to 016 and remediations 017 to 021, commits `5b03b46` to `31a05de` and this record on base `786e9bd`. Not merged. The remediations: 017 fixed a release-only compiler warning (`6de2775`); 018 made the layout probe clang-tidy clean (`9a1b04d`); 019 applied the review fixes in the sim (`32d3109`); 020 applied them in the client (`68dc4c6`); 021 fixed the Codex re-review's finding (`31a05de`). The requirements and acceptance criteria above are left as approved; where the build differs from them or from the design (`.etc_sdlc/features/active/F-2026-10-18-reading-the-race/design.md`), the difference is listed under "Departures". The architecture, tick step 9b, the golden hash move and the gated sweep's figures are in `docs/DESIGN.md`, "Reading the race (spec 011)". The decision records are `docs/adrs/F-2026-10-18-reading-the-race-001` to `-004`. The departures were accepted by the build conductor, not by the owner; four are marked for the owner to confirm.
 
-Verification at `6de2775`:
-- Tests: debug 475 of 475, debug-game 476 of 476 (the layout probe at 1366x820 and 1280x800 among them), release 475 of 475.
-- Golden hashes: moved once, in task 004 (`6f6a81d`), for the two pace flags on every company. `kGolden` `0x059a7c79213dd307` to `0xc7cc092323bf84f7`, `kGoldenPlayed` `0x41192679894c4afc` to `0x43349088476870b5`, `kGoldenRace` `0xae14b05ab3e56760` to `0xf576ea4384386ae7`. Recorded on Linux/GCC; CI confirms Windows.
-- Gated sweep, release preset, `sim_runner --sweep 50 --years 30 --ai 1 --sanity`, before at `786e9bd` and after at `6de2775`. Seeds 1 to 50: every gated check passed before and after; 37.51 s before, 37.47 s after. Seeds 51 to 100: every gated check passed before and after; 42.02 s before, 38.13 s after. The JSON output of both sweeps is byte-identical before and after. No figure moved, so BR-015 holds, and the running time is within the 5% budget.
+Reviews (texts in `.etc_sdlc/features/active/F-2026-10-18-reading-the-race/review/`):
+- Codex review (`codex-spec011.md`): five findings, all applied.
+  - P1, a busy lab after the stage research is done was not counted (019).
+  - P1, an ore a mine had worked out still counted as a source (019).
+  - P2, the verdict raced a bankrupt rival, and the client ranked rivals itself. 019 adds `ProgramView::leadingRival` and `leadingRivalFoundingDay`; 020 reads them and drops the stages-and-share fallback. With no solvent rival there is no Ahead, Behind or Level (edge case 4).
+  - P2, a fresh world past its deadline could not load its own save before the first tick. 019 settles the pace flags in the `Simulation` constructor.
+  - P3, AC-004's navigation was missing. 020 makes the status strip's race item open the Dashboard and the race strip open the Program tab. The layout probe clicks both, and the pace and missing-ore Needs you buttons.
+- Codex re-review (`codex-spec011-rereview.md`): all five confirmed fixed. One new P2, applied in 021: a mothballed mine that mined copper while lithium was locked stopped counting as a lithium source once lithium was unlocked. A mine now yields an ore when its last operating day produced it, or when the mine never extracted it and the owner's best survey shows it.
+- Code review (code-reviewer agent): gate pass.
+  - Medium, the busy lab after research: the Codex P1, applied in 019.
+  - Medium, the client re-implemented the leading rival: applied in 019 and 020.
+  - Low, the plot marks' two conditions are worked out in the client ("region can hold" is odds above zero; "survey shows" is an estimate above zero). Declined: they assemble a display from content and the player's own survey view. They are not a rule the sim enforces or decides, and R-001 allows display derivation.
+  - Low, GA-008's disclosure of a rival's busy lab: already the owner's decision.
+  - Low, the unused `status.paused_by` and the stale `.meta` descriptions: open, below.
+- Security review: gate clean, no findings.
+- Spec-enforcer, in two chunks. Before the fixes, AC-001, AC-003, AC-004 and AC-006 were not met, on the defects above, and AC-002 and AC-009 lacked evidence: no bankrupt-rival pass, no worked-out mine at the end screen. After them, 020 added an end screen pass with a worked-out mine. A bankrupt-rival probe pass was not added (open, below). AC-012 cannot be met until playtest 6.
+- Architect-reviewer: the agent the review gate calls for is not installed in this session. Its skip is recorded; the Codex review covered the architecture.
+
+Verification at `31a05de` (an earlier one at `6de2775` is superseded):
+- Tests: every preset builds with no warning and passes `ctest`. Debug 480 of 480, release 480 of 480, asan 480 of 480, debug-game 481 of 481 and release-game 481 of 481; both game presets run the layout probe at 1366x820 and 1280x800.
+- Format and tidy: clang-format 18 clean on every changed C++ file. clang-tidy 18 clean on every changed shipped source and on the layout probe, 0 findings.
+- Golden hashes: moved once, in task 004 (`6f6a81d`), for the two pace flags on every company. `kGolden` `0x059a7c79213dd307` to `0xc7cc092323bf84f7`, `kGoldenPlayed` `0x41192679894c4afc` to `0x43349088476870b5`, `kGoldenRace` `0xae14b05ab3e56760` to `0xf576ea4384386ae7`. Tasks 006, 019, 020 and 021 moved none. Recorded on Linux/GCC; CI confirms Windows.
+- Gated sweep, release preset, `sim_runner --sweep 50 --years 30 --ai 1 --sanity`, before at `786e9bd` and after at `31a05de`. Seeds 1 to 50 and 51 to 100 exit 0, and the JSON output of both is byte-identical before and after. No figure moved, so BR-015 holds.
+- Sweep time: absolute times vary with machine load (other sessions; load average 6 to 12), so the old and new runners were timed back to back on seeds 1 to 50. 40.70 s old against 41.86 s new, then 45.78 s against 46.81 s: about 2 to 3% slower, within the 5% budget.
 
 Departures (build decisions; the requirements and criteria above are not rewritten):
 - 2026-10-19, BR-016 and the design: the golden hashes moved once, not twice. The cover-costs change (task 006) moved none of them, because cover costs never runs in the three golden games. Its effect is measured by the gated sweep instead, where nothing moved.
 - 2026-10-19, design: `Session::stopsToday` is also cleared at the start of each tick, not only when the clock starts and on load, so it always holds the day's own stops (task 009, `e0eebfe`).
 - 2026-10-19, BR-009: the game-ending log line is marked `stoppedClock` though it matches no Stops rule. BR-009 marks "every line that stopped the clock", and the end of the game stops it under any rule set (task 009, `e0eebfe`).
-- 2026-10-19, BR-002 and edge case 5: the verdict reads Level on equal earliest founding days even when deliveries differ. BR-002's "then by stages complete and share delivered" conflicts with edge case 5. Level was made binding; stages and share decide only when a day is missing (task 010, `1f99872`). For the owner to confirm.
+- 2026-10-19, BR-002 and edge case 5: the verdict reads Level on equal earliest founding days even when deliveries differ. BR-002's "then by stages complete and share delivered" conflicts with edge case 5. Level was made binding (task 010, `1f99872`). Task 010 let stages and share decide when a day was missing; remediations 019 and 020 dropped that fallback (below). For the owner to confirm.
 - 2026-10-19, owner's decision on dates: dates use the game's existing formatter, "Y17 M5 D3", where the decision gave "Y17 M5" as the example (task 008, `df1f517`). For the owner to confirm.
 - 2026-10-19, BR-004: the pace warning shows from day 0 of every game. While neither company has started its stage research, the last day to start and keep pace is today. This is BR-004 as written. Playtest 6 will show whether it reads as noise (task 011, `cb953ca`). For the owner to confirm.
 - 2026-10-19, BR-001 and BR-005: a player who starts a project outside the program while the rival's lab is free falls behind that day and gets the race stop. This is BR-001 and BR-005 as written. For the owner to confirm.
@@ -162,15 +182,20 @@ Departures (build decisions; the requirements and criteria above are not rewritt
 - 2026-10-19, design: the layout probe's "Behind by N days" scenario runs on a copy of the content in which the rival delivers nothing, since the shipped game never produces that state at the probe's day (task 010, `1f99872`).
 - 2026-10-19, build: a release-only GCC null-dereference warning in `Session::markEnding` was fixed (remediation 017, `6de2775`).
 - 2026-10-19, design: the rule for a mine yielding an ore is public in the sim, `sim::mineYieldsOre` in `sim/include/sim/view.h`, so the client's Plots tab marks do not copy it (task 012, `5844377`).
+- 2026-10-19, BR-002 and edge case 4: with no solvent rival the verdict is empty, neither Ahead, Behind nor Level. This replaces task 010's stages-and-share fallback, which raced a bankrupt rival (Codex P2; remediations 019, `32d3109`, and 020, `68dc4c6`).
+- 2026-10-19, BR-006, BR-007 and edge case 9: a mine yields an ore when it is building, operating or mothballed and either its last operating day produced the ore, or it has never extracted the ore and the owner's best survey shows it. An ore the mine has worked out is no longer a source; lifetime extraction does not count (Codex P1, remediation 019, `32d3109`; Codex re-review P2, remediation 021, `31a05de`).
+- 2026-10-19, BR-001: a busy lab is counted after a stage's research is done, since the next stage's project waits for it, but not once the last stage's research is done, since the founding order needs no lab (Codex P1, remediation 019, `32d3109`).
+- 2026-10-19, BR-003 and AC-004: the status strip's race item opens the Dashboard and the Dashboard's race strip opens the Program tab. The spec named them only as places to read (Codex P3, remediation 020, `68dc4c6`).
 
 Open after build:
 - AC-012: the monitored playtest (playtest 6) has not been played. The spec is not done until it has.
-- The Codex review of the built spec has not been run.
+- The owner's word on the four departures marked above: Level on equal days, dates as "Y17 M5 D3", the pace warning from day 0, and the race stop when the player starts a project outside the program.
 - The golden values are unconfirmed on Windows/MSVC until CI runs.
 - `kLesserPartnerStages` stays in code, on the do-not-copy list, for spec 010 step 4 (GA-010).
-- `status.paused_by` is unused. It is kept in the catalogue.
-- The `.meta` descriptions are behind the code: `game/session/include/game/.meta/description.md` still names `takePausedBy`, and the sim's descriptions do not mention `validatePace` or `mineYieldsOre`.
-- Fixed after the departures were listed: the spec had added eight clang-tidy findings to `game/src/layout_probe.cpp`, which CI's tidy gate (shipped sources only) does not cover. Remediation 018 (`9a1b04d`) fixed them; the probe is tidy-clean.
+- `status.paused_by`, `ui.race_ahead` and `ui.race_behind` are unused. They are kept in the catalogue.
+- The `.meta` descriptions are behind the code: `game/session/include/game/.meta/description.md` still names `takePausedBy`, and `sim/src/.meta/description.md` does not mention `validatePace`, `mineYieldsOre` or `leadingRival`.
+- No layout probe pass shows a bankrupt rival (AC-002's evidence, from the spec-enforcer).
+- Nothing on screen tells the player the race item and the race strip can be clicked. Whether they need a hover cue is a question for `docs/design/ui-design.md`.
 
 ## Open questions
 For the architect, in the design:

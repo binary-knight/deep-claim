@@ -1798,7 +1798,12 @@ The spec is `spec/reading-the-race.md`. Its decision records are
 is not merged. Where the build differs from the design
 (`.etc_sdlc/features/active/F-2026-10-18-reading-the-race/design.md`)
 or the spec, the difference is listed in the spec under "Build
-(2026-10-19)", with the commit. Four of them wait for the owner.
+(2026-10-19)", with the commit. Four of them wait for the owner. The
+built spec was reviewed (Codex, a Codex re-review, code, security and
+the spec-enforcer) and the findings applied in remediations 019 to 021,
+to `31a05de`; one finding was declined (below). The spec's build record
+lists every finding; the Codex texts are in
+`.etc_sdlc/features/active/F-2026-10-18-reading-the-race/review/`.
 
 - **What it adds.** Playtest 5 (`docs/playtests/2026-10-18.md`) lost
   the race without the player seeing it. This spec makes the race
@@ -1966,13 +1971,18 @@ or the spec, the difference is listed in the spec under "Build
   - The verdict: "cannot found the program in time" when the view's
     `pastDeadline` says so; otherwise the gap in days to the leading
     rival's earliest founding day, behind or in hand, and Level on the
-    same day. Stages and share delivered decide only when a day is
-    missing.
+    same day. The leading rival and its day are the view's
+    (`ProgramView::leadingRival`); the client ranks no rivals. With no
+    solvent rival, or no day of the player's own, there is no verdict
+    (edge case 4). Task 010's fallback to stages and share delivered was
+    dropped in task 020, since it raced a bankrupt rival (Codex P2).
   - The status strip names the leading rival and the time before it
     could found the program ("in 6 y 120 d") when that comes before the
     deadline. The race strip gives each company's earliest founding day
     and its research's due day. Other dates use the existing formatter
-    ("Y17 M5 D3").
+    ("Y17 M5 D3"). Both can be clicked (task 020, AC-004): the status
+    strip's race item opens the Dashboard, the race strip the Program
+    tab.
   - The Program tab gives the last day to start the stage's research,
     or says it has passed, and names a busy lab with the day it is
     free. It says where each needed ore comes from: regions and odds,
@@ -2021,9 +2031,10 @@ confirmed for Windows/MSVC only when CI runs.
   the sim runner's company 0, whose cover costs are on, so its effect on
   balance is in the gated sweep's before and after figures, not here.
   It is pinned by the cover-costs tests in `tests/finance_test.cpp`.
-- **The review fixes (task 019) moved none of them.** The busy lab
-  after research, `mineYieldsOre`, the leading rival in the view and
-  the flags settled at construction left all three values as they were.
+- **The review fixes (tasks 019 to 021) moved none of them.** The busy
+  lab after research, `mineYieldsOre` in both its forms, the leading
+  rival in the view and the flags settled at construction left all
+  three values as they were; task 020 changed only the client.
 - **Once, not twice.** The spec (BR-016) and the design expected a
   second move for cover costs. It did not come, for the reason above.
   The spec lists this under "Build (2026-10-19)".
@@ -2031,17 +2042,28 @@ confirmed for Windows/MSVC only when CI runs.
 ### Gated sweep (spec 011)
 
 Release preset, `sim_runner --sweep 50 --years 30 --ai 1 --sanity`,
-run before the spec at `786e9bd` and after it at `6de2775`.
+run before the spec at `786e9bd` and after it at `31a05de`, the end of
+the review fixes.
 
-| Seeds | Gated checks, before and after | Seconds before | Seconds after |
-| --- | --- | --- | --- |
-| 1 to 50 | all passed | 37.51 | 37.47 |
-| 51 to 100 | all passed | 42.02 | 38.13 |
+| Seeds | Gated checks, before and after | Exit after |
+| --- | --- | --- |
+| 1 to 50 | all passed | 0 |
+| 51 to 100 | all passed | 0 |
 
 The JSON output of both sweeps is byte-identical before and after. No
 figure moved, so the two-tier cover costs changed no sale in the
-runner's 100 games, and BR-015 (no balance change) holds. The running
-time is within the design's 5% budget.
+runner's 100 games, and BR-015 (no balance change) holds.
+
+Absolute times varied with machine load (other sessions; load average
+6 to 12), so the old and new runners were timed back to back on seeds
+1 to 50:
+
+| Pair | Seconds before | Seconds after |
+| --- | --- | --- |
+| First | 40.70 | 41.86 |
+| Second | 45.78 | 46.81 |
+
+The new runner is about 2 to 3% slower, within the design's 5% budget.
 
 ### Departures and what is open (spec 011)
 
@@ -2054,7 +2076,23 @@ Those that change what this section describes:
 - **`programPastDeadline` is recomputed**, not sticky (above).
 - **The notice's days are `std::optional<Day>`**, not `Day`.
 - **`sim::mineYieldsOre` is public**, so the client does not copy the
-  rule.
+  rule. Its final form (tasks 019 and 021) counts an ore the last
+  operating day produced, or one never extracted that the owner's best
+  survey shows; lifetime extraction does not count (above).
+- **No verdict with no solvent rival** (edge case 4), in place of the
+  stages-and-share fallback (tasks 019 and 020, above).
+- **A busy lab is not counted once the last stage's research is done**,
+  since the founding order needs no lab (task 019, above).
+- **The race item and the race strip can be clicked**, to the Dashboard
+  and the Program tab, though the spec named them only as places to read
+  (task 020, above).
+
+Declined in review: the code review's low finding that the Plots tab
+works out its two mark conditions in the client ("region can hold" is
+odds above zero, "survey shows" is an estimate above zero). They
+assemble a display from content and the player's own survey view; they
+are not a rule the sim enforces or decides, and R-001 allows display
+derivation.
 
 Four departures wait for the owner: Level on equal days even when
 deliveries differ (BR-002 against edge case 5); dates as "Y17 M5 D3";
@@ -2062,10 +2100,10 @@ the pace warning showing from day 0, while neither company has started
 its stage research; and a player who starts other research while the
 rival's lab is free falling behind that day.
 
-Still open: the monitored playtest 6 (AC-012) and the Codex review;
-the golden values on Windows/MSVC; `kLesserPartnerStages` in code
-(GA-010); the unused `status.paused_by` string; the `.meta`
-descriptions, which still name `takePausedBy` and lack `validatePace`
-and `mineYieldsOre`. Eight clang-tidy findings the spec added to
-`game/src/layout_probe.cpp`, outside CI's tidy gate, were fixed by
-remediation 018 (`9a1b04d`).
+Still open: the monitored playtest 6 (AC-012); the golden values on
+Windows/MSVC; `kLesserPartnerStages` in code (GA-010); the unused
+strings `status.paused_by`, `ui.race_ahead` and `ui.race_behind`; the
+`.meta` descriptions, which still name `takePausedBy` and lack
+`validatePace`, `mineYieldsOre` and `leadingRival`; a layout probe pass
+with a bankrupt rival; and whether the clickable race items need a
+hover cue (a question for `docs/design/ui-design.md`).
