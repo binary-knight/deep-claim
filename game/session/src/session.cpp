@@ -378,8 +378,15 @@ void Session::markEnding(sim::Day day, std::span<const sim::Notice> notices) {
     if (ending == notices.end()) {
         return;
     }
-    std::erase_if(stops_, [](const sim::Notice& notice) { return endsTheGame(notice, kPlayer); });
-    stops_.insert(stops_.begin(), *ending);
+    std::vector<sim::Notice> stops;
+    stops.reserve(stops_.size() + 1);
+    stops.push_back(*ending);
+    for (const sim::Notice& stop : stops_) {
+        if (!endsTheGame(stop, kPlayer)) {
+            stops.push_back(stop);
+        }
+    }
+    stops_ = std::move(stops);
     for (auto entry = log_.rbegin(); entry != log_.rend() && entry->day == day; ++entry) {
         if (endsTheGame(entry->notice, kPlayer)) {
             entry->stoppedClock = true;
