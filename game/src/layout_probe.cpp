@@ -1801,17 +1801,24 @@ std::string researchWords(const sim::Content& content, const sim::ProgramPublicV
     return {};
 }
 
+// A rival and its earliest founding day, read out of the view's optional.
+struct RivalDay {
+    sim::CompanyId company;
+    sim::Day foundingDay = 0;
+};
+
 // The rival the player races (spec 011): the solvent one with the earliest
 // founding day, or none when every rival is bankrupt (edge case 4).
-const sim::ProgramPublicView* leadingRival(const sim::CompanyView& view) {
-    const sim::ProgramPublicView* leader = nullptr;
+std::optional<RivalDay> leadingRival(const sim::CompanyView& view) {
+    std::optional<RivalDay> leader;
     for (const sim::ProgramPublicView& program : view.programs) {
-        if (program.company == game::Session::kPlayer || !program.earliestFoundingDay ||
+        if (program.company == game::Session::kPlayer || !program.earliestFoundingDay.has_value() ||
             view.companies[program.company.index()].bankrupt) {
             continue;
         }
-        if (leader == nullptr || *program.earliestFoundingDay < *leader->earliestFoundingDay) {
-            leader = &program;
+        const sim::Day day = *program.earliestFoundingDay;
+        if (!leader.has_value() || day < leader->foundingDay) {
+            leader = RivalDay{.company = program.company, .foundingDay = day};
         }
     }
     return leader;
@@ -1826,10 +1833,10 @@ std::string simVerdict(const sim::Content& content, const sim::CompanyView& view
     if (mine.pastDeadline) {
         return game::text(content, "ui.race_cannot_found");
     }
-    const sim::ProgramPublicView* rival = leadingRival(view);
-    if (rival != nullptr && mine.earliestFoundingDay) {
+    const std::optional<RivalDay> rival = leadingRival(view);
+    if (rival.has_value() && mine.earliestFoundingDay.has_value()) {
         const std::int64_t gap = static_cast<std::int64_t>(*mine.earliestFoundingDay) -
-                                 static_cast<std::int64_t>(*rival->earliestFoundingDay);
+                                 static_cast<std::int64_t>(rival->foundingDay);
         if (gap == 0) {
             return game::text(content, "ui.race_level");
         }
@@ -1885,9 +1892,9 @@ RaceExpected simRace(const game::Session& session) {
         line.permille = program.progressPermille;
         expected.lines.push_back(line);
     }
-    const sim::ProgramPublicView* rival = leadingRival(view);
-    if (open && rival != nullptr && *rival->earliestFoundingDay < view.deadlineDay) {
-        const sim::Day due = *rival->earliestFoundingDay;
+    const std::optional<RivalDay> rival = leadingRival(view);
+    if (open && rival.has_value() && rival->foundingDay < view.deadlineDay) {
+        const sim::Day due = rival->foundingDay;
         expected.rival = game::text(
             content, "ui.race_rival_could_found",
             {{"company", view.companies[rival->company.index()].name},
@@ -2295,7 +2302,7 @@ std::size_t checkPlotMarks(Rml::Context& context, game::App& app, const std::str
         const std::string text = visibleText(shown[i]);
         for (const std::string& mark : {marks.mayHold, marks.surveyShows}) {
             checks.expect(text.find(mark) != std::string::npos,
-                          plot + ": its row does not read \"" + mark + "\"");
+                          std::format("{}: its row does not read \"{}\"", plot, mark));
         }
         marked += marks.mayHold.empty() && marks.surveyShows.empty() ? 0U : 1U;
         strong += marks.surveyShows.empty() ? 0U : 1U;
@@ -2315,7 +2322,7 @@ std::size_t checkPlotMarks(Rml::Context& context, game::App& app, const std::str
         const std::string text = visibleText(context.GetDocument(0)->GetElementById("content"));
         for (const std::string& mark : {marks.mayHold, marks.surveyShows}) {
             checks.expect(text.find(mark) != std::string::npos,
-                          where + ": the plot panel does not read \"" + mark + "\"");
+                          std::format("{}: the plot panel does not read \"{}\"", where, mark));
         }
     }
     std::cout << std::format("    {}: {} of {} plots for sale marked, {} by a survey\n", where,
@@ -2423,8 +2430,9 @@ int probeStandingBid(Rml::Context& context, game::App& app, LoggingSystem& syste
             checks.same(where + ": plot " + rows[i].name + "'s bid", rows[i].bid_stands,
                         mine ? stands : std::string());
             if (mine && i < shown.size()) {
-                checks.expect(visibleText(shown[i]).find(stands) != std::string::npos,
-                              where + ": the plot's row does not read \"" + stands + "\"");
+                checks.expect(
+                    visibleText(shown[i]).find(stands) != std::string::npos,
+                    std::format("{}: the plot's row does not read \"{}\"", where, stands));
             }
         }
         const game::PlotPanel& panel = app.model().panel;
@@ -2433,7 +2441,7 @@ int probeStandingBid(Rml::Context& context, game::App& app, LoggingSystem& syste
         const std::string text = visibleText(root);
         for (const std::string& line : {stands, replaces}) {
             checks.expect(text.find(line) != std::string::npos,
-                          where + ": the plot panel does not read \"" + line + "\"");
+                          std::format("{}: the plot panel does not read \"{}\"", where, line));
         }
     }
     std::cout << std::format("\nstanding bid on plot {}, day {}: \"{}\"; \"{}\"\n", target.value(),
