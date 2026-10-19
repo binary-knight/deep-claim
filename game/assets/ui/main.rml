@@ -62,9 +62,10 @@
              player leads, in words. The header has no width for it once the
              company name and the figures are long ones. Ahead of it, an item
              of its own so it wraps on its own (spec 011): when the leading
-             rival could found the program before the deadline, how soon. -->
-        <span class="item race" data-if="race_rival != ''"><span class="couldfound">{{race_rival}}</span></span>
-        <span class="item race" data-if="has_race"><span class="num deadline" data-if="race_deadline != ''">{{race_deadline}}</span><span class="founded" data-if="race_founded != ''">{{race_founded}}</span><span class="chip verdict" data-if="race_verdict != ''" data-class-good="race_verdict_class == 'good'" data-class-warn="race_verdict_class == 'warn'">{{race_verdict}}</span></span>
+             rival could found the program before the deadline, how soon.
+             Either item opens the Dashboard (spec 011, AC-004). -->
+        <span class="item race" data-if="race_rival != ''" data-event-click="set_tab(0)"><span class="couldfound">{{race_rival}}</span></span>
+        <span class="item race" data-if="has_race" data-event-click="set_tab(0)"><span class="num deadline" data-if="race_deadline != ''">{{race_deadline}}</span><span class="founded" data-if="race_founded != ''">{{race_founded}}</span><span class="chip verdict" data-if="race_verdict != ''" data-class-good="race_verdict_class == 'good'" data-class-warn="race_verdict_class == 'warn'">{{race_verdict}}</span></span>
         <span class="item"><span class="k">Research</span><span class="num">{{research_strip}}</span></span>
         <span class="item" data-if="has_world"><span class="k">World</span><span class="chip warn">{{world_event}}</span> <span class="num">{{world_sub}}</span></span>
     </div>
@@ -106,8 +107,9 @@
                      line a company. Progress is a bar with its figure beside
                      it, and who leads is a word, so neither rests on colour.
                      Each company's earliest founding day sits under its name
-                     (spec 011), and research under way gives its due day. -->
-                <div id="race" data-if="has_race">
+                     (spec 011), and research under way gives its due day.
+                     It opens the Program tab (spec 011, AC-004). -->
+                <div id="race" data-if="has_race" data-event-click="set_tab(6)">
                     <div class="when">
                         <span class="deadline" data-if="race_deadline != ''">{{race_deadline}}</span>
                         <span class="founded" data-if="race_founded != ''">{{race_founded}}</span>

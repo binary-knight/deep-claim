@@ -770,74 +770,30 @@ RaceRow makeRaceRow(const sim::Content& content, const sim::CompanyView& view,
     return row;
 }
 
-// Where a company stands when a founding day is missing: stages complete,
-// then progress toward the next.
-std::pair<std::uint32_t, std::int64_t> raceStanding(const sim::ProgramPublicView& program) {
-    return {program.stagesCompleted, program.progressPermille};
-}
-
-// The rival the player races (spec 011): the solvent one with the earliest
-// founding day, with that day; none when every rival is bankrupt (edge case 4).
-struct RaceLeader {
-    const sim::ProgramPublicView* program = nullptr;
-    sim::Day day = 0;
-};
-
-std::optional<RaceLeader> leadingRival(const sim::CompanyView& view) {
-    std::optional<RaceLeader> leader;
-    for (const sim::ProgramPublicView& program : view.programs) {
-        if (program.company == Session::kPlayer ||
-            program.company.index() >= view.companies.size() ||
-            view.companies[program.company.index()].bankrupt) {
-            continue;
-        }
-        if (const std::optional<sim::Day> day = program.earliestFoundingDay;
-            day && (!leader || *day < leader->day)) {
-            leader = RaceLeader{&program, *day};
-        }
-    }
-    return leader;
-}
-
-// The verdict and its chip class. The player's earliest founding day against
-// the leading rival's, with the gap in days, Level on the same day (edge case
-// 5); the sim's pastDeadline says when it is too late. Stages and share
-// delivered decide only where a day is missing.
+// The verdict and its chip class (spec 011). The player's earliest founding
+// day against the leading solvent rival's, both the sim's, with the gap in
+// days, Level on the same day (edge case 5); the sim's pastDeadline says when
+// it is too late. No verdict with no solvent rival (edge case 4) or no day of
+// the player's own.
 std::pair<std::string, std::string> raceVerdict(const sim::Content& content,
                                                 const sim::CompanyView& view) {
     const sim::ProgramPublicView& mine = view.programs[Session::kPlayer.index()];
     if (mine.pastDeadline) {
         return {text(content, "ui.race_cannot_found"), "warn"};
     }
-    const std::optional<RaceLeader> rival = leadingRival(view);
-    if (const std::optional<sim::Day> day = mine.earliestFoundingDay; rival && day) {
-        const std::int64_t gap =
-            static_cast<std::int64_t>(*day) - static_cast<std::int64_t>(rival->day);
-        if (gap == 0) {
-            return {text(content, "ui.race_level"), ""};
-        }
-        const std::int64_t days = gap > 0 ? gap : -gap;
-        return {textPlural(content, gap > 0 ? "ui.race_behind_by" : "ui.race_ahead_by", days,
-                           {{"days", formatCount(days)}}),
-                gap > 0 ? "warn" : "good"};
+    const std::optional<sim::Day> rival = view.program.leadingRivalFoundingDay;
+    const std::optional<sim::Day> day = mine.earliestFoundingDay;
+    if (!rival || !day) {
+        return {};
     }
-    bool ahead = true;
-    bool behind = false;
-    for (const sim::ProgramPublicView& program : view.programs) {
-        if (program.company == Session::kPlayer ||
-            program.company.index() >= view.companies.size()) {
-            continue;
-        }
-        ahead = ahead && raceStanding(mine) > raceStanding(program);
-        behind = behind || raceStanding(mine) < raceStanding(program);
+    const std::int64_t gap = static_cast<std::int64_t>(*day) - static_cast<std::int64_t>(*rival);
+    if (gap == 0) {
+        return {text(content, "ui.race_level"), ""};
     }
-    if (behind) {
-        return {text(content, "ui.race_behind"), "warn"};
-    }
-    if (ahead) {
-        return {text(content, "ui.race_ahead"), "good"};
-    }
-    return {text(content, "ui.race_level"), ""};
+    const std::int64_t days = gap > 0 ? gap : -gap;
+    return {textPlural(content, gap > 0 ? "ui.race_behind_by" : "ui.race_ahead_by", days,
+                       {{"days", formatCount(days)}}),
+            gap > 0 ? "warn" : "good"};
 }
 
 // The race as the view has it. Wording and order only: every day and every
@@ -877,12 +833,12 @@ void fillRace(const Session& session, UiModel& model) {
     }
     // Ahead of the deadline, the time before the leading rival could found
     // the program, when that comes first (spec 011, BR-003).
-    if (const std::optional<RaceLeader> rival = leadingRival(view);
-        rival && rival->day < view.deadlineDay) {
-        model.race_rival =
-            text(content, "ui.race_rival_could_found",
-                 {{"company", view.companies[rival->program->company.index()].name},
-                  {"time", formatTimeFromNow(content, daysLeft(rival->day, view.day))}});
+    const sim::CompanyId rival = view.program.leadingRival;
+    if (const std::optional<sim::Day> day = view.program.leadingRivalFoundingDay;
+        day && rival.valid() && rival.index() < view.companies.size() && *day < view.deadlineDay) {
+        model.race_rival = text(content, "ui.race_rival_could_found",
+                                {{"company", view.companies[rival.index()].name},
+                                 {"time", formatTimeFromNow(content, daysLeft(*day, view.day))}});
     }
     std::pair<std::string, std::string> verdict = raceVerdict(content, view);
     model.race_verdict = std::move(verdict.first);
@@ -2243,19 +2199,20 @@ std::pair<int, const char*> stopTab(PauseOn rule) {
 
 // A race stop's two earliest founding days: the player's and the rival's the
 // notice is about (falling behind names the rival, a rival's progress is its
-// own company's), else the leading rival's. "" when either has no day.
+// own company's), else the leading rival's (the sim's). "" when either has no
+// day.
 std::string stopRaceDays(const sim::Content& content, const sim::CompanyView& view,
                          const sim::Notice& notice) {
-    const sim::CompanyId rival = notice.rival.valid() ? notice.rival : notice.company;
+    sim::CompanyId rival = notice.rival.valid() ? notice.rival : notice.company;
+    if (!rival.valid() || rival == Session::kPlayer) {
+        rival = view.program.leadingRival;
+    }
     const sim::ProgramPublicView* mine = nullptr;
     const sim::ProgramPublicView* theirs = nullptr;
     for (const sim::ProgramPublicView& program : view.programs) {
         mine = program.company == Session::kPlayer ? &program : mine;
-        theirs = program.company == rival && rival != Session::kPlayer ? &program : theirs;
-    }
-    if (theirs == nullptr) {
-        const std::optional<RaceLeader> leader = leadingRival(view);
-        theirs = leader ? leader->program : nullptr;
+        theirs = rival.valid() && program.company == rival && rival != Session::kPlayer ? &program
+                                                                                        : theirs;
     }
     if (mine == nullptr || theirs == nullptr || !mine->earliestFoundingDay ||
         !theirs->earliestFoundingDay || theirs->company.index() >= view.companies.size()) {

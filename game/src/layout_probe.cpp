@@ -1807,61 +1807,40 @@ struct RivalDay {
     sim::Day foundingDay = 0;
 };
 
-// The rival the player races (spec 011): the solvent one with the earliest
-// founding day, or none when every rival is bankrupt (edge case 4).
+// The rival the player races (spec 011), as the sim names it
+// (sim::ProgramView::leadingRival): none when every rival is bankrupt (edge
+// case 4). Read, not ranked here, so a client that ranks rivals its own way
+// fails the probe.
 std::optional<RivalDay> leadingRival(const sim::CompanyView& view) {
-    std::optional<RivalDay> leader;
-    for (const sim::ProgramPublicView& program : view.programs) {
-        if (program.company == game::Session::kPlayer || !program.earliestFoundingDay.has_value() ||
-            view.companies[program.company.index()].bankrupt) {
-            continue;
-        }
-        const sim::Day day = *program.earliestFoundingDay;
-        if (!leader.has_value() || day < leader->foundingDay) {
-            leader = RivalDay{.company = program.company, .foundingDay = day};
-        }
+    const sim::ProgramView& program = view.program;
+    if (!program.leadingRival.valid() || !program.leadingRivalFoundingDay.has_value()) {
+        return std::nullopt;
     }
-    return leader;
+    return RivalDay{.company = program.leadingRival,
+                    .foundingDay = *program.leadingRivalFoundingDay};
 }
 
 // The verdict: the player's earliest founding day against the leading
 // rival's, with the gap in days, Level on the same day (edge case 5); "cannot
-// found in time" when the player's day is past the deadline. Stages and
-// share delivered decide only where a day is missing.
+// found in time" when the player's day is past the deadline. No verdict with
+// no solvent rival (edge case 4) or no day of the player's own.
 std::string simVerdict(const sim::Content& content, const sim::CompanyView& view) {
     const sim::ProgramPublicView& mine = view.programs[game::Session::kPlayer.index()];
     if (mine.pastDeadline) {
         return game::text(content, "ui.race_cannot_found");
     }
     const std::optional<RivalDay> rival = leadingRival(view);
-    if (rival.has_value() && mine.earliestFoundingDay.has_value()) {
-        const std::int64_t gap = static_cast<std::int64_t>(*mine.earliestFoundingDay) -
-                                 static_cast<std::int64_t>(rival->foundingDay);
-        if (gap == 0) {
-            return game::text(content, "ui.race_level");
-        }
-        const std::int64_t days = std::abs(gap);
-        return game::textPlural(content, gap > 0 ? "ui.race_behind_by" : "ui.race_ahead_by", days,
-                                {{"days", game::formatCount(days)}});
+    if (!rival.has_value() || !mine.earliestFoundingDay.has_value()) {
+        return {};
     }
-    bool ahead = true;
-    bool behind = false;
-    for (const sim::ProgramPublicView& program : view.programs) {
-        if (program.company == game::Session::kPlayer) {
-            continue;
-        }
-        const auto theirs = std::pair(program.stagesCompleted, program.progressPermille);
-        const auto ours = std::pair(mine.stagesCompleted, mine.progressPermille);
-        ahead = ahead && ours > theirs;
-        behind = behind || ours < theirs;
+    const std::int64_t gap = static_cast<std::int64_t>(*mine.earliestFoundingDay) -
+                             static_cast<std::int64_t>(rival->foundingDay);
+    if (gap == 0) {
+        return game::text(content, "ui.race_level");
     }
-    const char* verdict = "ui.race_level";
-    if (behind) {
-        verdict = "ui.race_behind";
-    } else if (ahead) {
-        verdict = "ui.race_ahead";
-    }
-    return game::text(content, verdict);
+    const std::int64_t days = std::abs(gap);
+    return game::textPlural(content, gap > 0 ? "ui.race_behind_by" : "ui.race_ahead_by", days,
+                            {{"days", game::formatCount(days)}});
 }
 
 RaceExpected simRace(const game::Session& session) {
@@ -1909,6 +1888,11 @@ std::string onlyText(Rml::Element* root, std::string_view tag, std::string_view 
     return found.size() == 1 ? visibleText(found.front()) : std::format("<{} found>", found.size());
 }
 
+// The verdict as onlyText reads it: no chip when there is no verdict.
+std::string shownVerdict(const RaceExpected& expected) {
+    return expected.verdict.empty() ? std::string("<0 found>") : expected.verdict;
+}
+
 // The status strip under the header, on whatever tab is showing: the time
 // before the leading rival could found the program when that is before the
 // deadline, the time left and the verdict.
@@ -1924,7 +1908,7 @@ void checkRaceItem(Rml::Context& context, std::string_view where, const RaceExpe
     checks.same(std::format("{}: the status strip's deadline", where),
                 onlyText(strip, "span", "deadline"), expected.deadline);
     checks.same(std::format("{}: the status strip's verdict", where),
-                onlyText(strip, "span", "verdict"), expected.verdict);
+                onlyText(strip, "span", "verdict"), shownVerdict(expected));
 }
 
 // The Dashboard's race strip: the deadline, the verdict in words, and a line
@@ -1942,7 +1926,7 @@ void checkRaceStrip(Rml::Context& context, std::string_view where, const RaceExp
     checks.same(std::format("{}: the strip's deadline", where), onlyText(strip, "span", "deadline"),
                 expected.deadline);
     checks.same(std::format("{}: the strip's verdict", where), onlyText(strip, "span", "verdict"),
-                expected.verdict);
+                shownVerdict(expected));
     const std::vector<Rml::Element*> rows = visibleElements(strip, "div", "rrow");
     checks.same(std::format("{}: companies on the strip", where), rows.size(),
                 expected.lines.size());
@@ -1988,8 +1972,42 @@ float headerSlack(Rml::Context& context) {
 
 // Every tab in both frames, with the status strip's item checked on each and
 // the race strip on the Dashboard.
+constexpr int kDashboardTab = 0;
+constexpr int kProgramTab = 6;
+
+// Clicks `target` from `from` and checks the tab it opens.
+void checkOpensTab(Rml::Context& context, game::App& app, Rml::Element* target, int from, int to,
+                   const std::string& what, Checks& checks) {
+    click(context, target, what, checks);
+    app.refreshNow();
+    settle(context);
+    checks.same(std::format("{}, clicked on tab {}: the tab it opens", what, from), app.model().tab,
+                to);
+}
+
+// The race reads as a way in (spec 011, AC-004): the status strip's race
+// item, clicked on the Program tab, opens the Dashboard; the Dashboard's race
+// strip opens the Program tab.
+void checkRaceNavigation(Rml::Context& context, game::App& app, const char* label, Checks& checks) {
+    const int before = app.model().tab;
+    app.setTab(kProgramTab);
+    app.refreshNow();
+    settle(context);
+    const std::vector<Rml::Element*> items =
+        visibleElements(context.GetDocument(0)->GetElementById("strip"), "span", "race");
+    checkOpensTab(context, app, items.empty() ? nullptr : items.back(), kProgramTab, kDashboardTab,
+                  std::format("{}: the status strip's race item", label), checks);
+    checkOpensTab(context, app, context.GetDocument(0)->GetElementById("race"), kDashboardTab,
+                  kProgramTab, std::format("{}: the Dashboard's race strip", label), checks);
+    std::cout << std::format("    {}: race item -> Dashboard, race strip -> Program\n", label);
+    app.setTab(before);
+    app.refreshNow();
+    settle(context);
+}
+
 bool probeRaceFrames(Rml::Context& context, game::App& app, LoggingSystem& system,
                      const RaceExpected& expected, const char* label, Checks& checks) {
+    checkRaceNavigation(context, app, label, checks);
     bool ok = true;
     for (const Frame& frame : kFrames) {
         const bool deck = static_cast<float>(frame.width) < kDeckWidth;
@@ -2019,7 +2037,6 @@ bool probeRaceFrames(Rml::Context& context, game::App& app, LoggingSystem& syste
 // ---- the Program tab (spec 010) ----
 
 constexpr int kProgramFailure = 10;
-constexpr int kProgramTab = 6;
 
 // One requirement's row, as the catalogue words the sim's figures for it.
 struct NeedLine {
@@ -2130,10 +2147,7 @@ WhereLine simWhere(const game::Session& session, sim::ResourceId resource) {
     // A source as the view's missing-ore rule counts one (sim/src/view.cpp).
     std::vector<std::string> mines;
     for (const sim::MineView& mine : view.mines) {
-        const bool open = mine.state == sim::MineState::Building ||
-                          mine.state == sim::MineState::Operating ||
-                          mine.state == sim::MineState::Mothballed;
-        if (open && (mine.extractedTonnes[r] > 0 || mine.bestEstimateTonnes[r] > 0)) {
+        if (sim::mineYieldsOre(mine, resource)) {
             mines.push_back(game::text(content, "ui.program_from_mine_item",
                                        {{"plot", std::format("#{}", mine.plot.value() + 1)},
                                         {"tonnes", game::formatTonnes(mine.lastOutputTonnes[r])}}));
@@ -2182,6 +2196,36 @@ std::string simPaceNeed(const game::Session& session) {
 
 // The pace row stands under Needs you exactly while the view warns, and its
 // button goes to the Program tab.
+// Clicks the button of the first Needs you row with `action`, on the
+// Dashboard, and checks the tab it opens. False when no row has it.
+bool clickNeedRow(Rml::Context& context, game::App& app, int action, int tab,
+                  const std::string& where, Checks& checks) {
+    const auto row = std::ranges::find_if(
+        app.model().needs, [&](const game::NeedRow& need) { return need.action == action; });
+    if (row == app.model().needs.end()) {
+        return false;
+    }
+    const int before = app.model().tab;
+    app.setTab(kDashboardTab);
+    app.refreshNow();
+    settle(context);
+    Rml::Element* button = nullptr;
+    for (Rml::Element* line : visibleElements(context.GetDocument(0), "div", "nrow")) {
+        const std::vector<Rml::Element*> buttons = visibleElements(line, "button", "");
+        if (button == nullptr && onlyText(line, "span", "title") == row->title &&
+            !buttons.empty()) {
+            button = buttons.front();
+        }
+    }
+    checkOpensTab(context, app, button, kDashboardTab, tab,
+                  std::format("{}: the button of the Needs you row \"{}\"", where, row->title),
+                  checks);
+    app.setTab(before);
+    app.refreshNow();
+    settle(context);
+    return true;
+}
+
 void checkPaceNeed(game::App& app, const std::string& where, Checks& checks) {
     const std::string title = simPaceNeed(app.session());
     const game::NeedRow* row = nullptr;
@@ -2350,6 +2394,9 @@ std::optional<std::size_t> probeOreFrames(Rml::Context& context, game::App& app,
         strong = checkPlotMarks(context, app, where, checks);
     }
     checkOreNeeds(app, label, checks);
+    if (clickNeedRow(context, app, kOpenPlotsAction, kPlotsTab, label, checks)) {
+        std::cout << std::format("    {}: the missing-ore row's button opens Plots\n", label);
+    }
     checkNeedRows(app, label, checks);
     return ok ? std::optional<std::size_t>(strong) : std::nullopt;
 }
@@ -4171,7 +4218,6 @@ int onItsOwnApp(const ProbeHost& host, const char* name, const sim::Content& con
 // ---- exact prices on the Market tab (spec 010 BR-014) ----
 
 constexpr int kPricesFailure = 13;
-constexpr int kDashboardTab = 0;
 constexpr int kMarketTab = 2;
 // The widest price with five digits of dollars, "$99,999.99": lithium trades
 // in the tens of thousands, well above the price it opens at.
@@ -4510,6 +4556,8 @@ int probePacePassed(Rml::Context& context, game::App& app, LoggingSystem& system
     }
     Checks checks("PROGRAM");
     checkPaceNeed(app, "pace passed, lab busy", checks);
+    checks.expect(clickNeedRow(context, app, 6, kProgramTab, "pace passed, lab busy", checks),
+                  "pace passed, lab busy: no pace row to click");
     const bool laidOut =
         probeProgramFrames(context, app, system, "program, pace passed, lab busy", checks);
     return programResult(checks, laidOut);
@@ -4580,6 +4628,72 @@ int probeBankrupt(Rml::Context& context, game::App& app, LoggingSystem& system) 
     return probeEndScreen(context, app, system, "bankrupt");
 }
 
+// A worked-out mine on the end screen (spec 011, BR-012, AC-009): the
+// shipped content with every deposit a tonne at most, so a mine works out on
+// its first day of operation, built in days rather than months, and the
+// deadline a few months in, before any company can have completed a stage.
+constexpr sim::Day kWorkedOutBuildDays = 5;
+constexpr sim::Day kWorkedOutDeadline = 120;
+
+sim::Content workedOutContent(const sim::Content& shipped) {
+    sim::Content content = shipped;
+    for (sim::RegionDef& region : content.regions) {
+        for (sim::DepositPrior& prior : region.deposits) {
+            prior.tonnesMedian = 1;
+            prior.tonnesMaxMult = sim::Fixed::fromInt(1);
+        }
+    }
+    content.balance.mineBuildDays = kWorkedOutBuildDays;
+    content.program.deadlineDay = kWorkedOutDeadline;
+    return content;
+}
+
+// The player buys the cheapest listed plot and builds on it; the mine works
+// out and the deadline ends the game. The end screen's open mines leave the
+// worked-out one out.
+int probeWorkedOut(Rml::Context& context, game::App& app, LoggingSystem& system) {
+    app.startGame(kScenarioSeed);
+    game::Session& session = app.session();
+    game::AutoPause never;
+    never.enabled.fill(false);
+    session.setAutoPause(never);
+    const sim::PlotId site = cheapestListed(session.view());
+    if (!site.valid()) {
+        std::cout << "SCENARIO (end, worked out): no plot is listed on day 0\n";
+        return kScenarioFailure;
+    }
+    const sim::Money ask = session.view().plots[site.index()].askPrice;
+    session.submit(sim::TakeLoan{{}, session.content().balance.loanMinPrincipal * 4});
+    session.submit(sim::BidOnPlot{{}, site, ask + ask / 2});
+    bool building = false;
+    for (sim::Day day = 0; day <= kWorkedOutDeadline + 1 && !session.gameOver(); ++day) {
+        session.stepOneDay();
+        if (!building && session.view().plots[site.index()].owner == game::Session::kPlayer) {
+            session.submit(sim::BuildMine{{}, site});
+            building = true;
+        }
+    }
+    const sim::CompanyView& view = session.view();
+    const sim::MineView* mine = mineOn(view, site);
+    if (!view.outcome.ended || view.outcome.founder.valid() || view.bankrupt || mine == nullptr ||
+        mine->state != sim::MineState::Depleted) {
+        std::cout << whereItStopped(view);
+        std::cout << "SCENARIO (end, worked out): the player's mine did not work out before the "
+                     "deadline ended the game\n";
+        return kScenarioFailure;
+    }
+    Checks checks("END");
+    const EndExpected expected = simEnd(session, "deadline", checks);
+    checks.same("worked out: the end screen's open mines", expected.mines,
+                std::to_string(view.mines.size() - 1));
+    std::cout << std::format(
+        "\nend, worked out: plot #{}'s mine worked out; {} of the player's {} mines open at the "
+        "deadline\n",
+        site.value() + 1, expected.mines, view.mines.size());
+    const int code = probeEndScreen(context, app, system, "deadline");
+    return code == 0 && !checks.ok() ? kEndFailure : code;
+}
+
 // The endings the rival or the calendar decides, each on a copy of the
 // content and so on an app of its own. Returns 0, or the exit code of the
 // last pass that failed.
@@ -4599,7 +4713,13 @@ int probeEndings(const ProbeHost& host, const sim::Content& shipped) {
         onItsOwnApp(host, "deadline", nearDeadline, [&](Rml::Context& context, game::App& app) {
             return probeDeadline(context, app, *host.system);
         });
-    return deadline != 0 ? deadline : exitCode;
+    exitCode = deadline != 0 ? deadline : exitCode;
+    const sim::Content workedOut = workedOutContent(shipped);
+    const int worked =
+        onItsOwnApp(host, "worked out", workedOut, [&](Rml::Context& context, game::App& app) {
+            return probeWorkedOut(context, app, *host.system);
+        });
+    return worked != 0 ? worked : exitCode;
 }
 
 // The Program tab's later states (spec 010), each on a copy of the content
@@ -4663,8 +4783,9 @@ int probeRivalResearching(Rml::Context& context, game::App& app, LoggingSystem& 
         return nullptr;
     };
     const auto researching = [&] {
-        return rival() != nullptr &&
-               rival()->researchState == sim::ProgramResearchState::InProgress;
+        const sim::ProgramPublicView* program = rival();
+        return program != nullptr &&
+               program->researchState == sim::ProgramResearchState::InProgress;
     };
     // The race's rules on (playToStock switched every rule off), so the day
     // the rival starts its research stops the clock as a race stop.
